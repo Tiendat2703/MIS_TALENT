@@ -11,6 +11,7 @@ def _response(score: int, note: str) -> dict:
         "note": note,
     }
 
+
 def _call_api(
     base_url: str | None,
     endpoint: str,

@@ -1,0 +1,6 @@
+openai-agents==0.18.2
+pydantic==2.13.4
+psycopg2-binary==2.9.12
+python-dotenv==1.2.2
+pytest==8.4.2
+pytest-asyncio==1.2.0

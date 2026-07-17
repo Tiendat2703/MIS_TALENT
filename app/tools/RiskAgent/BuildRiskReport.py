@@ -11,17 +11,21 @@ from agents import function_tool
 
 from app.schema.handoff_packs import (
     FinanceFeaturePack,
+    MaskedDataSummary,
+    ProposedAlert,
     RiskAlertMatch,
     RiskPack,
+    RiskPackSummary,
     RuleEvaluation,
     Severity,
 )
 from app.schema.risk_db_models import RiskRule
 from app.tools.RiskAgent.GetRiskControls import (
     get_alerts_impl,
+    get_data_classes_impl,
     get_risk_rules_impl,
 )
-from app.tools.RiskAgent._masking import mask_alert
+from app.tools.RiskAgent._masking import Masker
 
 _CONDITION = re.compile(
     r"^\s*(?P<metric>[a-z_]+)\s*(?P<operator>>=|<=|=|>|<)\s*(?P<target>.+?)\s*$",
@@ -45,18 +49,18 @@ _METRIC_FIELDS = {
     "confidence_score": "confidence_score",
     "delivery_delay_days": "delivery_delay_days",
 }
-_CONFIDENTIAL_METRICS = {
-    "closing_cash",
-    "projected_closing_cash",
-    "cash_reserve_minimum",
-    "gross_margin",
-    "requested_amount",
-}
 _SEVERITY_RANK = {
     Severity.LOW: 1,
     Severity.MEDIUM: 2,
     Severity.HIGH: 3,
     Severity.CRITICAL: 4,
+}
+
+# Alias giữa risk_type của rule và alert_type trong 14_ALERTS (dữ liệu tổ chức đặt
+# tên khác nhau cho cùng một loại rủi ro). Có thể mở rộng sau khi review.
+_RISK_TYPE_ALIASES: dict[str, set[str]] = {
+    "cash reserve breach": {"cashflow shortage"},
+    "margin below target": {"margin pressure"},
 }
 
 
@@ -81,16 +85,19 @@ def _pack_value(finance_pack: FinanceFeaturePack, metric: str) -> Any:
     return getattr(finance_pack, field_name) if field_name else None
 
 
-def _masked_value(metric: str, value: Any) -> str | None:
-    if value is None:
-        return None
-    if metric in _CONFIDENTIAL_METRICS:
-        return "[CONFIDENTIAL_VALUE]"
-    return str(value)
+def _alert_type_matches(alert_type: str | None, rule: RiskRule) -> bool:
+    """Khớp alert_type với risk_type của rule, có tính alias."""
+    if not alert_type:
+        return False
+    observed = alert_type.casefold()
+    expected = rule.risk_type.casefold()
+    if observed == expected:
+        return True
+    return observed in _RISK_TYPE_ALIASES.get(expected, set())
 
 
 def _evaluate_finance_rule(
-    rule: RiskRule, finance_pack: FinanceFeaturePack
+    rule: RiskRule, finance_pack: FinanceFeaturePack, masker: Masker
 ) -> RuleEvaluation:
     match = _CONDITION.match(rule.trigger_condition)
     if not match:
@@ -126,7 +133,7 @@ def _evaluate_finance_rule(
             owner_agent=rule.owner_agent,
             severity=rule.severity,
             status="INSUFFICIENT_EVIDENCE",
-            observed_value=_masked_value(metric, observed),
+            observed_value=masker.mask_field_value(metric, observed),
             required_action=rule.required_action,
             missing_fields=sorted(set(missing_fields)),
             message="Finance Feature Pack does not contain enough evidence.",
@@ -140,7 +147,7 @@ def _evaluate_finance_rule(
             owner_agent=rule.owner_agent,
             severity=rule.severity,
             status="INSUFFICIENT_EVIDENCE",
-            observed_value=_masked_value(metric, observed),
+            observed_value=masker.mask_field_value(metric, observed),
             required_action=rule.required_action,
             missing_fields=[f"comparable_{metric}"],
             message="The observed and comparison values are not comparable.",
@@ -151,7 +158,7 @@ def _evaluate_finance_rule(
         owner_agent=rule.owner_agent,
         severity=rule.severity,
         status="TRIGGERED" if triggered else "NOT_TRIGGERED",
-        observed_value=_masked_value(metric, observed),
+        observed_value=masker.mask_field_value(metric, observed),
         required_action=rule.required_action,
         message=(
             "The Finance Feature Pack satisfies the rule condition."
@@ -165,6 +172,7 @@ def _match_finance_pack_alerts(
     finance_pack: FinanceFeaturePack,
     rules: list[RiskRule],
     evaluations: list[RuleEvaluation],
+    masker: Masker,
 ) -> list[RiskAlertMatch]:
     triggered_ids = {
         evaluation.rule_id
@@ -180,8 +188,7 @@ def _match_finance_pack_alerts(
         type_rule_ids = sorted(
             rule_id
             for rule_id, rule in triggered_rules.items()
-            if alert.alert_type
-            and alert.alert_type.casefold() == rule.risk_type.casefold()
+            if _alert_type_matches(alert.alert_type, rule)
         )
         if not record_match and not type_rule_ids:
             continue
@@ -191,12 +198,36 @@ def _match_finance_pack_alerts(
         )
         matches.append(
             RiskAlertMatch(
-                alert=mask_alert(alert),
+                alert=masker.mask_alert(alert),
                 matched_rule_ids=type_rule_ids,
                 match_basis=match_basis,
             )
         )
     return matches
+
+
+def _build_proposed_alert(
+    rule: RiskRule, finance_pack: FinanceFeaturePack, masker: Masker
+) -> ProposedAlert:
+    """Tạo proposed alert cho một rule TRIGGERED chưa có alert khớp trong 14_ALERTS."""
+    related = [
+        masked
+        for record in finance_pack.source_record_ids
+        if (masked := masker.mask_identifier_text(record, "source_record"))
+    ]
+    contract_token = (
+        masker.mask_identifier_text(finance_pack.contract_id, "contract_id")
+        or finance_pack.contract_id
+    )
+    return ProposedAlert(
+        proposed_alert_id=f"PAL-{contract_token}-{rule.rule_id}",
+        rule_id=rule.rule_id,
+        risk_type=rule.risk_type,
+        severity=rule.severity,
+        recommended_action=rule.required_action,
+        reason_for_proposal="Rule triggered but no alert mapping found in 14_ALERTS",
+        related_records=related,
+    )
 
 
 def _requires_human_approval(evaluation: RuleEvaluation) -> bool:
@@ -209,8 +240,10 @@ def _requires_human_approval(evaluation: RuleEvaluation) -> bool:
 
 def build_risk_pack_impl(finance_pack: FinanceFeaturePack) -> RiskPack:
     """Build one contract-scoped Risk Pack from a Finance Feature Pack."""
+    masker = Masker(get_data_classes_impl())
     rules = get_risk_rules_impl()
-    evaluations = [_evaluate_finance_rule(rule, finance_pack) for rule in rules]
+    rule_by_id = {rule.rule_id: rule for rule in rules}
+    evaluations = [_evaluate_finance_rule(rule, finance_pack, masker) for rule in rules]
     triggered = [item for item in evaluations if item.status == "TRIGGERED"]
     severities = [item.severity for item in triggered if item.severity is not None]
     overall_risk_level = (
@@ -228,6 +261,33 @@ def build_risk_pack_impl(finance_pack: FinanceFeaturePack) -> RiskPack:
         for field_name in item.missing_fields
     ]
 
+    alert_matches = _match_finance_pack_alerts(finance_pack, rules, evaluations, masker)
+    covered_rule_ids = {
+        rule_id for match in alert_matches for rule_id in match.matched_rule_ids
+    }
+    uncovered = [item for item in triggered if item.rule_id not in covered_rule_ids]
+    proposed_alerts = [
+        _build_proposed_alert(rule_by_id[item.rule_id], finance_pack, masker)
+        for item in uncovered
+        if item.rule_id in rule_by_id
+    ]
+
+    human_approval_required = any(_requires_human_approval(item) for item in evaluations)
+
+    summary = RiskPackSummary(
+        total_rules_triggered=len(triggered),
+        triggered_rule_ids=[item.rule_id for item in triggered],
+        total_alerts_detected=len(alert_matches),
+        total_proposed_alerts=len(proposed_alerts),
+        unmapped_rule_ids=[item.rule_id for item in uncovered],
+        highest_severity=overall_risk_level,
+        human_review_required=human_approval_required or bool(proposed_alerts),
+    )
+    masked_data = MaskedDataSummary(
+        masking_applied=bool(masker.masked_fields),
+        masked_fields=masker.masked_fields,
+    )
+
     return RiskPack(
         case_id=finance_pack.case_id,
         contract_id=finance_pack.contract_id,
@@ -235,12 +295,13 @@ def build_risk_pack_impl(finance_pack: FinanceFeaturePack) -> RiskPack:
         overall_risk_level=overall_risk_level,
         rule_evaluations=evaluations,
         triggered_rule_ids=[item.rule_id for item in triggered],
-        alerts=_match_finance_pack_alerts(finance_pack, rules, evaluations),
+        alerts=alert_matches,
+        proposed_alerts=proposed_alerts,
         required_actions=required_actions,
         insufficient_evidence=insufficient_evidence,
-        human_approval_required=any(
-            _requires_human_approval(item) for item in evaluations
-        ),
+        human_approval_required=human_approval_required,
+        masked_data=masked_data,
+        summary=summary,
         decision_made_by_risk_agent=False,
     )
 
@@ -249,10 +310,12 @@ def build_risk_pack_impl(finance_pack: FinanceFeaturePack) -> RiskPack:
 def build_risk_pack(finance_pack: FinanceFeaturePack) -> str:
     """Build one masked RiskPack JSON for the supplied FinanceFeaturePack.
 
-    The tool loads all organizer-provided RR rules and existing alerts from
-    PostgreSQL, evaluates every rule against the supplied contract metrics, and
-    reports triggered rules, missing evidence, required actions, overall
-    severity, and whether human approval is required, then returns formatted
-    JSON. Call it once per case.
+    The tool loads all organizer-provided RR rules, existing alerts, and data
+    classification policy from PostgreSQL, evaluates every rule against the
+    supplied contract metrics, matches existing alerts (with risk-type aliases),
+    proposes alerts for triggered rules that have no mapping, masks restricted and
+    confidential fields per 20_DATA_CLASS, and reports overall severity, required
+    actions, missing evidence, a summary, and whether human approval is required,
+    then returns formatted JSON. Call it once per case.
     """
     return build_risk_pack_impl(finance_pack).model_dump_json(indent=2)

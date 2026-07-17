@@ -13,6 +13,7 @@ class AppContext:
     original_input: str
     run_id: str
     brain_request_payload: dict[str, Any] | None = None
+    continuation_approval_id: str | None = None
 
 
 TOOL_LABELS = {

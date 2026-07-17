@@ -6,6 +6,13 @@ class RiskLevel(str, Enum):
     MEDIUM = "medium"
     HIGH = "high"
 
+
+class DecisionStatus(str, Enum):
+    APPROVE = "approve"
+    REVIEW = "review"
+    REJECT = "reject"
+
+
 @dataclass(frozen=True, slots=True)
 class DecisionCardOutput:
     """
@@ -18,11 +25,26 @@ class DecisionCardOutput:
     protective_condition: str
     capital_need: float
     risk_level: RiskLevel
+    decision_status: DecisionStatus
     reasons: list[str] = field(default_factory=list)
     risk_warnings: list[str] = field(default_factory=list)
     missing_information: list[str] = field(default_factory=list)
+    eligible_score: float | None = None
+    precheck_note: str | None = None
     requires_founder_confirmation: bool = True
+    approval_status: bool = False
     is_preliminary: bool = True
+
+    def __post_init__(self) -> None:
+        if self.approval_status:
+            if self.eligible_score is None or self.precheck_note is None:
+                raise ValueError(
+                    "Approved precheck output requires eligible_score and precheck_note"
+                )
+        elif self.eligible_score is not None or self.precheck_note is not None:
+            raise ValueError(
+                "eligible_score and precheck_note must be None when approval_status is False"
+            )
 
 
 @dataclass(frozen=True, slots=True)

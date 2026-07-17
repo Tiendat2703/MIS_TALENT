@@ -5,7 +5,7 @@ from dataclasses import asdict
 from pathlib import Path
 from agents import Agent, OpenAIChatCompletionsModel, RunContextWrapper, handoff, Runner 
 from agents.extensions.handoff_prompt import prompt_with_handoff_instructions
-
+from app.tools.writeLogs import write_logs
 from app.Agent.config import OPENAI_CLIENT, OPENAI_MODEL
 from app.Agent.bus import event_bus
 from app.Agent.hooks import AppContext, CustomAgentHooks
@@ -54,6 +54,7 @@ DecisionAgent = Agent(
         precheck_performance_bond,
         precheck_trade_finance,
         precheck_micro_credit,
+        write_logs
     ],
     hooks= CustomAgentHooks("DecisionAgent"),
 )
@@ -78,10 +79,6 @@ async def run_decision_agent(
         run_id = context.run_id
         context.original_input = user_input
 
-    started_data: dict[str, object] = {"input": user_input}
-    if run_metadata:
-        started_data.update(run_metadata)
-
     try:
         await initialize_approval_state(
             run_id,
@@ -89,17 +86,15 @@ async def run_decision_agent(
             user_input,
             metadata=run_metadata,
         )
-        await event_bus.emit(run_id, {
-            "type": "run_started",
-            "agent": DecisionAgent.name,
-            "task": "Xử lý batch credit decision cases",
-            "status": "running",
-            "data": started_data,
-        })
 
+        agent_input = (
+            "Execution context for mandatory logging:\n"
+            f'{{"run_id": "{run_id}"}}\n\n'
+            f"{user_input}"
+        )
         result = await Runner.run(
             DecisionAgent,
-            input=user_input,
+            input=agent_input,
             context=context,
             max_turns=max_turns,
         )

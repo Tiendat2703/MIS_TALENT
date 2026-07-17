@@ -18,6 +18,7 @@ from app.Agent.state_store import (
     set_approval_decision,
 )
 from app.tools.DecisionAgent.PrecheckAPI import PRECHECK_TOOL_BY_NAME
+from app.tools.writeLogs import write_logs
 
 
 IMMUTABLE_TARGET_FIELDS = {
@@ -129,6 +130,7 @@ async def get_pending_approvals(run_id: str) -> list[dict[str, Any]]:
 def _followup_message(
     request: dict[str, Any],
     approved: bool,
+    run_id: str,
 ) -> dict[str, Any]:
     contract_id = request["contract_id"]
     if approved:
@@ -136,17 +138,20 @@ def _followup_message(
             "Approval đã được ghi trong StateStore. Hãy gọi đúng tool với đúng "
             "arguments bên dưới. Sau khi nhận kết quả thật, hãy đánh giá lại "
             "approve/review/reject và chỉ cập nhật Decision Card của contract này. "
-            "Mọi Decision Card khác phải được trả lại nguyên vẹn."
+            "Mọi Decision Card khác phải được trả lại nguyên vẹn. Sau khi cập nhật "
+            "batch, gọi write_logs đúng một lần với run_id bên dưới."
         )
     else:
         instruction = (
-            "Người duyệt đã từ chối precheck. Không gọi bất kỳ tool nào. Chỉ cập "
+            "Người duyệt đã từ chối precheck. Không gọi bất kỳ precheck tool nào. Chỉ cập "
             "nhật Decision Card của contract này với approval_status=false, "
-            "eligible_score=null, precheck_note=null; giữ nguyên mọi card khác."
+            "eligible_score=null, precheck_note=null; giữ nguyên mọi card khác. "
+            "Sau khi cập nhật batch, gọi write_logs đúng một lần với run_id bên dưới."
         )
 
     payload = {
         "type": "approval_continuation",
+        "run_id": run_id,
         "approval_id": request["approval_id"],
         "approved": approved,
         "contract_id": contract_id,
@@ -195,9 +200,9 @@ async def decide_approval(
         raise ValueError(f"Unsupported approved tool: {request['tool']}")
 
     continuation_agent = DecisionAgent.clone(
-        tools=[tool] if approved else [],
+        tools=[tool, write_logs] if approved else [write_logs],
     )
-    followup = _followup_message(request, approved)
+    followup = _followup_message(request, approved, run_id)
 
     try:
         await event_bus.emit(run_id, {

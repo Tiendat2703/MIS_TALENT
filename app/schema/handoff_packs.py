@@ -85,6 +85,45 @@ class RiskAlertMatch(StrictModel):
     match_basis: Literal["RELATED_RECORD", "EXACT_RISK_TYPE", "UNMAPPED"]
 
 
+class ProposedAlert(StrictModel):
+    """Alert proposed by the agent when a triggered rule has no matching alert in
+    the organizer-provided alert table. Always flagged for human review."""
+
+    proposed_alert_id: str
+    rule_id: str
+    risk_type: str
+    severity: Severity | None = None
+    recommended_action: str = ""
+    reason_for_proposal: str = ""
+    related_records: list[str] = Field(default_factory=list)
+    requires_human_review: Literal[True] = True
+    alert_source: Literal["AGENT_PROPOSED"] = "AGENT_PROPOSED"
+
+
+class MaskedField(StrictModel):
+    """One field masked at egress. Carries only the masked form, never the raw value."""
+
+    field_name: str
+    classification: str
+    masked_value: str
+
+
+class MaskedDataSummary(StrictModel):
+    masking_applied: bool = True
+    masking_policy_source: str = "20_DATA_CLASS"
+    masked_fields: list[MaskedField] = Field(default_factory=list)
+
+
+class RiskPackSummary(StrictModel):
+    total_rules_triggered: int
+    triggered_rule_ids: list[str] = Field(default_factory=list)
+    total_alerts_detected: int
+    total_proposed_alerts: int
+    unmapped_rule_ids: list[str] = Field(default_factory=list)
+    highest_severity: Severity | None = None
+    human_review_required: bool
+
+
 class RiskPack(StrictModel):
     """Handoff from Risk Agent to Decision & Partner Agent."""
 
@@ -95,18 +134,25 @@ class RiskPack(StrictModel):
     rule_evaluations: list[RuleEvaluation]
     triggered_rule_ids: list[str]
     alerts: list[RiskAlertMatch] = Field(default_factory=list)
+    proposed_alerts: list[ProposedAlert] = Field(default_factory=list)
     required_actions: list[str] = Field(default_factory=list)
     insufficient_evidence: list[str] = Field(default_factory=list)
     human_approval_required: bool
+    masked_data: MaskedDataSummary | None = None
+    summary: RiskPackSummary | None = None
     decision_made_by_risk_agent: Literal[False] = False
 
 
 __all__ = [
     "FinanceFeaturePack",
+    "MaskedDataSummary",
+    "MaskedField",
+    "ProposedAlert",
     "RiskAlert",
     "RiskAlertMatch",
     "RiskFinding",
     "RiskPack",
+    "RiskPackSummary",
     "RuleEvaluation",
     "Severity",
     "StrictModel",

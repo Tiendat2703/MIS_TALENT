@@ -1,11 +1,11 @@
-"""Build a masked Risk Agent report from DB-backed evaluations and alerts."""
+"""Build one masked Risk Pack from a Finance Feature Pack."""
 
 from __future__ import annotations
 
 import operator
 import re
 from datetime import UTC, datetime
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from agents import function_tool
 
@@ -16,19 +16,12 @@ from app.schema.handoff_packs import (
     RuleEvaluation,
     Severity,
 )
-from app.schema.risk_db_models import RiskReport, RiskRule
-from app.tools.RiskAgent.EvaluateRisks import evaluate_risks_impl
+from app.schema.risk_db_models import RiskRule
 from app.tools.RiskAgent.GetRiskControls import (
     get_alerts_impl,
-    get_data_classes_impl,
-    get_masking_examples_impl,
     get_risk_rules_impl,
 )
-from app.tools.RiskAgent._masking import (
-    mask_alert,
-    mask_evaluation,
-    mask_example,
-)
+from app.tools.RiskAgent._masking import mask_alert
 
 _CONDITION = re.compile(
     r"^\s*(?P<metric>[a-z_]+)\s*(?P<operator>>=|<=|=|>|<)\s*(?P<target>.+?)\s*$",
@@ -190,19 +183,17 @@ def _match_finance_pack_alerts(
             if alert.alert_type
             and alert.alert_type.casefold() == rule.risk_type.casefold()
         )
-        if record_match:
-            matched_rule_ids = type_rule_ids
-            basis = "RELATED_RECORD"
-        elif type_rule_ids:
-            matched_rule_ids = type_rule_ids
-            basis = "EXACT_RISK_TYPE"
-        else:
+        if not record_match and not type_rule_ids:
             continue
+
+        match_basis: Literal["RELATED_RECORD", "EXACT_RISK_TYPE"] = (
+            "RELATED_RECORD" if record_match else "EXACT_RISK_TYPE"
+        )
         matches.append(
             RiskAlertMatch(
                 alert=mask_alert(alert),
-                matched_rule_ids=matched_rule_ids,
-                match_basis=basis,
+                matched_rule_ids=type_rule_ids,
+                match_basis=match_basis,
             )
         )
     return matches
@@ -219,10 +210,7 @@ def _requires_human_approval(evaluation: RuleEvaluation) -> bool:
 def build_risk_pack_impl(finance_pack: FinanceFeaturePack) -> RiskPack:
     """Build one contract-scoped Risk Pack from a Finance Feature Pack."""
     rules = get_risk_rules_impl()
-    evaluations = [
-        _evaluate_finance_rule(rule, finance_pack)
-        for rule in rules
-    ]
+    evaluations = [_evaluate_finance_rule(rule, finance_pack) for rule in rules]
     triggered = [item for item in evaluations if item.status == "TRIGGERED"]
     severities = [item.severity for item in triggered if item.severity is not None]
     overall_risk_level = (
@@ -257,60 +245,6 @@ def build_risk_pack_impl(finance_pack: FinanceFeaturePack) -> RiskPack:
     )
 
 
-def build_risk_report_impl() -> RiskReport:
-    raw_evaluation = evaluate_risks_impl()
-    findings = [
-        finding
-        for evaluation in raw_evaluation.evaluations
-        for finding in evaluation.findings
-    ]
-    alert_matches: list[RiskAlertMatch] = []
-    for alert in get_alerts_impl():
-        alert_records = _related_records(alert.related_record)
-        record_rule_ids = {
-            finding.rule_id
-            for finding in findings
-            if finding.record_id in alert_records
-        }
-        exact_type_rule_ids = {
-            finding.rule_id
-            for finding in findings
-            if alert.alert_type
-            and finding.risk_type.casefold() == alert.alert_type.casefold()
-        }
-        matched_rule_ids = sorted(record_rule_ids or exact_type_rule_ids)
-        if record_rule_ids:
-            basis = "RELATED_RECORD"
-        elif exact_type_rule_ids:
-            basis = "EXACT_RISK_TYPE"
-        else:
-            basis = "UNMAPPED"
-        alert_matches.append(
-            RiskAlertMatch(
-                alert=mask_alert(alert),
-                matched_rule_ids=matched_rule_ids,
-                match_basis=basis,
-            )
-        )
-
-    return RiskReport(
-        generated_at=datetime.now(UTC),
-        evaluation=mask_evaluation(raw_evaluation),
-        alert_matches=alert_matches,
-        data_classes=get_data_classes_impl(),
-        masking_examples=[
-            mask_example(item) for item in get_masking_examples_impl()
-        ],
-        decision_made_by_risk_agent=False,
-    )
-
-
-@function_tool
-def build_risk_report() -> RiskReport:
-    """Build the final masked report using only organizer-provided DB content."""
-    return build_risk_report_impl()
-
-
 @function_tool
 def build_risk_pack(finance_pack: FinanceFeaturePack) -> str:
     """Build one masked RiskPack JSON for the supplied FinanceFeaturePack.
@@ -322,7 +256,3 @@ def build_risk_pack(finance_pack: FinanceFeaturePack) -> str:
     JSON. Call it once per case.
     """
     return build_risk_pack_impl(finance_pack).model_dump_json(indent=2)
-
-
-if __name__ == "__main__":
-    print(build_risk_report_impl().model_dump_json(indent=2))

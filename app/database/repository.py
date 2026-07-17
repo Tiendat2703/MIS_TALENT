@@ -26,7 +26,7 @@ def init_db_pool():
             maxconn=10,
             user=os.getenv("SUPABASE_DB_USER", "postgres"),
             password=os.getenv("SUPABASE_PASSWORD"),
-            host=os.getenv("SUPABASE_DB_HOST", "aws-1-ap-southeast-1.pooler.supabase.com"),
+            host=os.getenv("SUPABASE_DB_HOST", "aws-0-ap-southeast-1.pooler.supabase.com"),
             port=os.getenv("SUPABASE_DB_PORT", "6543"),
             database=os.getenv("SUPABASE_DB_NAME", "postgres"),
             sslmode="require",
@@ -56,13 +56,26 @@ def query_db(query: str, params=None):
         connection.commit()
         return result
 
-    except Exception:
+    except Exception as exc:
         connection.rollback()
-        logger.exception("Database query failed")
+        # Do not emit SQL parameters or connection details into application logs.
+        logger.error("Database query failed (%s)", type(exc).__name__)
         raise
 
     finally:
         db_pool.putconn(connection)
+
+
+def close_db_pool() -> None:
+    """Close all pooled database connections owned by this process."""
+    global _db_pool
+
+    if _db_pool is None:
+        return
+
+    _db_pool.closeall()
+    _db_pool = None
+    logger.info("Database pool closed")
 
 
 if __name__ == "__main__":

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 from datetime import UTC, datetime
 
 from agents import Agent, OpenAIChatCompletionsModel, Runner
@@ -23,7 +25,7 @@ Risk_compliance_agent = Agent(
     instructions=RISK_COMPLIANCE_SYSTEM_PROMPT,
     handoff_description=(
         "Evaluates a Finance Feature Pack against organizer-provided risk rules "
-        "and returns a masked Risk Pack."
+        "then persists and returns a masked Risk Pack."
     ),
     tools=RISK_AGENT_TOOLS,
     output_type=RiskPack,
@@ -31,20 +33,25 @@ Risk_compliance_agent = Agent(
 )
 
 
-async def main(finance_pack: FinanceFeaturePack) -> RiskPack:
-    """Pass one Finance Feature Pack directly to Risk Agent."""
-    finance_pack_json = finance_pack.model_dump_json()
+async def main(finance_pack: FinanceFeaturePack, session_id: int) -> RiskPack:
+    """Build and persist one Risk Pack for an existing workflow session."""
+    agent_input_json = json.dumps(
+        {
+            "session_id": session_id,
+            "finance_pack": finance_pack.model_dump(mode="json"),
+        }
+    )
     print(
-        f"[INPUT] case_id={finance_pack.case_id} | "
+        f"[INPUT] session_id={session_id} | case_id={finance_pack.case_id} | "
         f"contract_id={finance_pack.contract_id}"
     )
     result = await Runner.run(
         Risk_compliance_agent,
-        input=finance_pack_json,
+        input=agent_input_json,
         context=AppContext(
             document_id=finance_pack.contract_id,
-            original_input=finance_pack_json,
-            run_id=finance_pack.case_id,
+            original_input=agent_input_json,
+            run_id=str(session_id),
         ),
         max_turns=3,
     )
@@ -57,6 +64,11 @@ async def main(finance_pack: FinanceFeaturePack) -> RiskPack:
 
 
 async def test_agents() -> None:
+    session_id_text = os.getenv("RISK_AGENT_TEST_SESSION_ID")
+    if not session_id_text:
+        raise RuntimeError(
+            "Set RISK_AGENT_TEST_SESSION_ID to an existing context session"
+        )
     finance_pack = FinanceFeaturePack(
         case_id="CASE-HEALTHY-001",
         contract_id="CON-HEALTHY-001",
@@ -75,7 +87,7 @@ async def test_agents() -> None:
             "TXN-HEALTHY-001",
         ],
     )
-    await main(finance_pack)
+    await main(finance_pack, session_id=int(session_id_text))
 
 
 __all__ = ["Risk_compliance_agent", "main", "test_agents"]

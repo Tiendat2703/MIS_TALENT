@@ -19,3 +19,8 @@ node_modules/
 .DS_Store
 .idea/
 .vscode/
+
+# Test and coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/

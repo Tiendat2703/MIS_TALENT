@@ -24,6 +24,7 @@ TOOL_LABELS = {
     "place_limit_order": "Place limit order",
     "save_log": "Save transaction log",
     "build_risk_pack": "Analyze risks and build Risk Pack",
+    "save_risk_pack": "Save Risk Pack to workflow context",
 }
 
 

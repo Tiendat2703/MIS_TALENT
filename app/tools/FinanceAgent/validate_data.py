@@ -50,27 +50,35 @@ def validate_finance_data(data: dict) -> ValidationResult:
                                           f"customer_id {i.get('customer_id')} không tồn tại", "error"))
 
     # --- Field bắt buộc + số bất thường ---
+    # Các trường tính toán cốt lõi thiếu -> error (chặn), vì không được bịa số.
     for c in contracts:
         if c.get("contract_value") is None:
-            issues.append(ValidationIssue("missing_field", "04_CONTRACTS", c.get("contract_id", "?"), "thiếu contract_value", "warning"))
+            issues.append(ValidationIssue("missing_field", "04_CONTRACTS", c.get("contract_id", "?"),
+                                          "thiếu contract_value", "error", column="contract_value"))
     for o in orders:
         rev = o.get("order_revenue")
         if rev is None:
-            issues.append(ValidationIssue("missing_field", "06_ORDERS", o.get("order_id", "?"), "thiếu order_revenue", "warning"))
+            issues.append(ValidationIssue("missing_field", "06_ORDERS", o.get("order_id", "?"),
+                                          "thiếu order_revenue", "error", column="order_revenue"))
         elif to_float(rev) <= 0:
             issues.append(ValidationIssue("numeric", "06_ORDERS", o.get("order_id", "?"), "order_revenue <= 0", "warning"))
         if o.get("estimated_cost") is None:
-            issues.append(ValidationIssue("missing_field", "06_ORDERS", o.get("order_id", "?"), "thiếu estimated_cost", "warning"))
+            issues.append(ValidationIssue("missing_field", "06_ORDERS", o.get("order_id", "?"),
+                                          "thiếu estimated_cost", "error", column="estimated_cost"))
     for i in invoices:
         if i.get("invoice_amount") is None:
-            issues.append(ValidationIssue("missing_field", "07_INVOICES", i.get("invoice_id", "?"), "thiếu invoice_amount", "warning"))
+            issues.append(ValidationIssue("missing_field", "07_INVOICES", i.get("invoice_id", "?"),
+                                          "thiếu invoice_amount", "error", column="invoice_amount"))
         if not i.get("due_date"):
-            issues.append(ValidationIssue("missing_field", "07_INVOICES", i.get("invoice_id", "?"), "thiếu due_date", "warning"))
+            issues.append(ValidationIssue("missing_field", "07_INVOICES", i.get("invoice_id", "?"),
+                                          "thiếu due_date", "warning", column="due_date"))
     for cf in cashflow:
         if cf.get("projected_closing_cash") is None:
-            issues.append(ValidationIssue("missing_field", "09_CASHFLOW", cf.get("month", "?"), "thiếu projected_closing_cash", "error"))
+            issues.append(ValidationIssue("missing_field", "09_CASHFLOW", cf.get("month", "?"),
+                                          "thiếu projected_closing_cash", "error", column="projected_closing_cash"))
         if cf.get("cash_reserve_minimum") is None:
-            issues.append(ValidationIssue("missing_field", "09_CASHFLOW", cf.get("month", "?"), "thiếu cash_reserve_minimum", "error"))
+            issues.append(ValidationIssue("missing_field", "09_CASHFLOW", cf.get("month", "?"),
+                                          "thiếu cash_reserve_minimum", "error", column="cash_reserve_minimum"))
 
     # --- Phân loại counterparty ---
     customer_cp, external_cp, unidentified_cp = set(), set(), set()

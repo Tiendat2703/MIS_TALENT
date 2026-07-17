@@ -8,9 +8,21 @@ riêng get_profile trả về dict field->value.
 
 from __future__ import annotations
 
+import json
 import os
 
 from app.tools.FinanceAgent import mock_data
+
+# Khóa chính từng bảng — dùng để áp override theo từng bản ghi.
+PRIMARY_KEYS = {
+    "contracts": "contract_id",
+    "orders": "order_id",
+    "invoices": "invoice_id",
+    "bank_txn": "txn_id",
+    "cashflow": "month",
+    "customers": "customer_id",
+    "services": "service_id",
+}
 
 
 def _use_mock() -> bool:
@@ -82,10 +94,39 @@ def get_profile() -> dict:
     return rows[0] if rows else {}
 
 
-def load_all() -> dict:
-    """Nạp toàn bộ dữ liệu Finance Agent cần trong một lần (bước 1)."""
-    return {
-        "contracts": get_contracts(),
+def _apply_scenario(data: dict, path: str) -> None:
+    """Áp một tình huống từ tệp cấu hình JSON lên dữ liệu đã nạp.
+
+    Dùng để mô phỏng dữ liệu đầu vào còn thiếu (đặt trường = null) mà KHÔNG sửa
+    dữ liệu gốc. Format: {"name","description","overrides": {table_key: {record_key:
+    {column: value}}}}. value=null nghĩa là trường đó thiếu.
+    """
+    with open(path, encoding="utf-8") as f:
+        spec = json.load(f)
+    data["scenario"] = spec.get("name")
+    data["scenario_description"] = spec.get("description")
+    for table_key, records in (spec.get("overrides") or {}).items():
+        rows = data.get(table_key)
+        pk = PRIMARY_KEYS.get(table_key)
+        if rows is None or pk is None:
+            continue
+        for record_key, patch in records.items():
+            row = next((r for r in rows if str(r.get(pk)) == str(record_key)), None)
+            if row is None:
+                new_row = {pk: record_key, **patch}
+                rows.append(new_row)
+            else:
+                row.update(patch)
+
+
+def load_all(scenario: str | None = None) -> dict:
+    """Nạp toàn bộ dữ liệu Finance Agent cần (bước 1).
+
+    scenario: đường dẫn tệp cấu hình tình huống (hoặc lấy từ env FINANCE_SCENARIO).
+    Khi có, áp override lên dữ liệu để mô phỏng ca thiếu dữ liệu.
+    """
+    data = {
+        "contracts":get_contracts(),
         "orders": get_orders(),
         "invoices": get_invoices(),
         "bank_txn": get_bank_txn(),
@@ -94,4 +135,9 @@ def load_all() -> dict:
         "services": get_services(),
         "profile": get_profile(),
         "source": "mock" if _use_mock() else "database",
+        "scenario": None,
     }
+    scenario = scenario or os.getenv("FINANCE_SCENARIO")
+    if scenario:
+        _apply_scenario(data, scenario)
+    return data

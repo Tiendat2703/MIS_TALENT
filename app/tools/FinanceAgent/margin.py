@@ -25,8 +25,13 @@ def analyze_margin(orders: list[dict], contracts: list[dict],
     contract_agg: dict[str, list[float]] = {}   # contract_id -> [revenue, cost]
     total_rev = total_cost = 0.0
     committed_rev = committed_margin = 0.0
+    orders_missing_data: list[str] = []
 
     for o in orders:
+        # Thiếu revenue hoặc cost -> KHÔNG bịa (không coi là 0), bỏ qua và ghi nhận.
+        if o.get("order_revenue") is None or o.get("estimated_cost") is None:
+            orders_missing_data.append(o.get("order_id"))
+            continue
         rev = to_float(o.get("order_revenue"))
         cost = to_float(o.get("estimated_cost"))
         margin = rev - cost
@@ -82,4 +87,5 @@ def analyze_margin(orders: list[dict], contracts: list[dict],
         by_contract=by_contract,
         by_order=by_order,
         low_margin_contracts=low_margin,
+        orders_missing_data=orders_missing_data,
     )

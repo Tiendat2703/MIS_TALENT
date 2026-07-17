@@ -18,6 +18,7 @@ class ValidationIssue:
     record: str
     detail: str
     severity: str      # info | warning | error
+    column: str = ""   # tên cột thiếu (chỉ có với kind=missing_field), để dựng form
 
 
 @dataclass
@@ -61,6 +62,7 @@ class LiquidityBrief:
     funding_need: float
     months_below_reserve: list[str] = field(default_factory=list)
     months_negative_cash: list[str] = field(default_factory=list)
+    months_missing_data: list[str] = field(default_factory=list)  # tháng thiếu projected_closing_cash -> bỏ qua, không bịa
     governance_threshold: float = 0.0
     requires_human_approval: bool = False
 
@@ -90,6 +92,7 @@ class MarginAnalysis:
     by_contract: list[dict] = field(default_factory=list)
     by_order: list[dict] = field(default_factory=list)
     low_margin_contracts: list[str] = field(default_factory=list)
+    orders_missing_data: list[str] = field(default_factory=list)  # order thiếu revenue/cost -> bỏ qua, không bịa
 
 
 # ============ Bước 6: Missing data ============
@@ -100,6 +103,30 @@ class MissingDataItem:
     missing_item: str
     business_impact: str
     priority: str      # High | Medium | Low
+
+
+# ============ Form yêu cầu bổ sung dữ liệu thiếu ============
+@dataclass
+class MissingDataField:
+    """Một trường dữ liệu còn thiếu, cần người dùng điền. Sinh từ dữ liệu thật,
+    không bịa: mỗi trường ứng với một bản ghi + một cột đang null."""
+    field_id: str          # "table|record|column" — dùng khi submit lại
+    table: str             # khóa bảng trong data (contracts/orders/invoices/...)
+    record: str            # khóa bản ghi (vd ORD-004, 2026-08)
+    column: str            # tên cột thiếu (vd estimated_cost)
+    label: str             # nhãn hiển thị cho người dùng
+    data_type: str         # number | date | text
+    reason: str            # vì sao cần
+    required: bool = True
+    current_value: object | None = None
+
+
+@dataclass
+class MissingDataForm:
+    form_id: str
+    title: str
+    description: str
+    fields: list[MissingDataField] = field(default_factory=list)
 
 
 # ============ Bước 7: LLM synthesis (output_type của Agent) ============
@@ -126,4 +153,7 @@ class FinanceFeaturePack:
     missing_data_request: list[MissingDataItem]
     financial_capacity_signals: dict       # cờ từ code + mức từ LLM
     handoff_summary: str
+    status: str = "COMPLETE"               # COMPLETE | AWAITING_INPUT (đang chờ điền form)
+    data_request_form: MissingDataForm | None = None
+    submission_report: dict | None = None  # kết quả áp dữ liệu người dùng vừa điền
     agent_run_log: list[dict] = field(default_factory=list)

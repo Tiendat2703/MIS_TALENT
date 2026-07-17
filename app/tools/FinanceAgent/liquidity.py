@@ -17,8 +17,14 @@ GOVERNANCE_APPROVAL_THRESHOLD = 300_000_000
 
 def analyze_liquidity(cashflow: list[dict], profile: dict | None = None) -> LiquidityBrief:
     months: list[LiquidityMonth] = []
+    months_missing_data: list[str] = []
     for cf in cashflow:
-        closing = to_float(cf.get("projected_closing_cash"))
+        raw_closing = cf.get("projected_closing_cash")
+        if raw_closing is None:
+            # Thiếu projected_closing_cash -> KHÔNG bịa (không coi là 0), bỏ qua và ghi nhận.
+            months_missing_data.append(cf.get("month"))
+            continue
+        closing = to_float(raw_closing)
         reserve = to_float(cf.get("cash_reserve_minimum"))
         gap = max(0.0, reserve - closing)
         net_flow = to_float(cf.get("expected_cash_in")) - to_float(cf.get("expected_cash_out"))
@@ -34,7 +40,7 @@ def analyze_liquidity(cashflow: list[dict], profile: dict | None = None) -> Liqu
     months_below_reserve = [m.month for m in months if m.reserve_gap > 0]
     months_negative_cash = [m.month for m in months if m.projected_closing_cash < 0]
 
-    funding_need = max_gap  # hạn mức tối thiểu cần có sẵn
+    funding_need = max_gap  # hạn mức tối thiểu cần có sẵn (chỉ trên các tháng đủ dữ liệu)
 
     return LiquidityBrief(
         by_month=months,
@@ -43,6 +49,7 @@ def analyze_liquidity(cashflow: list[dict], profile: dict | None = None) -> Liqu
         funding_need=funding_need,
         months_below_reserve=months_below_reserve,
         months_negative_cash=months_negative_cash,
+        months_missing_data=months_missing_data,
         governance_threshold=float(GOVERNANCE_APPROVAL_THRESHOLD),
         requires_human_approval=funding_need > GOVERNANCE_APPROVAL_THRESHOLD,
     )

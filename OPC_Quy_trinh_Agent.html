@@ -1,0 +1,569 @@
+<style>
+  :root{
+    --ground:#F4F6F8; --surface:#FFFFFF; --ink:#16212E; --muted:#5B6773; --line:#E2E7EC;
+    --orch:#123A5A; --fin:#17786A; --risk:#2E6291; --dec:#4A4E93; --founder:#97722B; --bank:#5A6A7E;
+    --start:#2F7D57; --gate:#BE851F; --crit:#BF4A3F;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0}
+  .wrap{font-family:var(--sans);color:var(--ink);background:var(--ground);padding:28px 22px 56px;line-height:1.5}
+  .head{max-width:1200px;margin:0 auto}
+  .kicker{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--risk);font-weight:700}
+  h1{font-size:27px;line-height:1.2;margin:6px 0 6px;text-wrap:balance;letter-spacing:-.01em}
+  .sub{font-size:14.5px;color:var(--muted);max-width:74ch;margin:0}
+
+  /* mode toggle */
+  .modewrap{max-width:1200px;margin:16px auto 0;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .modebar{display:inline-flex;gap:0;border:1px solid var(--line);border-radius:22px;padding:3px;background:#fff}
+  .modebtn{border:none;background:none;font:inherit;font-size:12.5px;font-weight:600;color:var(--muted);padding:6px 15px;border-radius:18px;cursor:pointer}
+  .modebtn.on{background:var(--ink);color:#fff}
+  .modebtn:focus-visible{outline:2px solid var(--risk);outline-offset:2px}
+  .modehint{font-size:12px;color:var(--muted)}
+  .modehint b{color:var(--founder)}
+
+  .readnote{max-width:1200px;margin:14px auto 0;font-size:12.5px;color:var(--muted);padding:9px 12px;background:#EEF2F6;border-left:3px solid var(--risk);border-radius:6px}
+  .readnote b{color:var(--ink)}
+                                                                                                                                                                                                                           
+                                                                                                                                      .legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:14px auto 0;max-width:1200px;font-size:12px;color:var(--muted)}
+  .lg{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:13px;height:13px;border-radius:3px;flex:none}
+  .pill-oai{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:#0B5A44;background:#DFF2EA;border:1px solid #B7E0D0;padding:1px 6px;border-radius:20px}
+  .pill-gate{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:#7A5410;background:#FBEFD6;border:1px solid #EBD39A;padding:1px 6px;border-radius:20px}
+
+  /* example visibility */
+  .ex{display:none}
+  #doc.show-ex .ex{display:block}
+
+  /* section */
+  .sec{max-width:1200px;margin:38px auto 0}
+  .sec h2{font-size:19px;margin:0 0 3px;letter-spacing:-.01em}
+  .sec .h2sub{font-size:13px;color:var(--muted);margin:0 0 16px;max-width:74ch}
+
+  /* swimlane grid */
+  .scroll{overflow-x:auto;padding-bottom:8px}
+  .grid{display:grid;grid-template-columns:184px repeat(6,minmax(210px,1fr));gap:10px;min-width:1440px}
+  .corner{position:sticky;left:0;z-index:5;background:var(--ground);display:flex;align-items:flex-end;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.04em;padding:4px 6px}
+  .phc{background:var(--ink);color:#fff;border-radius:8px;padding:9px 11px}
+  .phc .pn{font-size:10px;letter-spacing:.12em;text-transform:uppercase;opacity:.7;font-weight:700}
+  .phc .ph{font-size:13px;font-weight:700;line-height:1.25;margin-top:2px}
+  .lane{position:sticky;left:0;z-index:4;border-radius:8px;padding:11px;color:#fff;display:flex;flex-direction:column;justify-content:center;min-height:118px}
+  .lane .ico{font-size:17px;line-height:1}
+  .lane .ln{font-size:13.5px;font-weight:700;margin-top:5px;line-height:1.2}
+  .lane .lr{font-size:10.5px;opacity:.82;margin-top:3px;line-height:1.25}
+  .cell{min-height:118px;border-radius:8px;background:rgba(255,255,255,.45);border:1px dashed #D7DCE2}
+  .card{background:var(--surface);border:1px solid var(--line);border-left-width:4px;border-radius:8px;padding:9px 10px;height:100%;box-shadow:0 1px 2px rgba(20,30,45,.05);display:flex;flex-direction:column;gap:6px}
+  .ctop{display:flex;align-items:center;gap:7px}
+  .step{flex:none;width:20px;height:20px;border-radius:50%;background:var(--ink);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .ctitle{font-size:12.5px;font-weight:700;line-height:1.2}
+  .what{font-size:11.5px;color:#33404E;line-height:1.4}
+  .kv{font-size:10.5px}
+  .kv .k{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;display:block;margin-bottom:2px}
+  .chips{display:flex;flex-wrap:wrap;gap:3px}
+  .chip{font-family:var(--mono);font-size:10px;background:#EEF2F6;border:1px solid #DDE4EA;color:#2C3A48;padding:0 5px;border-radius:4px;white-space:nowrap}
+  .out{font-size:11px;color:#1E2A38;background:#F3F7F4;border:1px solid #DCEAE1;border-radius:5px;padding:5px 7px}
+  .cardex{font-size:10.8px;color:#2C3A48;background:#FBF6EA;border:1px solid #ECD9AE;border-radius:5px;padding:5px 7px}
+  .cardex b{color:#6E4B0E}
+  .gate{font-size:10.5px;color:#6E4B0E;background:#FBEFD6;border:1px solid #EBD39A;border-radius:5px;padding:4px 7px;display:flex;gap:5px}
+  .gate .d{color:var(--gate);font-weight:800}
+  .event{border-radius:8px;padding:10px 11px;color:#fff;height:100%;display:flex;flex-direction:column;gap:5px;justify-content:center}
+  .ev-start{background:var(--start)}
+  .ev-title{font-size:12.5px;font-weight:700;display:flex;align-items:center;gap:6px}
+  .ev-body{font-size:11px;opacity:.95;line-height:1.35}
+  .ev-ex{font-size:10.8px;background:rgba(255,255,255,.16);border-radius:5px;padding:5px 7px}
+  .ends{display:flex;flex-direction:column;gap:6px;height:100%;justify-content:center}
+  .end{border-radius:20px;padding:7px 11px;font-size:11.5px;font-weight:700;display:flex;align-items:center;gap:7px}
+  .end.yes{background:#E4F2EA;color:#1C5E40;border:1.5px solid #2F7D57}
+  .end.no{background:#F6E7E5;color:#8A342B;border:1.5px solid var(--crit)}
+  .feedback{max-width:1200px;margin:16px auto 0;font-size:12.5px;color:#6E4B0E;background:#FBF3E2;border:1px dashed #E2C888;border-radius:8px;padding:10px 14px}
+  .govnote{max-width:1200px;margin:12px auto 0;font-size:12.5px;padding:9px 12px;border-left:3px solid var(--dec);background:#EEEDF7;border-radius:6px;color:#33404E}
+  .govnote b{color:var(--ink)}
+
+  /* detailed agent pipelines */
+  .agent{background:var(--surface);border:1px solid var(--line);border-radius:12px;margin-bottom:18px;overflow:hidden}
+  .agent-head{display:flex;align-items:center;gap:11px;padding:13px 16px;color:#fff}
+  .agent-head .ico{font-size:20px}
+  .agent-head .nm{font-size:15px;font-weight:700}
+  .agent-head .role{font-size:11.5px;opacity:.9;margin-left:auto;text-align:right;line-height:1.3}
+  .io{display:flex;flex-wrap:wrap;gap:8px;padding:11px 16px;background:#F7F9FB;border-bottom:1px solid var(--line);font-size:11.5px}
+  .io .box{flex:1;min-width:220px}
+  .io .k{font-size:10px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--muted);display:block;margin-bottom:3px}
+  .ms-list{list-style:none;margin:0;padding:6px 16px 14px}
+  .ms{position:relative;padding:13px 0 13px 42px;border-bottom:1px solid #EEF1F4}
+  .ms:last-child{border-bottom:none}
+  .ms::before{content:"";position:absolute;left:12px;top:34px;bottom:-1px;width:2px;background:#E4E9EE}
+  .ms:last-child::before{display:none}
+  .ms-n{position:absolute;left:0;top:11px;width:26px;height:26px;border-radius:7px;background:#EEF2F6;border:1px solid #DCE3EA;font-family:var(--mono);font-size:10.5px;font-weight:700;color:#33414F;display:flex;align-items:center;justify-content:center;z-index:1}
+  .ms-op{font-size:13px;line-height:1.5;color:var(--ink)}
+  .ms-op b{font-weight:700}
+  .ms-meta{display:flex;flex-wrap:wrap;gap:5px 16px;margin-top:7px;align-items:center}
+  .ms-data{font-size:11.5px;color:#41505F;display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+  .ms-data .k{font-weight:700;color:var(--muted);font-size:10px;letter-spacing:.04em;text-transform:uppercase}
+  .ms-res{font-size:11.5px;color:#41505F}
+  .ms-res .k{font-weight:700;color:var(--muted);font-size:10px;letter-spacing:.04em;text-transform:uppercase;margin-right:4px}
+  .ms-ex{margin-top:9px;font-size:12px;color:#2C3A48;background:#FBF6EA;border:1px solid #ECD9AE;border-left:3px solid var(--founder);border-radius:6px;padding:8px 11px;line-height:1.5}
+  .ms-ex b{color:#6E4B0E}
+  .ms-ex .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .ms-out{margin-top:9px;font-size:12px;background:#F3F7F4;border:1px solid #DCEAE1;border-radius:6px;padding:8px 11px}
+  .ms-out .k{color:#2F7D57;font-weight:700;text-transform:uppercase;font-size:10px;letter-spacing:.05em;display:block;margin-bottom:2px}
+  .ms-gate{margin-top:9px;font-size:11.5px;color:#6E4B0E;background:#FBEFD6;border:1px solid #EBD39A;border-radius:6px;padding:7px 10px}
+  .ms-gate .d{color:var(--gate);font-weight:800}
+  .mini-oai{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:#0B5A44;background:#DFF2EA;border:1px solid #B7E0D0;padding:1px 6px;border-radius:20px}
+  .foot{max-width:1200px;margin:22px auto 0;font-size:11.5px;color:var(--muted)}
+</style>
+
+<div class="wrap" id="doc">
+  <div class="head">
+    <div class="kicker">OPC · Agentic AI · MIS Talent 2026</div>
+    <h1>Quy trình xử lý của hệ thống Multi-Agent: từ cơ hội kinh doanh đến quyết định nhận / không nhận hợp đồng</h1>
+    <p class="sub">Gồm hai phần: <b>(A)</b> sơ đồ swimlane tổng quan và <b>(B)</b> chi tiết từng bước con bên trong mỗi agent — mỗi bước ghi rõ dùng bảng dữ liệu nào để làm gì và cho ra kết quả gì.</p>
+  </div>
+
+  <div class="modewrap">
+    <div class="modebar" role="group" aria-label="Chế độ hiển thị">
+      <button class="modebtn on" id="m-gen" aria-pressed="true">Bản khái quát</button>
+      <button class="modebtn" id="m-ex" aria-pressed="false">Bản ví dụ: CON-004</button>
+    </div>
+    <span class="modehint">Bật <b>“Bản ví dụ: CON-004”</b> để chèn số liệu cụ thể của một hợp đồng vào từng bước.</span>
+  </div>
+
+  <div class="readnote"><b>Cách đọc:</b> Phần A là bản đồ tổng thể (mỗi hàng một tác nhân, luồng chạy trái→phải qua 6 giai đoạn). Phần B mở từng agent ra thành chuỗi <b>bước con</b> — đây là nơi thấy rõ agent “suy nghĩ” tuần tự thế nào. Nhãn <span class="pill-oai">◇ OpenAI</span> = nơi OpenAI làm chức năng lõi; <span class="pill-gate">◆ Cổng</span> = điểm kiểm soát/quyết định.</div>
+
+  <div class="legend">
+    <span class="lg"><span class="sw" style="background:var(--start)"></span>Sự kiện bắt đầu/kết thúc</span>
+    <span class="lg"><span class="sw" style="background:var(--orch)"></span>Orchestrator</span>
+    <span class="lg"><span class="sw" style="background:var(--fin)"></span>Data &amp; Finance</span>
+    <span class="lg"><span class="sw" style="background:var(--risk)"></span>Risk &amp; Compliance</span>
+    <span class="lg"><span class="sw" style="background:var(--dec)"></span>Decision &amp; Partner</span>
+    <span class="lg"><span class="sw" style="background:var(--founder)"></span>Nhà sáng lập (con người)</span>
+    <span class="lg"><span class="sw" style="background:var(--bank)"></span>Đối tác ngân hàng (mô phỏng)</span>
+  </div>
+
+  <!-- ============ SECTION A: SWIMLANE ============ -->
+  <div class="sec">
+    <h2>A · Sơ đồ tổng quan (swimlane)</h2>
+    <p class="h2sub">Bức tranh toàn cảnh 9 bước qua 7 tác nhân. Xem chi tiết bên trong mỗi agent ở Phần B.</p>
+    <div class="scroll">
+      <div class="grid">
+        <div class="corner">TÁC NHÂN · GIAI ĐOẠN →</div>
+        <div class="phc"><div class="pn">Giai đoạn 1</div><div class="ph">Tiếp nhận cơ hội</div></div>
+        <div class="phc"><div class="pn">Giai đoạn 2</div><div class="ph">Phân tích tài chính</div></div>
+        <div class="phc"><div class="pn">Giai đoạn 3</div><div class="ph">Đánh giá rủi ro &amp; tuân thủ</div></div>
+        <div class="phc"><div class="pn">Giai đoạn 4</div><div class="ph">Quyết định &amp; so khớp đối tác</div></div>
+        <div class="phc"><div class="pn">Giai đoạn 5</div><div class="ph">Phê duyệt của nhà sáng lập</div></div>
+        <div class="phc"><div class="pn">Giai đoạn 6</div><div class="ph">Thực thi &amp; ghi nhận</div></div>
+
+        <!-- LANE 1 -->
+        <div class="lane" style="background:var(--bank)"><div class="ico">🏢</div><div class="ln">Khách hàng / Cơ hội</div><div class="lr">Bên mua dịch vụ của OPC</div></div>
+        <div class="cell" style="padding:0;border:none;background:none">
+          <div class="event ev-start">
+            <div class="ev-title">▶ Bước 1 · Cơ hội kinh doanh</div>
+            <div class="ev-body">Khách hàng đề nghị một hợp đồng mới / cơ hội cần quyết định nhận hay không.</div>
+            <div class="ev-ex ex"><b>CON-004:</b> HTX Xanh (CUS-005) đề nghị rollout 20 tỉnh, 4,2 tỷ, yêu cầu bảo lãnh thực hiện hợp đồng.</div>
+          </div>
+        </div>
+        <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+        <!-- LANE 2 -->
+        <div class="lane" style="background:var(--orch)"><div class="ico">🧭</div><div class="ln">Orchestrator / Planner Agent</div><div class="lr">Điều phối · phân rã · tổng hợp</div></div>
+        <div class="cell" style="padding:0;border:none;background:none">
+          <div class="card" style="border-left-color:var(--orch)">
+            <div class="ctop"><span class="step">2</span><span class="ctitle">Tiếp nhận &amp; điều phối</span></div>
+            <div class="what">Phân loại loại sự kiện, kéo hồ sơ liên quan, phân rã nhiệm vụ, định tuyến cho các agent.</div>
+            <div class="kv"><span class="k">Dữ liệu dùng</span><div class="chips"><span class="chip">02 OPC</span><span class="chip">03 Customers</span><span class="chip">04 Contracts</span></div></div>
+            <div class="out">Kế hoạch xử lý + gói dữ liệu đầu vào cho từng agent.</div>
+            <div class="cardex ex"><b>CON-004:</b> nhận diện “cơ hội hợp đồng lớn” → định tuyến Finance → Risk → Decision.</div>
+            <span class="pill-oai">◇ OpenAI: phân loại &amp; phân rã</span>
+          </div>
+        </div>
+        <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+        <div class="cell" style="padding:0;border:none;background:none">
+          <div class="card" style="border-left-color:var(--orch)">
+            <div class="ctop"><span class="step">9</span><span class="ctitle">Ghi nhận &amp; chốt</span></div>
+            <div class="what">Lưu Decision Card cuối, tính before/after, ghi nhật ký truy vết toàn luồng.</div>
+            <div class="kv"><span class="k">Dữ liệu dùng</span><div class="chips"><span class="chip">25 Runtime Log</span></div></div>
+            <div class="out">Nhật ký truy vết (trace_id) + so sánh before/after.</div>
+          </div>
+        </div>
+
+        <!-- LANE 3 -->
+        <div class="lane" style="background:var(--fin)"><div class="ico">💰</div><div class="ln">Data &amp; Finance Agent</div><div class="lr">Dòng tiền · funding gap</div></div>
+        <div class="cell"></div>
+        <div class="cell" style="padding:0;border:none;background:none">
+          <div class="card" style="border-left-color:var(--fin)">
+            <div class="ctop"><span class="step">3</span><span class="ctitle">Phân tích tài chính</span></div>
+            <div class="what">Tổng hợp đơn/hoá đơn/giao dịch/dòng tiền; tính biên lợi nhuận, khe hụt vốn, thời điểm tiền về.</div>
+            <div class="kv"><span class="k">Dữ liệu dùng</span><div class="chips"><span class="chip">04</span><span class="chip">06</span><span class="chip">07</span><span class="chip">08</span><span class="chip">09</span></div></div>
+            <div class="out">Cashflow summary · Funding need · Yêu cầu dữ liệu thiếu.</div>
+            <div class="cardex ex"><b>CON-004:</b> margin 0,24 &lt; 0,28; cần ~420tr bond + ~950tr vốn lưu động; thiếu chứng từ tuổi nợ.</div>
+            <div class="gate"><span class="d">◆ Cổng A</span><span>Thiếu dữ liệu? → đòi chứng từ trước khi đi tiếp.</span></div>
+            <span class="pill-oai">◇ OpenAI: lập luận số liệu</span>
+          </div>
+        </div>
+        <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+        <!-- LANE 4 -->
+        <div class="lane" style="background:var(--risk)"><div class="ico">🛡️</div><div class="ln">Risk &amp; Compliance Agent</div><div class="lr">Rủi ro · cảnh báo · phê duyệt</div></div>
+        <div class="cell"></div><div class="cell"></div>
+        <div class="cell" style="padding:0;border:none;background:none">
+          <div class="card" style="border-left-color:var(--risk)">
+            <div class="ctop"><span class="step">4</span><span class="ctitle">Đánh giá rủi ro</span></div>
+            <div class="what">Áp bộ quy tắc rủi ro, lọc cảnh báo, <b>phân loại &amp; gắn cờ dữ liệu nhạy cảm</b> (chính sách theo sheet 20), xác định điểm cần phê duyệt.</div>
+            <div class="kv"><span class="k">Dữ liệu dùng</span><div class="chips"><span class="chip">08</span><span class="chip">13</span><span class="chip">14</span><span class="chip">20</span></div></div>
+            <div class="out">Risk level · Alerts · Required approvals.</div>
+            <div class="cardex ex"><b>CON-004:</b> rủi ro thực thi Cao (AL-003 vượt năng lực nhà thầu); 4 điểm cần phê duyệt.</div>
+            <div class="gate"><span class="d">◆ Cổng B</span><span>Cảnh báo Critical (RR-001)? → giữ giao dịch + báo founder.</span></div>
+            <span class="pill-oai">◇ OpenAI: diễn giải quy tắc</span>
+          </div>
+        </div>
+        <div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+        <!-- LANE 5 -->
+        <div class="lane" style="background:var(--dec)"><div class="ico">🎯</div><div class="ln">Decision &amp; Partner Agent</div><div class="lr">Quyết định · chọn ngân hàng</div></div>
+        <div class="cell"></div><div class="cell"></div><div class="cell"></div>
+        <div class="cell" style="padding:0;border:none;background:none">
+          <div class="card" style="border-left-color:var(--dec)">
+            <div class="ctop"><span class="step">5</span><span class="ctitle">Ra quyết định &amp; chọn đối tác</span></div>
+            <div class="what">Khớp nhu cầu vốn với sản phẩm ngân hàng, so sánh đối tác, kiểm cổng độ tin cậy, dựng Decision Card.</div>
+            <div class="kv"><span class="k">Dữ liệu dùng</span><div class="chips"><span class="chip">10</span><span class="chip">11</span><span class="chip">12</span><span class="chip">+ ③④</span></div></div>
+            <div class="out"><b>Decision Card:</b> phương án + 3 lý do + điểm xác nhận.</div>
+            <div class="cardex ex"><b>CON-004:</b> VietinBank (bond+WC) + CoopBank (thu hộ); bond 0,63 &lt; 0,65 → khuyến nghị có điều kiện.</div>
+            <div class="gate"><span class="d">◆ Cổng C</span><span>Độ tin cậy &lt; 0,65 (RR-006)? → không khuyến nghị.</span></div>
+            <span class="pill-oai">◇ OpenAI: dựng Decision Card</span>
+          </div>
+        </div>
+        <div class="cell"></div>
+        <div class="cell" style="padding:0;border:none;background:none">
+          <div class="card" style="border-left-color:var(--dec)">
+            <div class="ctop"><span class="step">7</span><span class="ctitle">Thực thi hồ sơ</span></div>
+            <div class="what">Sau phê duyệt: nộp precheck ra ngân hàng (dữ liệu đã che), sinh checklist/hồ sơ.</div>
+            <div class="kv"><span class="k">Dữ liệu dùng</span><div class="chips"><span class="chip">11</span><span class="chip">12</span><span class="chip">21</span></div></div>
+            <div class="out">Nhật ký gọi API (mock) + bộ hồ sơ.</div>
+          </div>
+        </div>
+
+        <!-- LANE 6 -->
+        <div class="lane" style="background:var(--founder)"><div class="ico">👤</div><div class="ln">Nhà sáng lập (Founder)</div><div class="lr">Human-in-the-loop · phê duyệt</div></div>
+        <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+        <div class="cell" style="padding:0;border:none;background:none">
+          <div class="card" style="border-left-color:var(--founder)">
+            <div class="ctop"><span class="step">6</span><span class="ctitle">Phê duyệt quyết định</span></div>
+            <div class="what">Xem Decision Card, phê duyệt hoặc trả lại để chỉnh sửa.</div>
+            <div class="kv"><span class="k">Dữ liệu dùng</span><div class="chips"><span class="chip">Decision Card</span><span class="chip">Audit trail</span></div></div>
+            <div class="out">Phê duyệt (APR-xxx) hoặc yêu cầu chỉnh sửa.</div>
+            <div class="cardex ex"><b>CON-004:</b> duyệt nộp hồ sơ bond/WC (&gt;300tr) ra VietinBank.</div>
+            <div class="gate"><span class="d">◆ Cổng D</span><span>&gt;300tr hoặc gửi ra đối tác (RR-005) → bắt buộc phê duyệt.</span></div>
+          </div>
+        </div>
+        <div class="cell"></div>
+
+        <!-- LANE 7 -->
+        <div class="lane" style="background:var(--bank)"><div class="ico">🏦</div><div class="ln">Đối tác ngân hàng</div><div class="lr">VietinBank / CoopBank (mô phỏng)</div></div>
+        <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+        <div class="cell" style="padding:0;border:none;background:none">
+          <div class="card" style="border-left-color:var(--bank)">
+            <div class="ctop"><span class="step">8</span><span class="ctitle">Nhận &amp; phản hồi precheck</span></div>
+            <div class="what">Nhận yêu cầu precheck (đã che dữ liệu), trả kết quả sơ bộ mô phỏng.</div>
+            <div class="kv"><span class="k">Giao diện</span><div class="chips"><span class="chip">API-002</span><span class="chip">API-005</span><span class="chip">(mock)</span></div></div>
+            <div class="out">Kết quả precheck sơ bộ → Decision Agent.</div>
+          </div>
+        </div>
+
+        <!-- END -->
+        <div class="corner" style="align-items:center;font-weight:700;color:var(--ink)">KẾT QUẢ</div>
+        <div class="cell" style="border:none;background:none"></div>
+        <div class="cell" style="border:none;background:none"></div>
+        <div class="cell" style="border:none;background:none"></div>
+        <div class="cell" style="border:none;background:none"></div>
+        <div class="cell" style="border:none;background:none"></div>
+        <div class="cell" style="padding:0;border:none;background:none">
+          <div class="ends">
+            <div class="end yes">■ Quyết định: NHẬN hợp đồng (có điều kiện)</div>
+            <div class="end no">■ Quyết định: KHÔNG NHẬN hợp đồng</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="feedback">↩ <b>Vòng phản hồi (Cổng D):</b> Nếu nhà sáng lập <b>không đồng ý</b> ở Bước 6 → quay lại Decision Agent (Giai đoạn 4). <b>Cổng A</b> (thiếu dữ liệu) và <b>Cổng C</b> (độ tin cậy thấp) cũng tạo nhánh “đòi thêm dữ liệu / không khuyến nghị” thay vì tiếp tục vô căn cứ.</div>
+    <div class="govnote"><b>Lớp Governance xuyên suốt:</b> che/token hoá dữ liệu (VD <span style="font-family:var(--mono)">CUS-005 → TOK-CUS-A91F</span>) được <b>thực thi tự động tại ranh giới tin cậy</b> (Bước 7 &amp; 8). Risk &amp; Compliance chỉ <b>định nghĩa chính sách</b>; audit log (sheet 25) ghi ở <b>mọi bước</b>.</div>
+  </div>
+
+  <!-- ============ SECTION B: DETAILED PIPELINES ============ -->
+  <div class="sec">
+    <h2>B · Chi tiết xử lý bên trong từng Agent (step-by-step)</h2>
+    <p class="h2sub">Mỗi agent được bóc thành chuỗi bước con: <b>dùng bảng dữ liệu nào → làm phép gì → ra kết quả gì</b>, rồi chuyển sang bước kế. Bật “Bản ví dụ: CON-004” để thấy số liệu thật chạy qua từng bước.</p>
+
+    <!-- ORCHESTRATOR -->
+    <div class="agent">
+      <div class="agent-head" style="background:var(--orch)"><span class="ico">🧭</span><span class="nm">① Orchestrator / Planner Agent</span><span class="role">Điều phối &amp; phân rã nhiệm vụ<br/>(neo: RR-005 “CEO/Planner”)</span></div>
+      <div class="io">
+        <div class="box"><span class="k">📥 Input (đầu vào duy nhất)</span>Một <b>cơ hội hợp đồng</b> OPC nhận được — có thể đầy đủ hoặc thiếu dữ liệu. <span style="color:var(--muted)">(Vòng Chung kết: Crisis Card = thay đổi dữ kiện → tái đánh giá, không phải cơ hội mới.)</span></div>
+        <div class="box"><span class="k">📤 Output</span>Kế hoạch xử lý (task graph) + gói dữ liệu cho mỗi agent + trace_id.</div>
+      </div>
+      <ul class="ms-list">
+        <li class="ms"><span class="ms-n">O1</span>
+          <div class="ms-op"><b>Phân loại sự kiện.</b> Xác định đây là loại việc gì để chọn luồng xử lý phù hợp. <span class="mini-oai">◇ OpenAI</span></div>
+          <div class="ms-meta"><span class="ms-res"><span class="k">Kết quả</span>Nhãn sự kiện + luồng xử lý.</span></div>
+          <div class="ms-ex ex"><b>CON-004 →</b> phân loại “cơ hội hợp đồng lớn cần quyết định nhận/không”.</div>
+        </li>
+        <li class="ms"><span class="ms-n">O2</span>
+          <div class="ms-op"><b>Định danh &amp; kéo bản ghi gốc.</b> Từ mã hợp đồng, truy ngược ra khách hàng và dịch vụ liên quan.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">04 Contracts</span><span class="chip">03 Customers</span><span class="chip">05 Products</span></span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> giá trị <span class="num">4,2 tỷ</span>, margin <span class="num">0,24</span>, “Bond required”; khách CUS-005 (HTX Xanh, Cooperative, độ tin cậy <span class="num">0,83</span>, chiến lược Cao); dịch vụ SVC-004 (Cooperative Network Rollout).</div>
+        </li>
+        <li class="ms"><span class="ms-n">O3</span>
+          <div class="ms-op"><b>Lập task graph &amp; định tuyến.</b> Quyết định trình tự chạy các agent và khai báo dữ liệu mỗi agent cần.</div>
+          <div class="ms-meta"><span class="ms-res"><span class="k">Kết quả</span>Trình tự Finance → Risk → Decision; khởi tạo trace_id.</span></div>
+          <div class="ms-ex ex"><b>CON-004 →</b> giao Finance tính vốn trước (vì đây là hợp đồng lớn cần tài trợ).</div>
+        </li>
+        <li class="ms"><span class="ms-n">O4</span>
+          <div class="ms-op"><b>Kiểm tra sơ bộ tính đầy đủ.</b> Xem hồ sơ có đủ trường tối thiểu để bắt đầu không.</div>
+          <div class="ms-out"><span class="k">Output chuyển tiếp</span>Kế hoạch xử lý + gói dữ liệu → gửi Data &amp; Finance Agent.</div>
+        </li>
+      </ul>
+    </div>
+
+    <!-- FINANCE -->
+    <div class="agent">
+      <div class="agent-head" style="background:var(--fin)"><span class="ico">💰</span><span class="nm">② Data &amp; Finance Agent</span><span class="role">Tổng hợp dòng tiền &amp; xác định nhu cầu vốn</span></div>
+      <div class="io">
+        <div class="box"><span class="k">📥 Input</span>Gói dữ liệu từ Orchestrator (hợp đồng + phạm vi cần phân tích).</div>
+        <div class="box"><span class="k">📤 Output</span>Cashflow summary · Funding need · Missing-data request.</div>
+      </div>
+      <ul class="ms-list">
+        <li class="ms"><span class="ms-n">F1</span>
+          <div class="ms-op"><b>Lấy các đơn hàng thuộc hợp đồng.</b> Lọc đơn theo mã hợp đồng, đọc doanh thu &amp; chi phí ước tính từng đơn.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">06 Orders</span></span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> ORD-005 (<span class="num">1.600tr</span>/<span class="num">1.216tr</span>) + ORD-006 (<span class="num">1.500tr</span>/<span class="num">1.140tr</span>) → tổng doanh thu <span class="num">3.100tr</span>, chi phí <span class="num">2.356tr</span>.</div>
+        </li>
+        <li class="ms"><span class="ms-n">F2</span>
+          <div class="ms-op"><b>Tính biên lợi nhuận &amp; so ngưỡng.</b> gross_margin = (doanh thu − chi phí)/doanh thu; so với mục tiêu công ty.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">04 Contracts</span><span class="chip">02 OPC (target 0,28)</span></span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> margin <span class="num">0,24 &lt; 0,28</span> → gắn cờ “biên lợi nhuận thấp”, chuyển cho Risk.</div>
+        </li>
+        <li class="ms"><span class="ms-n">F3</span>
+          <div class="ms-op"><b>Kiểm trạng thái thu tiền.</b> Ghép hoá đơn theo đơn hàng để biết đã phát hành/đã thu chưa.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">07 Invoices</span></span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> INV-005 (<span class="num">1.600tr</span>) trạng thái “Not issued”; ORD-006 chưa có hoá đơn → <b>chưa thu đồng nào</b>.</div>
+        </li>
+        <li class="ms"><span class="ms-n">F4</span>
+          <div class="ms-op"><b>Đối chiếu giao dịch ngân hàng thực tế.</b> Soát các khoản thu từ khách hàng này trong sổ giao dịch.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">08 Bank Txn</span></span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> không có khoản tiền vào nào từ CUS-005 → xác nhận dòng tiền vào từ hợp đồng = 0 ở hiện tại.</div>
+        </li>
+        <li class="ms"><span class="ms-n">F5</span>
+          <div class="ms-op"><b>Đặt vào dòng tiền toàn công ty.</b> Đọc dòng tiền các tháng thực thi, so với dự trữ tối thiểu.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">09 Cashflow</span><span class="chip">02 OPC (reserve 550tr)</span></span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> T6 <span class="num">−160tr</span> · T7 <span class="num">−130tr</span> · T8 <span class="num">−155tr</span> (đều dưới dự trữ 550tr); hồi phục T9 <span class="num">+350tr</span> → có khe hụt vốn T6–T8.</div>
+        </li>
+        <li class="ms"><span class="ms-n">F6</span>
+          <div class="ms-op"><b>Tính nhu cầu vốn cho hợp đồng.</b> Chi phí phải bỏ trước vs thời điểm thu → quy ra loại vốn cần (bảo lãnh &amp; vốn lưu động), đối chiếu hồ sơ tín dụng.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">10 Credit Profile</span></span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> cần <b>bond ~420tr</b> (CR-002) + <b>vốn lưu động ~950tr</b> (CR-001) để phủ khe hụt trước khi thu tiền T9.</div>
+        </li>
+        <li class="ms"><span class="ms-n">F7</span>
+          <div class="ms-op"><b>Kiểm dữ liệu thiếu.</b> Đọc ghi chú precheck của hồ sơ tín dụng để phát hiện chứng từ còn thiếu.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">10 Credit Profile</span></span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> CR-001 ghi “Need receivable aging evidence” → thiếu <b>báo cáo tuổi nợ</b>.</div>
+          <div class="ms-gate"><span class="d">◆ Cổng A —</span> nếu thiếu dữ liệu bắt buộc → phát “yêu cầu bổ sung” và tạm dừng, không suy đoán.</div>
+        </li>
+        <li class="ms"><span class="ms-n">F8</span>
+          <div class="ms-op"><b>Tổng hợp thành báo cáo tài chính.</b> Gộp các kết quả trên thành một gói mạch lạc. <span class="mini-oai">◇ OpenAI</span></div>
+          <div class="ms-out"><span class="k">Output chuyển tiếp → Risk</span>Cashflow summary (âm T6–T8) · Funding need (~420tr bond + ~950tr vốn lưu động) · Missing-data (tuổi nợ).</div>
+        </li>
+      </ul>
+    </div>
+
+    <!-- RISK -->
+    <div class="agent">
+      <div class="agent-head" style="background:var(--risk)"><span class="ico">🛡️</span><span class="nm">③ Risk &amp; Compliance Agent</span><span class="role">Chấm rủi ro · cảnh báo · điểm phê duyệt</span></div>
+      <div class="io">
+        <div class="box"><span class="k">📥 Input</span>Output tài chính từ Finance + bộ quy tắc rủi ro.</div>
+        <div class="box"><span class="k">📤 Output</span>Risk level · Alerts · Required approvals · chính sách masking.</div>
+      </div>
+      <ul class="ms-list">
+        <li class="ms"><span class="ms-n">R1</span>
+          <div class="ms-op"><b>Nạp bộ quy tắc.</b> Đọc bảng quy tắc rủi ro để chuẩn bị đối chiếu.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">13 Risk Rules</span></span></div>
+        </li>
+        <li class="ms"><span class="ms-n">R2</span>
+          <div class="ms-op"><b>Áp quy tắc biên lợi nhuận (RR-003).</b> So margin với ngưỡng 0,28.</div>
+          <div class="ms-meta"><span class="ms-res"><span class="k">Kết quả</span>Cờ rủi ro Medium nếu margin thấp.</span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> margin <span class="num">0,24</span> → Medium, “review giá/chi phí”.</div>
+        </li>
+        <li class="ms"><span class="ms-n">R3</span>
+          <div class="ms-op"><b>Áp quy tắc dòng tiền (RR-002).</b> So tiền mặt đóng kỳ với dự trữ tối thiểu.</div>
+          <div class="ms-meta"><span class="ms-res"><span class="k">Kết quả</span>Rủi ro High nếu dưới dự trữ.</span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> T6–T8 dưới 550tr → High, “đề xuất vốn lưu động / phân kỳ giao hàng”.</div>
+        </li>
+        <li class="ms"><span class="ms-n">R4</span>
+          <div class="ms-op"><b>Áp quy tắc quyết định lớn (RR-005).</b> Đánh dấu mọi khoản &gt; 300tr phải có người phê duyệt.</div>
+          <div class="ms-meta"><span class="ms-res"><span class="k">Kết quả</span>Danh sách điểm cần human approval.</span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> bond <span class="num">420tr</span> &amp; vốn lưu động <span class="num">950tr</span> &gt; 300tr → bắt buộc founder duyệt.</div>
+        </li>
+        <li class="ms"><span class="ms-n">R5</span>
+          <div class="ms-op"><b>Quét cảnh báo liên quan.</b> Lọc bảng cảnh báo theo bản ghi của hợp đồng.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">14 Alerts</span></span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> AL-003 (High, 72) — “rollout 20 tỉnh vượt năng lực nhà thầu” → rủi ro thực thi Cao.</div>
+        </li>
+        <li class="ms"><span class="ms-n">R6</span>
+          <div class="ms-op"><b>Quét giao dịch bất thường (song song, cấp công ty).</b> Lọc giao dịch có điểm rủi ro ≥ 85 (RR-001).</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">08 Bank Txn</span><span class="chip">14 Alerts</span></span></div>
+          <div class="ms-ex ex"><b>Ví dụ khác:</b> TXN-006 (<span class="num">88</span>) &amp; TXN-007 (<span class="num">91</span>) → Critical.</div>
+          <div class="ms-gate"><span class="d">◆ Cổng B —</span> nếu Critical → giữ giao dịch + báo founder ngay (hành động không thể đảo ngược).</div>
+        </li>
+        <li class="ms"><span class="ms-n">R7</span>
+          <div class="ms-op"><b>Phân loại dữ liệu nhạy cảm (chính sách).</b> Đối chiếu bảng phân loại để gắn cờ trường nào phải che/token hoá — <i>việc thực thi che do lớp Governance làm tại lúc gọi ra ngoài.</i></div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">20 Data Class</span><span class="chip">21 Masking</span></span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> customer_id, contract_value = restricted/confidential → chính sách: token hoá/aggregate trước khi gửi ngân hàng.</div>
+        </li>
+        <li class="ms"><span class="ms-n">R8</span>
+          <div class="ms-op"><b>Tổng hợp hồ sơ rủi ro.</b> Gộp mức rủi ro, cảnh báo, điểm phê duyệt. <span class="mini-oai">◇ OpenAI</span></div>
+          <div class="ms-out"><span class="k">Output chuyển tiếp → Decision</span>Risk level (thực thi: Cao) · Alerts (AL-003) · 4 điểm phê duyệt · chính sách masking.</div>
+        </li>
+      </ul>
+    </div>
+
+    <!-- DECISION -->
+    <div class="agent">
+      <div class="agent-head" style="background:var(--dec)"><span class="ico">🎯</span><span class="nm">④ Decision &amp; Partner Agent</span><span class="role">So khớp đối tác &amp; tạo Decision Card</span></div>
+      <div class="io">
+        <div class="box"><span class="k">📥 Input</span>Output của Finance + Risk + danh mục tài chính.</div>
+        <div class="box"><span class="k">📤 Output</span>Decision Card: phương án + 3 lý do + điểm founder xác nhận.</div>
+      </div>
+      <ul class="ms-list">
+        <li class="ms"><span class="ms-n">D1</span>
+          <div class="ms-op"><b>Nạp danh mục tài chính.</b> Đọc hồ sơ tín dụng, sản phẩm ngân hàng và catalog API.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">10 Credit</span><span class="chip">11 Bank Products</span><span class="chip">12 API Catalog</span></span></div>
+        </li>
+        <li class="ms"><span class="ms-n">D2</span>
+          <div class="ms-op"><b>Khớp nhu cầu #1 — Bảo lãnh thực hiện hợp đồng.</b> Lọc sản phẩm phù hợp loại + phân khúc, tính phí &amp; ký quỹ.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">11 Bank Products</span></span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> BANKPROD-002 (VietinBank) — phí <span class="num">1,2%</span> ≈ <span class="num">5tr/năm</span>, ký quỹ <span class="num">84tr</span>. CoopBank không có sản phẩm bond → chọn VietinBank.</div>
+        </li>
+        <li class="ms"><span class="ms-n">D3</span>
+          <div class="ms-op"><b>Khớp nhu cầu #2 — Vốn lưu động.</b> So sánh các sản phẩm cùng loại theo lãi suất &amp; điều kiện.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">11 Bank Products</span></span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> BANKPROD-004 VietinBank <span class="num">10,5%</span> rẻ hơn BANKPROD-006 CoopBank <span class="num">11,8%</span> cho khoản lớn → chọn VietinBank.</div>
+        </li>
+        <li class="ms"><span class="ms-n">D4</span>
+          <div class="ms-op"><b>Bổ sung nhu cầu thu hộ địa phương.</b> Vì mạng lưới trải nhiều tỉnh, cân nhắc tài khoản thu hộ của đối tác phù hợp.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">11 Bank Products</span></span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> BANKPROD-005 (CoopBank cooperative collection) → dùng CoopBank thu hộ 20 tỉnh. Phương án kết hợp 2 đối tác.</div>
+        </li>
+        <li class="ms"><span class="ms-n">D5</span>
+          <div class="ms-op"><b>Cổng độ tin cậy (RR-006).</b> Kiểm điểm eligibility của hồ sơ tín dụng so ngưỡng 0,65.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">10 Credit</span><span class="chip">13 (RR-006)</span></span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> bond eligibility <span class="num">0,63 &lt; 0,65</span> → hạ xuống “khuyến nghị có điều kiện + đòi bằng chứng”, không tự khẳng định.</div>
+          <div class="ms-gate"><span class="d">◆ Cổng C —</span> tin cậy thấp → không khuyến nghị chắc chắn; yêu cầu thêm dữ liệu.</div>
+        </li>
+        <li class="ms"><span class="ms-n">D6</span>
+          <div class="ms-op"><b>Chuẩn bị precheck payload (chưa gửi).</b> Map các trường bắt buộc của API precheck; ID để lớp Governance token hoá khi gửi.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">12 (API-002)</span><span class="chip">21 Masking</span></span></div>
+          <div class="ms-ex ex"><b>CON-004:</b> chuẩn bị API-002 precheck bond {contract_id, amount 420tr, company_profile} — chờ founder duyệt mới gửi.</div>
+        </li>
+        <li class="ms"><span class="ms-n">D7</span>
+          <div class="ms-op"><b>Dựng Decision Card.</b> Tổng hợp thành quyết định có cấu trúc kèm lý do và điểm cần xác nhận. <span class="mini-oai">◇ OpenAI</span></div>
+          <div class="ms-out"><span class="k">Output chuyển tiếp → Founder</span><b>Decision Card:</b> phương án (nhận có điều kiện, phân kỳ, VietinBank+CoopBank) + 3 lý do + điểm founder xác nhận + before/after.</div>
+        </li>
+      </ul>
+    </div>
+
+    <!-- FOUNDER + FINAL -->
+    <div class="agent">
+      <div class="agent-head" style="background:var(--founder)"><span class="ico">👤</span><span class="nm">⑤ Nhà sáng lập + Thực thi &amp; Ghi nhận</span><span class="role">Human-in-the-loop &amp; đóng luồng</span></div>
+      <div class="io">
+        <div class="box"><span class="k">📥 Input</span>Decision Card + audit trail.</div>
+        <div class="box"><span class="k">📤 Output</span>Quyết định cuối (NHẬN có điều kiện / KHÔNG NHẬN) + nhật ký truy vết.</div>
+      </div>
+      <ul class="ms-list">
+        <li class="ms"><span class="ms-n">6</span>
+          <div class="ms-op"><b>Phê duyệt.</b> Founder xem Decision Card, đối chiếu, quyết định duyệt hoặc trả lại.</div>
+          <div class="ms-gate"><span class="d">◆ Cổng D —</span> &gt;300tr hoặc gửi hồ sơ ra đối tác → bắt buộc phê duyệt. <b>Không đồng ý → quay lại D7.</b></div>
+          <div class="ms-ex ex"><b>CON-004:</b> founder duyệt nộp hồ sơ bond/WC ra VietinBank; xác nhận chấp nhận tạm margin 0,24 kèm điều kiện đàm phán lại.</div>
+        </li>
+        <li class="ms"><span class="ms-n">7</span>
+          <div class="ms-op"><b>Thực thi hồ sơ (sau phê duyệt).</b> Gửi precheck ra ngân hàng — <b>lớp Governance token hoá dữ liệu tại đây</b> — và sinh checklist/hồ sơ.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">11</span><span class="chip">12</span><span class="chip">21 Masking</span></span></div>
+        </li>
+        <li class="ms"><span class="ms-n">8</span>
+          <div class="ms-op"><b>Đối tác ngân hàng phản hồi (mô phỏng).</b> Trả kết quả precheck sơ bộ về Decision Agent.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Giao diện</span><span class="chip">API-002 / 005 (mock)</span></span></div>
+        </li>
+        <li class="ms"><span class="ms-n">9</span>
+          <div class="ms-op"><b>Ghi nhận &amp; chốt.</b> Lưu Decision Card cuối, tính before/after, ghi audit log toàn luồng.</div>
+          <div class="ms-meta"><span class="ms-data"><span class="k">Dữ liệu</span><span class="chip">25 Runtime Log</span></span></div>
+          <div class="ms-out"><span class="k">Kết quả cuối</span>Quyết định: <b>NHẬN hợp đồng (có điều kiện)</b> hoặc <b>KHÔNG NHẬN</b> — kèm nhật ký truy vết đầy đủ (trace_id, các trường đã che).</div>
+        </li>
+      </ul>
+    </div>
+
+    <p class="foot">Ghi chú: mã hai chữ số (02, 04, 06…) là số hiệu sheet trong Team Pack. “bond” = bảo lãnh thực hiện hợp đồng; “vốn lưu động” = working capital line. Toàn bộ dữ liệu là giả lập phục vụ cuộc thi.</p>
+  </div>
+
+  <div class="sec">
+    <h2>C · Sẵn sàng cho Crisis Card <span style="font-weight:600;color:var(--muted);font-size:14px">— thiết kế sẵn cho Vòng Chung kết, chưa chạy ở Chung khảo</span></h2>
+    <p class="h2sub">Chứng minh tính khả thi &amp; tính kế thừa giữa các vòng: cùng một entry point và cùng pipeline, Crisis Card chỉ là thao tác <b>“thay 1–2 dữ kiện → tái đánh giá”</b>. Kiến trúc đã có sẵn 4 “móc nối” để làm việc này mà không cần thêm thành phần mới.</p>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-bottom:16px">
+      <div style="background:var(--surface);border:1px dashed #B9C2CC;border-radius:10px;padding:12px 14px">
+        <div style="font-weight:700;font-size:12.5px;margin-bottom:4px">🔁 Pipeline tái chạy được</div>
+        <div style="font-size:11.5px;color:#41505F;line-height:1.45">Agent tính tất định từ dữ liệu → đổi một dữ kiện là chạy lại F1→D7 ra kết quả mới.</div>
+      </div>
+      <div style="background:var(--surface);border:1px dashed #B9C2CC;border-radius:10px;padding:12px 14px">
+        <div style="font-weight:700;font-size:12.5px;margin-bottom:4px">⚙️ Scenario / Before-After engine</div>
+        <div style="font-size:11.5px;color:#41505F;line-height:1.45">Skill dưới Decision Agent — chính là bộ xử lý Crisis Card, đã có trong thiết kế.</div>
+      </div>
+      <div style="background:var(--surface);border:1px dashed #B9C2CC;border-radius:10px;padding:12px 14px">
+        <div style="font-weight:700;font-size:12.5px;margin-bottom:4px">🧭 Định tuyến theo “affected agent”</div>
+        <div style="font-size:11.5px;color:#41505F;line-height:1.45">Orchestrator biết đổi loại dữ kiện nào thì gọi đúng agent tính lại.</div>
+      </div>
+      <div style="background:var(--surface);border:1px dashed #B9C2CC;border-radius:10px;padding:12px 14px">
+        <div style="font-weight:700;font-size:12.5px;margin-bottom:4px">🧾 Audit đã có versioning</div>
+        <div style="font-size:11.5px;color:#41505F;line-height:1.45">Sheet 25 sẵn trường <span style="font-family:var(--mono)">decision_version</span> (before/after) + <span style="font-family:var(--mono)">input_source = Crisis Card</span>.</div>
+      </div>
+    </div>
+
+    <div style="background:#F7F9FB;border:1px dashed #B9C2CC;border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:12px;color:#33404E;line-height:1.7">
+      <b>Luồng Crisis Card (Vòng Chung kết):</b><br/>
+      Crisis Card (đổi 1–2 dữ kiện) &nbsp;→&nbsp; 🧭 Orchestrator định tuyến &nbsp;→&nbsp; Agent bị ảnh hưởng <b>tính lại</b> &nbsp;→&nbsp; 🎯 Decision Card <b>before / after</b> &nbsp;→&nbsp; 🧾 Audit ghi <span style="font-family:var(--mono)">decision_version</span>.
+    </div>
+
+    <div class="tblwrap" style="overflow-x:auto;border:1px solid var(--line);border-radius:10px">
+      <table style="border-collapse:collapse;width:100%;min-width:640px;font-size:12px;background:var(--surface)">
+        <thead>
+          <tr>
+            <th style="background:#EEF2F6;text-align:left;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:#3B4A59;padding:9px 11px;border-bottom:1px solid var(--line)">Crisis Card đổi gì</th>
+            <th style="background:#EEF2F6;text-align:left;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:#3B4A59;padding:9px 11px;border-bottom:1px solid var(--line)">Agent tính lại</th>
+            <th style="background:#EEF2F6;text-align:left;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:#3B4A59;padding:9px 11px;border-bottom:1px solid var(--line)">Chỉ số cập nhật</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td style="padding:9px 11px;border-bottom:1px solid #EDF0F3">Deadline (ngày / số ngày)</td><td style="padding:9px 11px;border-bottom:1px solid #EDF0F3"><span class="dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--risk)"></span>Risk &amp; Compliance</td><td style="padding:9px 11px;border-bottom:1px solid #EDF0F3">Rủi ro giao hàng, mức phạt trễ</td></tr>
+          <tr><td style="padding:9px 11px;border-bottom:1px solid #EDF0F3">Chi phí (VND / %)</td><td style="padding:9px 11px;border-bottom:1px solid #EDF0F3"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--fin)"></span>Data &amp; Finance</td><td style="padding:9px 11px;border-bottom:1px solid #EDF0F3">Funding gap, biên lợi nhuận</td></tr>
+          <tr><td style="padding:9px 11px;border-bottom:1px solid #EDF0F3">Điều khoản thanh toán</td><td style="padding:9px 11px;border-bottom:1px solid #EDF0F3"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--fin)"></span>Data &amp; Finance</td><td style="padding:9px 11px;border-bottom:1px solid #EDF0F3">Tiền mặt đóng kỳ dự kiến</td></tr>
+          <tr><td style="padding:9px 11px;border-bottom:1px solid #EDF0F3">Điều kiện tài chính (lãi/phí/ký quỹ)</td><td style="padding:9px 11px;border-bottom:1px solid #EDF0F3"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--dec)"></span>Decision &amp; Partner</td><td style="padding:9px 11px;border-bottom:1px solid #EDF0F3">Đối tác / phương án đề xuất</td></tr>
+          <tr><td style="padding:9px 11px">Phạm vi (số tỉnh / đơn)</td><td style="padding:9px 11px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--ink)"></span>Cả 3 agent core</td><td style="padding:9px 11px">Mức rủi ro + quyết định cuối</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="foot"><b>Ranh giới trung thực:</b> ở Vòng Chung khảo chỉ <b>thiết kế sẵn</b> cơ chế này (data model Decision Card có trường before/after + decision_version) — <b>không thực thi</b>. Ở Vòng Chung kết mới nhập Crisis Card thật để tái chạy và hiển thị before/after.</p>
+  </div>
+</div>
+
+<script>
+  (function(){
+    var doc=document.getElementById('doc');
+    var b1=document.getElementById('m-gen'), b2=document.getElementById('m-ex');
+    function set(ex){
+      doc.classList.toggle('show-ex',ex);
+      b1.classList.toggle('on',!ex); b2.classList.toggle('on',ex);
+      b1.setAttribute('aria-pressed',String(!ex)); b2.setAttribute('aria-pressed',String(ex));
+    }
+    b1.addEventListener('click',function(){set(false);});
+    b2.addEventListener('click',function(){set(true);});
+    set(false);
+  })();
+</script>

@@ -1,0 +1,227 @@
+<style>
+  :root{
+    --ground:#F4F6F8; --surface:#FFFFFF; --ink:#16212E; --muted:#5B6773; --line:#E2E7EC;
+    --fin:#17786A; --risk:#2E6291; --dec:#4A4E93; --val:#8A3B5A; --founder:#97722B; --data:#2E6291;
+    --start:#2F7D57; --gate:#BE851F; --crit:#BF4A3F;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0}
+  .wrap{font-family:var(--sans);color:var(--ink);background:var(--ground);padding:28px 22px 52px;line-height:1.55}
+  .mx{max-width:1080px;margin:0 auto}
+  .kicker{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dec);font-weight:700}
+  h1{font-size:27px;line-height:1.2;margin:6px 0 6px;letter-spacing:-.01em;text-wrap:balance}
+  .sub{font-size:14.5px;color:var(--muted);max-width:74ch;margin:0}
+  h2{font-size:19px;margin:0 0 3px;letter-spacing:-.01em}
+  .h2s{font-size:13px;color:var(--muted);margin:0 0 14px;max-width:74ch}
+  .sec{margin-top:36px}
+
+  /* pipeline */
+  .scroll{overflow-x:auto;padding-bottom:8px}
+  .pipe{display:flex;align-items:stretch;gap:8px;min-width:940px}
+  .node{border-radius:10px;color:#fff;padding:11px 12px;min-width:150px;display:flex;flex-direction:column;gap:4px}
+  .node .nt{font-size:13px;font-weight:700;line-height:1.2}
+  .node .nr{font-size:10.5px;opacity:.9;line-height:1.3}
+  .node .np{font-size:10px;font-family:var(--mono);background:rgba(255,255,255,.18);border-radius:4px;padding:1px 5px;margin-top:2px;align-self:flex-start}
+  .gate{background:var(--val);min-width:96px}
+  .gate .nt{font-size:12px}
+  .arw{align-self:center;color:var(--muted);font-weight:800;font-size:17px;flex:none}
+  .start{background:var(--start);min-width:130px}
+  .founder{background:var(--founder);min-width:130px}
+  .loopnote{font-size:11.5px;color:#7a2f4d;background:#F7E9EF;border:1px dashed #D9A9BE;border-radius:8px;padding:9px 12px;margin-top:12px}
+  .loopnote b{color:#7a2f4d}
+
+  /* agent cards */
+  .agent{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:16px}
+  .ah{display:flex;align-items:center;gap:10px;padding:12px 16px;color:#fff}
+  .ah .ico{font-size:19px}
+  .ah .nm{font-size:15.5px;font-weight:700}
+  .ah .map{margin-left:auto;font-size:10.5px;background:rgba(255,255,255,.2);border-radius:20px;padding:2px 9px;font-weight:700}
+  .abody{display:grid;grid-template-columns:1fr 1fr;gap:0}
+  .fld{padding:11px 16px;border-top:1px solid #EEF1F4}
+  .fld.full{grid-column:1 / -1}
+  .fld .k{font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:5px;display:flex;align-items:center;gap:6px}
+  .fld .v{font-size:12.5px;color:#33404E}
+  .chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+  .chip{font-family:var(--mono);font-size:10.5px;background:#EDF1F5;border:1px solid #DBE2E9;color:#294056;padding:1px 6px;border-radius:4px;white-space:nowrap}
+  .chip.pack{background:#EAF0F7;border-color:#CFDDEC;color:#274a6e;font-family:var(--sans);font-weight:600}
+  ul.tight{margin:3px 0 0;padding-left:17px}
+  ul.tight li{font-size:12.4px;color:#33404E;margin:2px 0}
+  .no{color:#8A342B;background:#F7EAE8;border:1px solid #E7C4bd;border-radius:6px;padding:6px 9px;font-size:12px}
+  .hitl{color:#6E4B0E;background:#FBEFD6;border:1px solid #EBD39A;border-radius:6px;padding:6px 9px;font-size:12px}
+  .oai{color:#0B5A44;background:#DFF2EA;border:1px solid #B7E0D0;border-radius:6px;padding:6px 9px;font-size:12px}
+
+  /* handoff */
+  .hoff{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+  .pack{flex:1;min-width:200px;border:1px solid var(--line);border-radius:10px;background:#FAFBFC;padding:11px 13px}
+  .pack .pn{font-size:13px;font-weight:700;margin-bottom:3px}
+  .pack .pd{font-size:11.6px;color:#41505F}
+  .pack.p1{border-top:3px solid var(--fin)}
+  .pack.p2{border-top:3px solid var(--risk)}
+  .pack.p3{border-top:3px solid var(--dec)}
+
+  /* tables */
+  .tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+  table{border-collapse:collapse;width:100%;min-width:640px;font-size:12.3px;background:#fff}
+  th{background:#EEF2F6;text-align:left;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;color:#3B4A59;padding:9px 11px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:9px 11px;border-bottom:1px solid #EEF1F4;vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  .ok{color:#1C5E40;font-weight:700}
+  .ext{color:#7a2f4d;font-weight:700}
+  .note{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--gate);border-radius:8px;padding:11px 14px;margin-bottom:10px;font-size:12.6px;color:#33404E}
+  .note b{color:var(--ink)}
+  .foot{font-size:11.5px;color:var(--muted);margin-top:18px}
+  .mono{font-family:var(--mono)}
+  @media (max-width:680px){ .abody{grid-template-columns:1fr} }
+</style>
+
+<div class="wrap">
+  <div class="mx">
+    <div class="kicker">OPC · MIS Talent 2026 · Vòng Chung khảo</div>
+    <h1>Agent Blueprint — Hệ thống Multi-Agent vận hành OPC</h1>
+    <p class="sub">Bốn agent phối hợp biến dữ liệu thành quyết định quản trị: một agent tài chính, một agent rủi ro, một agent quyết định, và một agent kiểm tra chất lượng chạy xen giữa. Mỗi agent mô tả rõ Input, Action, Output, điểm cần con người xác nhận, và ranh giới không được vượt.</p>
+  </div>
+
+  <!-- SECTION 1: PIPELINE -->
+  <div class="sec mx">
+    <h2>1 · Sơ đồ luồng tổng thể</h2>
+    <p class="h2s">Các agent chạy tuần tự; sau mỗi agent, Validate Agent kiểm tra rồi mới cho qua bước sau. Con người xác nhận ở các điểm rủi ro cao.</p>
+    <div class="scroll">
+      <div class="pipe">
+        <div class="node start"><div class="nt">Cơ hội hợp đồng</div><div class="nr">Đầu vào duy nhất</div><span class="np">CON-004 / CON-005</span></div>
+        <span class="arw">→</span>
+        <div class="node" style="background:var(--fin)"><div class="nt">Finance Agent</div><div class="nr">Phân tích tài chính</div><span class="np">→ Finance Feature Pack</span></div>
+        <span class="arw">→</span>
+        <div class="node gate"><div class="nt">✓ Validate</div><div class="nr">Kiểm tra Finance</div></div>
+        <span class="arw">→</span>
+        <div class="node" style="background:var(--risk)"><div class="nt">Risk Agent</div><div class="nr">Phát hiện rủi ro</div><span class="np">→ Risk Alert Pack</span></div>
+        <span class="arw">→</span>
+        <div class="node gate"><div class="nt">✓ Validate</div><div class="nr">Kiểm tra Risk</div></div>
+        <span class="arw">→</span>
+        <div class="node" style="background:var(--dec)"><div class="nt">Decision Agent</div><div class="nr">Quyết định &amp; đối tác</div><span class="np">→ Decision Card</span></div>
+        <span class="arw">→</span>
+        <div class="node gate"><div class="nt">✓ Validate</div><div class="nr">Kiểm tra Decision</div></div>
+        <span class="arw">→</span>
+        <div class="node founder"><div class="nt">Nhà sáng lập</div><div class="nr">Phê duyệt cuối + Dashboard</div></div>
+      </div>
+    </div>
+    <div class="loopnote">↩ <b>Vòng phản biện của Validate:</b> nếu phát hiện sai / thiếu / không rõ, Validate tạo <b>Challenge Ticket</b> buộc agent trước giải trình hoặc chạy lại phần sai, rồi kiểm tra lại — thay vì để lỗi trôi xuống bước sau.</div>
+  </div>
+
+  <!-- SECTION 2: AGENT DETAILS -->
+  <div class="sec mx">
+    <h2>2 · Chi tiết từng Agent (Input → Action → Output)</h2>
+    <p class="h2s">Mỗi thẻ nêu rõ dữ liệu dùng, việc agent làm, kết quả bàn giao, điểm con người xác nhận, ranh giới không được vượt, và vai trò của OpenAI.</p>
+
+    <!-- FINANCE -->
+    <div class="agent">
+      <div class="ah" style="background:var(--fin)"><span class="ico">💰</span><span class="nm">Finance Agent</span><span class="map">Đề: Data &amp; Finance Agent</span></div>
+      <div class="abody">
+        <div class="fld"><div class="k">📥 Input · dữ liệu</div><div class="v"><div class="chips"><span class="chip">04_CONTRACTS</span><span class="chip">06_ORDERS</span><span class="chip">07_INVOICES</span><span class="chip">08_BANK_TXN</span><span class="chip">09_CASHFLOW</span><span class="chip">02_OPC_PROFILE</span><span class="chip">03_CUSTOMERS</span><span class="chip">05_PRODUCTS</span></div></div></div>
+        <div class="fld"><div class="k">⚙️ Action · việc làm</div><div class="v"><ul class="tight"><li>Kiểm tra dữ liệu, đối chiếu hóa đơn với giao dịch ngân hàng</li><li>Tính thanh khoản theo tháng, công nợ, hóa đơn chưa phát hành</li><li>Phân tích biên lợi nhuận, ước tính nhu cầu vốn theo kịch bản</li></ul></div></div>
+        <div class="fld"><div class="k">📤 Output</div><div class="v"><span class="chip pack">Finance Feature Pack</span> → Risk Agent<div style="margin-top:5px;font-size:11.5px;color:var(--muted)">gồm liquidity brief, AR plan, reconciliation, margin, funding scenarios, missing-data request</div></div></div>
+        <div class="fld"><div class="k">🟢 OpenAI</div><div class="v"><div class="oai">Diễn giải số liệu, đánh giá mức áp lực tài chính, xác định dữ liệu còn thiếu. Phép tính do chương trình chạy.</div></div></div>
+        <div class="fld full"><div class="k">⛔ Ranh giới không được vượt</div><div class="v"><span class="no">Không quyết định nhận/từ chối hợp đồng · Không gọi API ngân hàng · Không chọn sản phẩm ngân hàng</span></div></div>
+      </div>
+    </div>
+
+    <!-- RISK -->
+    <div class="agent">
+      <div class="ah" style="background:var(--risk)"><span class="ico">🛡️</span><span class="nm">Risk Agent</span><span class="map">Đề: Risk &amp; Compliance Agent</span></div>
+      <div class="abody">
+        <div class="fld"><div class="k">📥 Input · dữ liệu</div><div class="v"><div class="chips"><span class="chip">08_BANK_TXN</span><span class="chip">13_RISK_RULES</span><span class="chip">14_ALERTS</span><span class="chip">20_DATA_CLASS</span><span class="chip pack">Finance Feature Pack</span></div><div style="margin-top:5px;font-size:11.5px;color:var(--muted)">+ callback/webhook giao dịch mới từ ngân hàng (luồng realtime)</div></div></div>
+        <div class="fld"><div class="k">⚙️ Action · việc làm</div><div class="v"><ul class="tight"><li>R1: giao dịch bất thường (realtime) → yêu cầu tạm giữ nếu nghiêm trọng</li><li>R2–R7: rủi ro thanh khoản, công nợ, đối chiếu, thiếu chứng từ, tiến độ, biên lợi nhuận</li><li>Map rule sang alert; che dữ liệu nhạy cảm 2 lớp (sau intake &amp; trước output)</li></ul></div></div>
+        <div class="fld"><div class="k">📤 Output</div><div class="v"><span class="chip pack">Risk Alert Pack</span> → Decision Agent<div style="margin-top:5px;font-size:11.5px;color:var(--muted)">triggered rules, alerts, proposed alerts, masked data, human review points</div></div></div>
+        <div class="fld"><div class="k">🟢 OpenAI</div><div class="v"><div class="oai">Diễn giải luật rủi ro, giải thích bằng chứng cho từng rủi ro, phân loại mức độ.</div></div></div>
+        <div class="fld"><div class="k">👤 Điểm con người xác nhận</div><div class="v"><div class="hitl">R1 nghiêm trọng → tạm giữ giao dịch + nhà sáng lập xác nhận (hành động có thể đảo ngược).</div></div></div>
+        <div class="fld"><div class="k">⛔ Ranh giới không được vượt</div><div class="v"><span class="no">Không tạo Decision Card · Không chọn sản phẩm ngân hàng cuối · Không ra quyết định thay Decision Agent</span></div></div>
+      </div>
+    </div>
+
+    <!-- DECISION -->
+    <div class="agent">
+      <div class="ah" style="background:var(--dec)"><span class="ico">🎯</span><span class="nm">Decision Agent</span><span class="map">Đề: Decision &amp; Partner Agent</span></div>
+      <div class="abody">
+        <div class="fld"><div class="k">📥 Input · dữ liệu</div><div class="v"><div class="chips"><span class="chip pack">Finance Feature Pack</span><span class="chip pack">Risk Alert Pack</span><span class="chip">10_CREDIT_PROFILE</span><span class="chip">11_BANK_PRODUCTS</span><span class="chip">12_API_CATALOG</span></div></div></div>
+        <div class="fld"><div class="k">⚙️ Action · việc làm</div><div class="v"><ul class="tight"><li>Chuẩn hóa thành credit decision case; sàng lọc &amp; lập shortlist</li><li>So khớp nhu cầu vốn với sản phẩm ngân hàng phù hợp</li><li>Tạo Decision Card; qua cổng human approval mới gọi API precheck</li></ul></div></div>
+        <div class="fld"><div class="k">📤 Output</div><div class="v"><span class="chip pack">Decision Card</span> → Nhà sáng lập / Dashboard<div style="margin-top:5px;font-size:11.5px;color:var(--muted)">option + 3 lý do + điểm xác nhận + khuyến nghị sản phẩm ngân hàng</div></div></div>
+        <div class="fld"><div class="k">🟢 OpenAI</div><div class="v"><div class="oai">Tổng hợp Finance + Risk, sinh Decision Card kèm lý do, xếp hạng phương án đối tác.</div></div></div>
+        <div class="fld"><div class="k">👤 Điểm con người xác nhận</div><div class="v"><div class="hitl">Trước khi gọi API precheck ngân hàng (khoản &gt; 300tr hoặc gửi hồ sơ ra đối tác).</div></div></div>
+        <div class="fld"><div class="k">⛔ Ranh giới không được vượt</div><div class="v"><span class="no">Không tự duyệt khoản vay · Không gọi API precheck trước khi có human approval</span></div></div>
+      </div>
+    </div>
+
+    <!-- VALIDATE -->
+    <div class="agent">
+      <div class="ah" style="background:var(--val)"><span class="ico">🔎</span><span class="nm">Validate Agent</span><span class="map">Mở rộng (ngoài 3 vai trò bắt buộc)</span></div>
+      <div class="abody">
+        <div class="fld"><div class="k">📥 Input</div><div class="v"><span class="chip pack">run_log</span> <span class="chip pack">output_pack</span> của agent vừa chạy + bộ checklist tương ứng</div></div>
+        <div class="fld"><div class="k">⚙️ Action · việc làm</div><div class="v"><ul class="tight"><li>Nạp validation skill đúng agent (finance / risk / decision)</li><li>Kiểm 4 nhóm: đúng quy trình, đúng dữ liệu/tool, đúng schema output, không vượt quyền</li><li>PASS hoặc tạo Challenge Ticket buộc chạy lại</li></ul></div></div>
+        <div class="fld"><div class="k">📤 Output</div><div class="v"><div class="chips"><span class="chip">PASS</span><span class="chip">NEED_CLARIFICATION</span><span class="chip">REWORK_REQUIRED</span><span class="chip">BLOCK_NEXT_STAGE</span></div></div></div>
+        <div class="fld"><div class="k">🟢 OpenAI</div><div class="v"><div class="oai">Đọc log, phản biện, viết Challenge Ticket bằng lời rõ ràng.</div></div></div>
+        <div class="fld full"><div class="k">⛔ Ranh giới không được vượt</div><div class="v"><span class="no">Không tự sửa số liệu thay agent chính — chỉ chấp nhận, chất vấn, hoặc chặn</span></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 3: HANDOFF -->
+  <div class="sec mx">
+    <h2>3 · Chuỗi bàn giao giữa các agent</h2>
+    <p class="h2s">Mỗi agent đóng gói kết quả thành một gói dữ liệu có cấu trúc rồi chuyển cho agent sau, qua cửa kiểm tra của Validate.</p>
+    <div class="hoff">
+      <div class="pack p1"><div class="pn">Finance Feature Pack</div><div class="pd">Bức tranh tài chính: thanh khoản, công nợ, nhu cầu vốn, dữ liệu thiếu.</div></div>
+      <span class="arw">→</span>
+      <div class="pack p2"><div class="pn">Risk Alert Pack</div><div class="pd">Rủi ro đã kích hoạt, cảnh báo, dữ liệu đã che, điểm cần con người xem.</div></div>
+      <span class="arw">→</span>
+      <div class="pack p3"><div class="pn">Decision Card</div><div class="pd">Phương án + 3 lý do + điểm xác nhận + khuyến nghị ngân hàng.</div></div>
+    </div>
+  </div>
+
+  <!-- SECTION 4: HITL -->
+  <div class="sec mx">
+    <h2>4 · Các điểm con người xác nhận (human-in-the-loop)</h2>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Điểm</th><th>Ở agent nào</th><th>Vì sao cần con người</th></tr></thead>
+        <tbody>
+          <tr><td>Tạm giữ giao dịch nghi vấn</td><td>Risk Agent</td><td>Giao dịch bất thường (R1) có thể là gian lận — cần nhà sáng lập xác nhận</td></tr>
+          <tr><td>Duyệt trước khi gọi API ngân hàng</td><td>Decision Agent</td><td>Khoản &gt; 300tr hoặc gửi hồ sơ ra đối tác — theo quy tắc OPC</td></tr>
+          <tr><td>Challenge Ticket khi phát hiện lỗi</td><td>Validate Agent</td><td>Buộc agent giải trình / chạy lại thay vì để lỗi trôi xuống</td></tr>
+          <tr><td>Phê duyệt Decision Card cuối</td><td>Nhà sáng lập</td><td>Quyết định nhận / không nhận hợp đồng do con người chốt</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SECTION 5: MAPPING -->
+  <div class="sec mx">
+    <h2>5 · Đối chiếu với yêu cầu cuộc thi</h2>
+    <p class="h2s">Hệ thống phủ đủ 3 vai trò bắt buộc, cộng thêm một agent mở rộng có khai báo.</p>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Đề yêu cầu</th><th>Agent của đội</th><th>Trạng thái</th></tr></thead>
+        <tbody>
+          <tr><td>Data &amp; Finance Agent (bắt buộc)</td><td>Finance Agent</td><td class="ok">✓ Khớp</td></tr>
+          <tr><td>Risk &amp; Compliance Agent (bắt buộc)</td><td>Risk Agent</td><td class="ok">✓ Khớp</td></tr>
+          <tr><td>Decision &amp; Partner Agent (bắt buộc)</td><td>Decision Agent</td><td class="ok">✓ Khớp</td></tr>
+          <tr><td>Agent mở rộng (được phép nếu khai báo)</td><td>Validate Agent</td><td class="ext">✦ Mở rộng hợp lệ</td></tr>
+          <tr><td>Mô tả Input – Action – Output + handoff</td><td>Mục 2 &amp; 3 của blueprint</td><td class="ok">✓ Có</td></tr>
+          <tr><td>Điểm nhà sáng lập xác nhận</td><td>Mục 4 của blueprint</td><td class="ok">✓ Có</td></tr>
+          <tr><td>OpenAI ở chức năng lõi</td><td>Diễn giải &amp; lập luận ở cả 4 agent</td><td class="ok">✓ Có</td></tr>
+          <tr><td>Governance: che dữ liệu, audit, human approval</td><td>Masking 2 lớp + Validate + human gate</td><td class="ok">✓ Có</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SECTION 6: NOTES -->
+  <div class="sec mx">
+    <h2>6 · Vài điểm nên cân nhắc để chắc điểm</h2>
+    <div class="note"><b>Đặt tên khớp đề.</b> Nên ghi rõ Finance Agent chính là Data &amp; Finance Agent, Risk Agent là Risk &amp; Compliance Agent, Decision Agent là Decision &amp; Partner Agent — để giám khảo tick đúng 3 vai trò bắt buộc.</div>
+    <div class="note"><b>Việc tạm giữ giao dịch.</b> Risk Agent gọi API chặn giao dịch nên được mô tả là <b>tạm giữ có thể đảo ngược, kèm nhà sáng lập xác nhận ngay sau đó</b>, đúng tinh thần cần con người duyệt với hành động không thể đảo ngược.</div>
+    <div class="note"><b>Khai báo Validate là agent mở rộng.</b> Nêu rõ đây là agent thứ tư ngoài ba vai trò bắt buộc, và vì chạy trên dữ liệu tĩnh nên chi phí và độ trễ vẫn khả thi cho prototype.</div>
+    <div class="note"><b>Một nguồn số thống nhất.</b> Số liệu ví dụ giữa các tài liệu nên lấy từ một nguồn chung (Finance Agent) để các agent sau không bị lệch con số khi làm prototype.</div>
+    <p class="foot">Ghi chú tên gọi: Finance Feature Pack, Risk Alert Pack, Decision Card, Challenge Ticket là các gói dữ liệu do đội tự định nghĩa. Tên bảng (04_CONTRACTS…) và tên cột giữ nguyên theo Team Pack. Toàn bộ dữ liệu là giả lập phục vụ cuộc thi.</p>
+  </div>
+</div>

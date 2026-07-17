@@ -1,0 +1,16 @@
+# MIS Talent 2026 — OPC Agentic AI (backend)
+# Cài: pip install -r requirements.txt
+
+# OpenAI Agents SDK (gói import tên là `agents`) + client OpenAI
+openai-agents>=0.0.10
+openai>=1.40.0
+
+# Database Supabase Postgres
+psycopg2-binary>=2.9.0
+
+# Cấu hình & tiện ích
+python-dotenv>=1.0.0
+requests>=2.31.0
+
+# Ràng buộc schema (đi kèm agents SDK, ghi rõ để chắc chắn)
+pydantic>=2.0.0

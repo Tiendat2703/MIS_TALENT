@@ -73,13 +73,14 @@ build_risk_pack performs these operations internally; do not reproduce them in
 LLM reasoning and do not call additional tools for them:
 1. Query risk_rule to load every organizer-provided RR rule.
 2. Evaluate each rule against the corresponding FinanceFeaturePack metric.
-3. Query alert and match existing alerts by related record or exact risk type.
+3. Query alert and match existing alerts by related record or risk type (aliased).
 4. Preserve rule_id, severity, required_action, and owner_agent from PostgreSQL.
 5. Determine overall_risk_level from the highest triggered severity.
 6. Determine human_approval_required from triggered severities and actions.
 7. Mark missing or incomparable metrics as INSUFFICIENT_EVIDENCE.
-8. Mask restricted identifiers.
-9. Serialize the final RiskPack as formatted JSON.
+8. Propose an alert for each triggered rule that has no matching existing alert.
+9. Mask restricted and confidential fields per 20_DATA_CLASS and record masked_data.
+10. Build a summary and serialize the final RiskPack as formatted JSON.
 
 EXPECTED BUILD TOOL OUTPUT
 The returned JSON represents one RiskPack and contains:
@@ -88,9 +89,12 @@ The returned JSON represents one RiskPack and contains:
 - rule_evaluations for all loaded RR rules
 - triggered_rule_ids
 - alerts
+- proposed_alerts (triggered rules with no matching alert; each requires human review)
 - required_actions
 - insufficient_evidence
 - human_approval_required
+- masked_data (fields masked at egress per 20_DATA_CLASS)
+- summary (counts, unmapped_rule_ids, highest_severity, human_review_required)
 - decision_made_by_risk_agent
 
 TOOL CALL RULES

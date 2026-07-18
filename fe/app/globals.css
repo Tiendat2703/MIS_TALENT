@@ -66,6 +66,7 @@
   --fin-soft-border: rgba(255, 255, 255, 0.1);
   --fin-accent: #34d399;
   --fin-accent-soft: #6ee7b7;
+  --fin-net-cash: #f4f4f5;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -110,6 +111,7 @@
   --fin-soft-border: rgba(21, 33, 26, 0.12);
   --fin-accent: #047857;
   --fin-accent-soft: #065f46;
+  --fin-net-cash: #18181b;
 }
 
 .dark {
@@ -148,22 +150,22 @@
 
 /* Existing finance screens are dark-first. These semantic overrides keep
    shared cards and typography legible while the UI is migrated to tokens. */
-html.light .bg-black,
-html.light .bg-black\/80 {
+html.light [class*="bg-black"],
+html.light [class*="bg-black/"] {
   background-color: var(--fin-bg);
 }
 
-html.light .bg-zinc-950,
-html.light .bg-zinc-900,
-html.light .bg-zinc-800,
-html.light .bg-\[\#080808\],
-html.light .bg-\[\#0b0e0c\],
-html.light .bg-\[\#0f1210\],
-html.light .bg-\[\#111814\] {
+html.light [class*="bg-zinc-950"],
+html.light [class*="bg-zinc-900"],
+html.light [class*="bg-zinc-800"],
+html.light [class*="bg-[#080808]"],
+html.light [class*="bg-[#0b0e0c]"],
+html.light [class*="bg-[#0f1210]"],
+html.light [class*="bg-[#111814]"] {
   background-color: var(--fin-surface);
 }
 
-html.light .bg-\[\#10241a\] {
+html.light [class*="bg-[#10241a]"] {
   background-color: #e6f5eb;
 }
 
@@ -174,6 +176,7 @@ html.light [class*="bg-white/"] {
 html.light .text-white,
 html.light .text-zinc-50,
 html.light .text-zinc-100,
+html.light .text-zinc-200,
 html.light .text-zinc-300 {
   color: var(--fin-text);
 }

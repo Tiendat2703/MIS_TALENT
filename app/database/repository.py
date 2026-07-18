@@ -24,7 +24,7 @@ def init_db_pool():
         _db_pool = pool.SimpleConnectionPool(
             minconn=1,
             maxconn=10,
-            user=os.getenv("SUPABASE_DB_USER", "postgres"),
+            user=os.getenv("user", "postgres"),
             password=os.getenv("SUPABASE_PASSWORD"),
             host=os.getenv("SUPABASE_DB_HOST", "aws-0-ap-southeast-1.pooler.supabase.com"),
             port=os.getenv("SUPABASE_DB_PORT", "6543"),

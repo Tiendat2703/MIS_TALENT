@@ -11,6 +11,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel
+
 from app.Agent.hooks import AppContext
 
 
@@ -18,7 +20,7 @@ PENDING_STATE_DIR = (
     Path(__file__).resolve().parents[2] / "data" / "pending_states"
 )
 
-_RUN_LOCKS: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+_RUN_LOCKS: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 def _timestamp() -> str:
@@ -32,15 +34,17 @@ def _json_default(value: Any) -> Any:
         return value.value
     if isinstance(value, Path):
         return str(value)
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
-def _state_path(run_id: str) -> Path:
+def _state_path(run_id: int) -> Path:
     return PENDING_STATE_DIR / f"{run_id}.json"
 
 
 @contextmanager
-def _process_lock(run_id: str):
+def _process_lock(run_id: int):
     """Serialize state transitions across separate CLI processes."""
     PENDING_STATE_DIR.mkdir(parents=True, exist_ok=True)
     lock_path = PENDING_STATE_DIR / f".{run_id}.lock"
@@ -52,7 +56,7 @@ def _process_lock(run_id: str):
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-def _write_state(run_id: str, payload: dict[str, Any]) -> None:
+def _write_state(run_id: int, payload: dict[str, Any]) -> None:
     PENDING_STATE_DIR.mkdir(parents=True, exist_ok=True)
     path = _state_path(run_id)
     temporary_path = path.with_suffix(".json.tmp")
@@ -70,7 +74,7 @@ def _write_state(run_id: str, payload: dict[str, Any]) -> None:
     temporary_path.replace(path)
 
 
-def _read_state(run_id: str) -> dict[str, Any]:
+def _read_state(run_id: int) -> dict[str, Any]:
     path = _state_path(run_id)
     if not path.exists():
         raise FileNotFoundError(f"No approval state found for run_id={run_id}")
@@ -101,7 +105,7 @@ def _approval_fingerprint(
 
 
 async def initialize_approval_state(
-    run_id: str,
+    run_id: int,
     context: AppContext,
     user_input: str,
     metadata: dict[str, object] | None = None,
@@ -136,7 +140,7 @@ async def initialize_approval_state(
 
 
 async def register_approval_request(
-    run_id: str,
+    run_id: int,
     contract_id: str,
     tool_name: str,
     arguments: dict[str, Any],
@@ -171,16 +175,16 @@ async def register_approval_request(
             return dict(request)
 
 
-async def get_approval_state(run_id: str) -> dict[str, Any]:
+async def get_approval_state(run_id: int) -> dict[str, Any]:
     return _read_state(run_id)
 
 
-async def list_approval_requests(run_id: str) -> list[dict[str, Any]]:
+async def list_approval_requests(run_id: int) -> list[dict[str, Any]]:
     return list(_read_state(run_id)["approval_requests"])
 
 
 async def set_approval_decision(
-    run_id: str,
+    run_id: int,
     approval_id: str,
     approved: bool,
 ) -> dict[str, Any]:
@@ -211,7 +215,7 @@ async def set_approval_decision(
 
 
 async def claim_approval_execution(
-    run_id: str,
+    run_id: int,
     approval_id: str,
 ) -> dict[str, Any]:
     """Atomically claim an approved request before making the external call."""
@@ -234,7 +238,7 @@ async def claim_approval_execution(
 
 
 async def complete_approval_execution(
-    run_id: str,
+    run_id: int,
     approval_id: str,
     result: dict[str, Any],
 ) -> dict[str, Any]:
@@ -258,7 +262,7 @@ async def complete_approval_execution(
 
 
 async def fail_approval_execution(
-    run_id: str,
+    run_id: int,
     approval_id: str,
     error: str,
 ) -> None:
@@ -275,7 +279,7 @@ async def fail_approval_execution(
 
 
 async def commit_initial_result(
-    run_id: str,
+    run_id: int,
     decision_result: dict[str, Any],
     conversation_items: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -294,20 +298,20 @@ async def commit_initial_result(
             return payload
 
 
-async def load_conversation_items(run_id: str) -> list[dict[str, Any]]:
+async def load_conversation_items(run_id: int) -> list[dict[str, Any]]:
     items = _read_state(run_id).get("conversation_items")
     if not isinstance(items, list):
         raise ValueError(f"Run {run_id} has no saved conversation history")
     return items
 
 
-async def load_context(run_id: str) -> tuple[dict[str, Any], AppContext]:
+async def load_context(run_id: int) -> tuple[dict[str, Any], AppContext]:
     payload = _read_state(run_id)
     return payload, AppContext(**payload["context"])
 
 
 async def commit_continuation_result(
-    run_id: str,
+    run_id: int,
     *,
     expected_revision: int,
     approval_id: str,

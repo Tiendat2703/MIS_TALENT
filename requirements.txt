@@ -1,30 +1,15 @@
-<<<<<<< HEAD
+# MIS Talent 2026 backend — reproducible integration environment
+openai-agents==0.18.2
+openai==2.45.0
+pydantic==2.13.4
+
 psycopg2-binary==2.9.12
 python-dotenv==1.2.2
-requests>=2.32.0
-openai-agents>=0.0.16
-openai>=1.59.0
-langgraph>=0.2.0
+requests>=2.32.0,<3
 
-# Config & validation
-pydantic>=2.0
+langgraph>=0.2.0
 fastapi>=0.110.0
 uvicorn>=0.27.0
-=======
-# MIS Talent 2026 — OPC Agentic AI (backend)
-# Cài: pip install -r requirements.txt
 
-# OpenAI Agents SDK (gói import tên là `agents`) + client OpenAI
-openai-agents>=0.0.10
-openai>=1.40.0
-
-# Database Supabase Postgres
-psycopg2-binary>=2.9.0
-
-# Cấu hình & tiện ích
-python-dotenv>=1.0.0
-requests>=2.31.0
-
-# Ràng buộc schema (đi kèm agents SDK, ghi rõ để chắc chắn)
-pydantic>=2.0.0
->>>>>>> origin/feat/financeAgent
+pytest==8.4.2
+pytest-asyncio==1.2.0

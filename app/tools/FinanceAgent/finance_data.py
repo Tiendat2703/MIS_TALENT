@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from copy import deepcopy
 
 from app.tools.FinanceAgent import mock_data
 
@@ -44,7 +45,7 @@ TABLES = {
 
 def _fetch(table_key: str, mock_rows: list[dict]) -> list[dict]:
     if _use_mock():
-        return mock_rows
+        return deepcopy(mock_rows)
     from app.database.repository import query_db  # import trễ để mock không cần psycopg2
 
     rows = query_db(f"SELECT * FROM {TABLES[table_key]}")
@@ -84,7 +85,7 @@ def get_services() -> list[dict]:
 def get_profile() -> dict:
     """02_OPC_PROFILE ở dạng field/value. Mock trả thẳng dict; DB thì pivot lại."""
     if _use_mock():
-        return dict(mock_data.PROFILE)
+        return deepcopy(mock_data.PROFILE)
     from app.database.repository import query_db
 
     rows = query_db(f"SELECT * FROM {TABLES['profile']}")

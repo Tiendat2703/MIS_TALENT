@@ -302,11 +302,17 @@ def build_risk_pack_impl(finance_pack: FinanceFeaturePack) -> RiskPack:
         human_approval_required=human_approval_required,
         masked_data=masked_data,
         summary=summary,
+        handoff_summary=(
+            f"Risk level {overall_risk_level.value if overall_risk_level else 'NONE'}; "
+            f"{len(triggered)} rules triggered; "
+            f"{len(insufficient_evidence)} evidence gaps; "
+            f"human review {'required' if summary.human_review_required else 'not required'}."
+        ),
         decision_made_by_risk_agent=False,
     )
 
 
-@function_tool
+@function_tool(strict_mode=False)
 def build_risk_pack(finance_pack: FinanceFeaturePack) -> str:
     """Build one masked RiskPack JSON for the supplied FinanceFeaturePack.
 

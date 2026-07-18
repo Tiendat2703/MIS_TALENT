@@ -2,13 +2,12 @@ import asyncio
 import json
 import sys
 import traceback
-from dataclasses import asdict
 from typing import Any
 
 from agents import Runner
 
 from app.Agent.bus import event_bus
-from app.Agent.decisionAgent import DecisionAgent, run_decision_agent
+from app.Agent.decisionAgent import get_decision_agent, run_decision_agent
 from app.Agent.state_store import (
     commit_continuation_result,
     get_approval_state,
@@ -18,7 +17,6 @@ from app.Agent.state_store import (
     set_approval_decision,
 )
 from app.tools.DecisionAgent.PrecheckAPI import PRECHECK_TOOL_BY_NAME
-from app.tools.writeLogs import write_logs
 
 
 IMMUTABLE_TARGET_FIELDS = {
@@ -122,7 +120,7 @@ def _guard_continuation_result(
             raise ValueError("Rejected precheck must keep precheck_note=null")
 
 
-async def get_pending_approvals(run_id: str) -> list[dict[str, Any]]:
+async def get_pending_approvals(run_id: int) -> list[dict[str, Any]]:
     requests = await list_approval_requests(run_id)
     return [request for request in requests if request["status"] == "pending"]
 
@@ -130,7 +128,7 @@ async def get_pending_approvals(run_id: str) -> list[dict[str, Any]]:
 def _followup_message(
     request: dict[str, Any],
     approved: bool,
-    run_id: str,
+    run_id: int,
 ) -> dict[str, Any]:
     contract_id = request["contract_id"]
     if approved:
@@ -139,14 +137,14 @@ def _followup_message(
             "arguments bên dưới. Sau khi nhận kết quả thật, hãy đánh giá lại "
             "approve/review/reject và chỉ cập nhật Decision Card của contract này. "
             "Mọi Decision Card khác phải được trả lại nguyên vẹn. Sau khi cập nhật "
-            "batch, gọi write_logs đúng một lần với run_id bên dưới."
+            "batch. Tầng ứng dụng sẽ tự lưu log."
         )
     else:
         instruction = (
             "Người duyệt đã từ chối precheck. Không gọi bất kỳ precheck tool nào. Chỉ cập "
             "nhật Decision Card của contract này với approval_status=false, "
             "eligible_score=null, precheck_note=null; giữ nguyên mọi card khác. "
-            "Sau khi cập nhật batch, gọi write_logs đúng một lần với run_id bên dưới."
+            "Tầng ứng dụng sẽ tự lưu log sau khi batch được kiểm tra."
         )
 
     payload = {
@@ -166,7 +164,7 @@ def _followup_message(
 
 
 async def decide_approval(
-    run_id: str,
+    run_id: int,
     approval_id: str,
     approved: bool,
 ) -> dict[str, Any]:
@@ -199,15 +197,16 @@ async def decide_approval(
     if approved and tool is None:
         raise ValueError(f"Unsupported approved tool: {request['tool']}")
 
-    continuation_agent = DecisionAgent.clone(
-        tools=[tool, write_logs] if approved else [write_logs],
+    decision_agent = get_decision_agent()
+    continuation_agent = decision_agent.clone(
+        tools=[tool] if approved else [],
     )
     followup = _followup_message(request, approved, run_id)
 
     try:
         await event_bus.emit(run_id, {
             "type": "run_resumed",
-            "agent": DecisionAgent.name,
+            "agent": decision_agent.name,
             "task": f"Tiếp tục đánh giá {request['contract_id']} sau approval",
             "status": "running",
             "data": {
@@ -226,7 +225,7 @@ async def decide_approval(
         if result.interruptions:
             raise RuntimeError("Unexpected SDK interruption during continuation")
 
-        new_batch = asdict(result.final_output)
+        new_batch = result.final_output.model_dump(mode="json")
         state_after_tool = await get_approval_state(run_id)
         request_after = _find_request(state_after_tool, approval_id)
         request_ids_after = {
@@ -244,6 +243,13 @@ async def decide_approval(
             request_ids_after=request_ids_after,
         )
 
+        try:
+            from app.database.context_store import save_decision_pack
+
+            await asyncio.to_thread(save_decision_pack, run_id, result.final_output)
+        except LookupError:
+            # Legacy standalone Decision demos have no Finance/Risk context row.
+            pass
         committed = await commit_continuation_result(
             run_id,
             expected_revision=state_after_tool["revision"],
@@ -253,7 +259,7 @@ async def decide_approval(
         )
         await event_bus.emit(run_id, {
             "type": "decision_updated",
-            "agent": DecisionAgent.name,
+            "agent": decision_agent.name,
             "task": f"Đã cập nhật Decision Card cho {request['contract_id']}",
             "status": committed["workflow_status"],
             "data": new_batch,
@@ -262,7 +268,7 @@ async def decide_approval(
     except asyncio.CancelledError:
         await asyncio.shield(event_bus.emit(run_id, {
             "type": "run_cancelled",
-            "agent": DecisionAgent.name,
+            "agent": decision_agent.name,
             "task": "Decision continuation bị dừng",
             "status": "cancelled",
             "data": {"approval_id": approval_id},
@@ -271,7 +277,7 @@ async def decide_approval(
     except Exception as exc:
         await event_bus.emit(run_id, {
             "type": "decision_update_rejected",
-            "agent": DecisionAgent.name,
+            "agent": decision_agent.name,
             "task": "Từ chối commit continuation output",
             "status": "error",
             "data": {
@@ -286,6 +292,21 @@ async def decide_approval(
         if event_bus.get_snapshot(run_id) is not None:
             log_path = event_bus.persist_snapshot(run_id)
             print(f"Agent log saved to: {log_path}")
+        if "new_batch" in locals():
+            try:
+                from app.tools.writeLogs import persist_agent_stage_log
+
+                await asyncio.to_thread(
+                    persist_agent_stage_log,
+                    run_id,
+                    "decision",
+                    new_batch,
+                )
+            except Exception as exc:
+                print(
+                    "Could not persist DecisionLogs: "
+                    f"{type(exc).__name__}: {exc}"
+                )
 
 
 def _parse_bool(value: str) -> bool:
@@ -319,7 +340,7 @@ precheck_note=null. Không hỏi thêm thông tin trong test này.
     print("\nINITIAL DECISION BATCH:")
     print(
         json.dumps(
-            asdict(result.final_output),
+            result.final_output.model_dump(mode="json"),
             ensure_ascii=False,
             indent=2,
             default=str,
@@ -356,7 +377,14 @@ async def main() -> None:
         )
         return
 
-    run_id, approval_id, decision = sys.argv[1], sys.argv[2], sys.argv[3]
+    try:
+        run_id = int(sys.argv[1])
+        if run_id <= 0:
+            raise ValueError
+    except ValueError:
+        print("run_id must be a positive bigint session id")
+        return
+    approval_id, decision = sys.argv[2], sys.argv[3]
     approved = _parse_bool(decision)
     try:
         state = await get_approval_state(run_id)

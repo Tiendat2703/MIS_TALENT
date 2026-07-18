@@ -34,11 +34,13 @@ class AgentEventBus:
         self.snapshots: dict[str, dict[str, Any]] = {}
         self.log_dir = Path(log_dir)
 
-    def next_seq(self, run_id: str) -> int:
+    def next_seq(self, run_id: str | int) -> int:
+        run_id = str(run_id)
         self.seq_map[run_id] += 1
         return self.seq_map[run_id]
 
-    async def emit(self, run_id: str, payload: dict[str, Any]) -> None:
+    async def emit(self, run_id: str | int, payload: dict[str, Any]) -> None:
+        run_id = str(run_id)
         if run_id not in self.snapshots:
             self.restore_snapshot(run_id)
 
@@ -104,8 +106,9 @@ class AgentEventBus:
         for queue in self.subscribers[run_id]:
             await queue.put(event)
 
-    def restore_snapshot(self, run_id: str) -> None:
+    def restore_snapshot(self, run_id: str | int) -> None:
         """Continue an existing log when a paused run resumes in a new process."""
+        run_id = str(run_id)
         log_path = self.log_dir / f"{run_id}.json"
         if not log_path.exists():
             return
@@ -123,7 +126,8 @@ class AgentEventBus:
             default=0,
         )
 
-    def persist_snapshot(self, run_id: str) -> Path:
+    def persist_snapshot(self, run_id: str | int) -> Path:
+        run_id = str(run_id)
         snapshot = self.snapshots.get(run_id)
         if snapshot is None:
             raise ValueError(f"No agent log found for run_id={run_id}")
@@ -138,16 +142,18 @@ class AgentEventBus:
         temporary_path.replace(log_path)
         return log_path
 
-    def subscribe(self, run_id: str) -> asyncio.Queue:
+    def subscribe(self, run_id: str | int) -> asyncio.Queue:
+        run_id = str(run_id)
         queue = asyncio.Queue()
         self.subscribers[run_id].append(queue)
         return queue
 
-    def unsubscribe(self, run_id: str, queue: asyncio.Queue) -> None:
+    def unsubscribe(self, run_id: str | int, queue: asyncio.Queue) -> None:
+        run_id = str(run_id)
         if queue in self.subscribers[run_id]:
             self.subscribers[run_id].remove(queue)
 
-    def get_snapshot(self, run_id: str) -> dict[str, Any] | None:
-        return self.snapshots.get(run_id)
+    def get_snapshot(self, run_id: str | int) -> dict[str, Any] | None:
+        return self.snapshots.get(str(run_id))
 
 event_bus = AgentEventBus()

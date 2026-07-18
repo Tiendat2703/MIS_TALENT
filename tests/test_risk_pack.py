@@ -49,6 +49,7 @@ def _finance_pack(**overrides) -> FinanceFeaturePack:
         company_id="OPC-001",
         generated_at=datetime.now(UTC),
         source_record_ids=["CON-001"],
+        handoff_summary="Deterministic finance handoff for tests.",
     )
     base.update(overrides)
     return FinanceFeaturePack(**base)

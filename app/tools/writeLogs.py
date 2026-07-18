@@ -3,9 +3,10 @@ import os
 from dataclasses import asdict, is_dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from agents import function_tool
+from pydantic import BaseModel
 from psycopg2 import sql
 from psycopg2.extras import Json
 
@@ -44,6 +45,8 @@ def _json_default(value: Any) -> Any:
         return value.value
     if isinstance(value, Path):
         return str(value)
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
     return str(value)
 
 
@@ -53,11 +56,15 @@ def _json_safe(value: Any) -> Any:
     )
 
 
-def build_decision_log_payload(run_id: str, response: Any) -> dict[str, Any]:
-    """Combine the Decision response with hook events captured before this write."""
-    snapshot = event_bus.get_snapshot(run_id)
+def build_agent_log_payload(
+    session_id: int,
+    stage: Literal["finance", "risk", "decision", "validator"],
+    response: Any,
+) -> dict[str, Any]:
+    """Build one stage-owned log from real hook events and its structured output."""
+    snapshot = event_bus.get_snapshot(session_id)
     if snapshot is None:
-        raise ValueError(f"No hook log snapshot found for run_id={run_id}")
+        raise ValueError(f"No hook log snapshot found for session_id={session_id}")
 
     normalized_response = _normalize_log_value(response)
     if (
@@ -67,12 +74,33 @@ def build_decision_log_payload(run_id: str, response: Any) -> dict[str, Any]:
     ):
         normalized_response = normalized_response["response"]
 
+    agent_name = {
+        "finance": "Finance_Agent",
+        "risk": "Risk_Agent",
+        "decision": "Decision_Agent",
+        "validator": "Validator_Agent",
+    }[stage]
+    stage_events = [
+        event
+        for event in snapshot.get("events", [])
+        if event.get("agent") == agent_name
+        or event.get("target_agent") == agent_name
+    ]
     return {
-        "run_id": run_id,
-        "capture_stage": "write_logs_started",
-        "agent_log": _json_safe(snapshot),
+        "session_id": session_id,
+        "stage": stage,
+        "agent_log": {
+            "started_at": snapshot.get("started_at"),
+            "updated_at": snapshot.get("updated_at"),
+            "events": _json_safe(stage_events),
+        },
         "response": _json_safe(normalized_response),
     }
+
+
+def build_decision_log_payload(run_id: int, response: Any) -> dict[str, Any]:
+    """Backward-compatible alias for callers that persist Decision logs."""
+    return build_agent_log_payload(run_id, "decision", response)
 
 
 def _to_db_value(value: Any) -> Any:
@@ -88,15 +116,20 @@ def _get_table_name() -> str:
     return table_name
 
 
-def _normalize_id(id: str) -> str:
-    normalized_id = id.strip()
-    if not normalized_id:
-        raise ValueError("id must not be empty")
+def _normalize_id(id: int | str) -> int:
+    if isinstance(id, bool):
+        raise ValueError("id must be a positive bigint")
+    try:
+        normalized_id = int(str(id).strip())
+    except (TypeError, ValueError) as exc:
+        raise ValueError("id must be a positive bigint") from exc
+    if normalized_id <= 0:
+        raise ValueError("id must be a positive bigint")
     return normalized_id
 
 
 def upsert_agent_logs(
-    id: str,
+    id: int | str,
     financelogs: Any,
     risklogs: Any,
     decisionlog: Any,
@@ -147,13 +180,13 @@ def upsert_agent_logs(
 
     return {
         "status": "upserted",
-        "id": str(rows[0]["id"]),
+        "id": int(rows[0]["id"]),
         "table": table_name,
     }
 
 
 def upsert_agent_logs_partial(
-    id: str,
+    id: int | str,
     *,
     financelogs: Any = None,
     risklogs: Any = None,
@@ -217,7 +250,7 @@ def upsert_agent_logs_partial(
 
     return {
         "status": "upserted",
-        "id": str(rows[0]["id"]),
+        "id": int(rows[0]["id"]),
         "columns": [DB_LOG_COLUMNS[key] for key in supplied_columns],
         "table": table_name,
     }
@@ -225,7 +258,7 @@ def upsert_agent_logs_partial(
 
 @function_tool
 def write_logs(
-    id: str,
+    id: int,
     financelogs: str | None,
     risklogs: str | None,
     decisionlog: str | None,
@@ -249,8 +282,26 @@ def write_logs(
     )
 
 
+def persist_agent_stage_log(
+    session_id: int,
+    stage: Literal["finance", "risk", "decision", "validator"],
+    response: Any,
+) -> dict[str, Any]:
+    """Application-owned persistence path; it never depends on an LLM tool call."""
+    payload = build_agent_log_payload(session_id, stage, response)
+    keyword = {
+        "finance": "financelogs",
+        "risk": "risklogs",
+        "decision": "decisionlog",
+        "validator": "validatorlogs",
+    }[stage]
+    return upsert_agent_logs_partial(session_id, **{keyword: payload})
+
+
 __all__ = [
+    "build_agent_log_payload",
     "build_decision_log_payload",
+    "persist_agent_stage_log",
     "upsert_agent_logs",
     "upsert_agent_logs_partial",
     "write_logs",

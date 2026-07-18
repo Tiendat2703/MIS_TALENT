@@ -1,12 +1,12 @@
-"""Public handoff contracts for the Risk & Compliance Agent."""
+"""Strict public contracts shared by Finance, Risk, and Decision agents."""
 
 from __future__ import annotations
 
 from datetime import date, datetime
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class StrictModel(BaseModel):
@@ -21,7 +21,7 @@ class Severity(str, Enum):
 
 
 class FinanceFeaturePack(StrictModel):
-    """Handoff from Data & Finance Agent to Risk Agent."""
+    """Contract-scoped handoff persisted in ``public.context.finance_pack``."""
 
     case_id: str
     contract_id: str
@@ -32,10 +32,47 @@ class FinanceFeaturePack(StrictModel):
     cash_reserve_minimum: float | None = None
     gross_margin: float | None = None
     document_sent_to_partner: bool | None = None
+    contract_value: float | None = None
     requested_amount: float | None = None
     confidence_score: float | None = Field(default=None, ge=0, le=1)
     delivery_delay_days: int | None = Field(default=None, ge=0)
+    funding_need_type: Literal[
+        "PERFORMANCE_BOND",
+        "TRADE_FINANCE",
+        "WORKING_CAPITAL",
+        "RECEIVABLE_FINANCING",
+    ] | None = None
+    tenor: str | None = None
+    customer_type: str | None = None
+    supplier_docs: list[str] = Field(default_factory=list)
+    receivable_list: list[str] = Field(default_factory=list)
     source_record_ids: list[str] = Field(default_factory=list)
+    handoff_summary: str
+    status: Literal["COMPLETE", "AWAITING_INPUT"] = "COMPLETE"
+    finance_details: dict[str, Any] = Field(default_factory=dict)
+
+
+class FinanceBatchPack(StrictModel):
+    """All contract-scoped Finance packs produced in one pipeline run."""
+
+    contract_ids: list[str] = Field(min_length=1)
+    packs: list[FinanceFeaturePack] = Field(min_length=1)
+    portfolio_analysis: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_contracts(self) -> "FinanceBatchPack":
+        observed = [pack.contract_id for pack in self.packs]
+        if observed != self.contract_ids:
+            raise ValueError("FinanceBatchPack packs must match contract_ids in order")
+        if len(observed) != len(set(observed)):
+            raise ValueError("FinanceBatchPack contains duplicate contracts")
+        return self
+
+
+class PipelineHandoff(StrictModel):
+    """The only payload allowed to cross an SDK handoff boundary."""
+
+    session_id: int = Field(gt=0)
 
 
 class RiskAlert(StrictModel):
@@ -140,18 +177,38 @@ class RiskPack(StrictModel):
     human_approval_required: bool
     masked_data: MaskedDataSummary | None = None
     summary: RiskPackSummary | None = None
+    handoff_summary: str
     decision_made_by_risk_agent: Literal[False] = False
+
+
+class RiskBatchPack(StrictModel):
+    """Risk results for every Finance case in the same pipeline run."""
+
+    contract_ids: list[str] = Field(min_length=1)
+    packs: list[RiskPack] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_contracts(self) -> "RiskBatchPack":
+        observed = [pack.contract_id for pack in self.packs]
+        if observed != self.contract_ids:
+            raise ValueError("RiskBatchPack packs must match contract_ids in order")
+        if len(observed) != len(set(observed)):
+            raise ValueError("RiskBatchPack contains duplicate contracts")
+        return self
 
 
 __all__ = [
     "FinanceFeaturePack",
+    "FinanceBatchPack",
     "MaskedDataSummary",
     "MaskedField",
+    "PipelineHandoff",
     "ProposedAlert",
     "RiskAlert",
     "RiskAlertMatch",
     "RiskFinding",
     "RiskPack",
+    "RiskBatchPack",
     "RiskPackSummary",
     "RuleEvaluation",
     "Severity",

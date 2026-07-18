@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from agents import Agent, RunContextWrapper
@@ -9,9 +9,21 @@ from app.Agent.bus import event_bus
 
 @dataclass
 class AppContext:
+    """Local dependency container shared by every agent in one pipeline run.
+
+    ``run_id`` is the bigint ``public.context.session_id``.  SDK handoffs only
+    transmit that id; the mutable dictionaries below stay local to the Runner
+    and are never used as the inter-agent source of truth.
+    """
+
     document_id: str
     original_input: str
-    run_id: str
+    run_id: int
+    contract_id: str | None = None
+    contract_ids: list[str] = field(default_factory=list)
+    reference_date: str | None = None
+    scenario: str | None = None
+    finance_store: dict[str, Any] = field(default_factory=dict)
     brain_request_payload: dict[str, Any] | None = None
     continuation_approval_id: str | None = None
 
@@ -23,9 +35,11 @@ TOOL_LABELS = {
     "calculate_exponential_moving_average": "Calculate EMA",
     "place_market_order": "Place market order",
     "place_limit_order": "Place limit order",
-    "save_log": "Save transaction log",
     "build_risk_pack": "Analyze risks and build Risk Pack",
     "save_risk_pack": "Save Risk Pack to workflow context",
+    "prepare_finance_handoff": "Persist Finance Batch Pack",
+    "process_risk_context": "Build and persist Risk Batch Pack",
+    "load_decision_context": "Load Finance and Risk Batch Packs",
 }
 
 
@@ -34,7 +48,7 @@ class CustomAgentHooks(AgentHooks):
         self.display_name = display_name
 
     async def _emit(self, context: RunContextWrapper, payload: dict[str, Any]) -> None:
-        run_id = context.context.run_id
+        run_id = str(context.context.run_id)
         print(
             f"[RUN {run_id}] "
             f"type={payload.get('type')} | "

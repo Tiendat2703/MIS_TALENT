@@ -297,6 +297,7 @@ def test_contract_risk_pack_matches_and_masks_transaction_alert(
         generated_at=datetime.now(UTC),
         transaction_risk_score=90,
         source_record_ids=[transaction.txn_id],
+        handoff_summary="Transaction anomaly test finance handoff.",
     )
     monkeypatch.setattr(BuildRiskReport, "get_risk_rules_impl", lambda: [rule])
     monkeypatch.setattr(BuildRiskReport, "get_alerts_impl", lambda: [alert])

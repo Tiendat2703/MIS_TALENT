@@ -18,13 +18,15 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import uuid
-from dataclasses import asdict
+import time
 from datetime import date, datetime, timezone
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from app.Agent.bus import event_bus
-from app.schema.financeAgent import FinanceFeaturePack, FinanceSynthesis
+from app.Agent.prompt_loader import load_prompt
+from app.schema.financeAgent import FinanceAnalysisPack, FinanceSynthesis
 from app.tools.FinanceAgent.data_request import apply_form_submission, build_data_request_form
 from app.tools.FinanceAgent.finance_data import load_all
 from app.tools.FinanceAgent.invoices import classify_invoices
@@ -48,44 +50,49 @@ _ANALYSIS_REQUEST = (
 )
 
 
-def load_prompt(path: Path = PROMPT_PATH) -> str:
-    prompt = path.read_text(encoding="utf-8").strip()
-    if not prompt:
-        raise RuntimeError(f"Prompt rỗng: {path}")
-    return prompt
-
-
 # Agent (LLM + tools) tạo trễ để module import được cả khi chưa cài `agents`.
 _AGENT = None
+
+
+def build_finance_agent(*, handoffs: Sequence[Any] = ()):
+    from agents import Agent, ModelSettings, OpenAIChatCompletionsModel
+    from agents.extensions.handoff_prompt import prompt_with_handoff_instructions
+    from app.Agent.config import OPENAI_MODEL, get_openai_client
+    from app.Agent.hooks import CustomAgentHooks
+    from app.tools.FinanceAgent.tools import FINANCE_TOOLS
+    from app.tools.pipeline import prepare_finance_handoff
+
+    prompt = load_prompt(PROMPT_PATH)
+    if handoffs:
+        prompt = prompt_with_handoff_instructions(prompt)
+    return Agent(
+        name="Finance_Agent",
+        model=OpenAIChatCompletionsModel(
+            model=OPENAI_MODEL,
+            openai_client=get_openai_client(),
+        ),
+        instructions=prompt,
+        output_type=FinanceSynthesis,
+        tools=[*FINANCE_TOOLS, *([prepare_finance_handoff] if handoffs else [])],
+        handoffs=list(handoffs),
+        model_settings=ModelSettings(parallel_tool_calls=True),
+        hooks=CustomAgentHooks("Finance_Agent"),
+    )
 
 
 def _get_agent():
     global _AGENT
     if _AGENT is None:
-        from agents import Agent, ModelSettings, OpenAIChatCompletionsModel
-        from app.Agent.config import OPENAI_CLIENT, OPENAI_MODEL
-        from app.Agent.hooks import CustomAgentHooks
-        from app.tools.FinanceAgent.tools import FINANCE_TOOLS
-
-        _AGENT = Agent(
-            name="Finance_Agent",
-            model=OpenAIChatCompletionsModel(model=OPENAI_MODEL, openai_client=OPENAI_CLIENT),
-            instructions=load_prompt(),
-            output_type=FinanceSynthesis,
-            tools=FINANCE_TOOLS,
-            # Cho phép LLM gọi nhiều tool trong một lượt -> SDK chạy chúng song song.
-            model_settings=ModelSettings(parallel_tool_calls=True),
-            hooks=CustomAgentHooks("FinanceAgent"),
-        )
+        _AGENT = build_finance_agent()
     return _AGENT
 
 
 # ---------- helpers ----------
-async def _emit(run_id: str, payload: dict) -> None:
+async def _emit(run_id: str | int, payload: dict) -> None:
     await event_bus.emit(run_id, payload)
 
 
-async def _step(run_id: str, step: int, title: str, status: str, summary: str | None = None) -> None:
+async def _step(run_id: str | int, step: int, title: str, status: str, summary: str | None = None) -> None:
     payload = {
         "type": "finance_step",
         "agent": "Finance_Agent",
@@ -122,12 +129,12 @@ def _ensure_results(store: dict, today: date) -> dict:
 
 def _facts_from_store(store: dict) -> dict:
     return {
-        "validation": asdict(store["validation"]),
-        "reconciliation": asdict(store["reconciliation"]),
-        "liquidity_brief": asdict(store["liquidity"]),
-        "invoice_classification": asdict(store["invoices"]),
-        "margin_analysis": asdict(store["margin"]),
-        "missing_data_request": [asdict(m) for m in store["missing"]],
+        "validation": store["validation"].model_dump(mode="json"),
+        "reconciliation": store["reconciliation"].model_dump(mode="json"),
+        "liquidity_brief": store["liquidity"].model_dump(mode="json"),
+        "invoice_classification": store["invoices"].model_dump(mode="json"),
+        "margin_analysis": store["margin"].model_dump(mode="json"),
+        "missing_data_request": [m.model_dump(mode="json") for m in store["missing"]],
     }
 
 
@@ -152,7 +159,7 @@ def _fallback_synthesis(facts: dict) -> FinanceSynthesis:
     return FinanceSynthesis(handoff_summary=summary)
 
 
-async def _run_steps_deterministic(run_id: str, store: dict, today: date) -> None:
+async def _run_steps_deterministic(run_id: str | int, store: dict, today: date) -> None:
     """Fallback: tự chạy 6 bước có bắn event (khi không dùng LLM)."""
     await _step(run_id, 1, "Bước 1/6: Load & validate dữ liệu", "start")
     data = store.get("data") or load_all()  # dùng data đã preload (đã áp scenario/submission)
@@ -186,8 +193,16 @@ async def _run_steps_deterministic(run_id: str, store: dict, today: date) -> Non
     await _step(run_id, 6, "Bước 6/6: Missing data", "done", f"{len(store['missing'])} mục cần bổ sung")
 
 
-def _assemble(run_id: str, store: dict, synthesis: FinanceSynthesis, source: str,
-              run_log: list[dict], form, status: str, submission_report) -> FinanceFeaturePack:
+def assemble_finance_analysis(
+    run_id: str | int,
+    store: dict,
+    synthesis: FinanceSynthesis,
+    source: str,
+    run_log: list[dict],
+    form,
+    status: str,
+    submission_report,
+) -> FinanceAnalysisPack:
     liquidity = store["liquidity"]
     margin = store["margin"]
     reconciliation = store["reconciliation"]
@@ -223,7 +238,7 @@ def _assemble(run_id: str, store: dict, synthesis: FinanceSynthesis, source: str
     }
     metadata = {
         "agent": "Finance Agent",
-        "analysis_id": f"FIN-{run_id[:8]}",
+        "analysis_id": f"FIN-{run_id}",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "scope": "portfolio",
         "data_source": store["data"]["source"],
@@ -233,7 +248,7 @@ def _assemble(run_id: str, store: dict, synthesis: FinanceSynthesis, source: str
         "output_for": "Risk Agent",
         "final_decision_allowed": False,
     }
-    return FinanceFeaturePack(
+    return FinanceAnalysisPack(
         metadata=metadata,
         liquidity_brief=liquidity,
         invoice_classification=store["invoices"],
@@ -251,18 +266,32 @@ def _assemble(run_id: str, store: dict, synthesis: FinanceSynthesis, source: str
 
 # ---------- orchestrator ----------
 async def run_finance_agent(
-    run_id: str | None = None,
+    run_id: int | None = None,
+    contract_id: str = "CON-004",
     reference_date: date | None = None,
     scenario: str | None = None,
     submission: dict | None = None,
-) -> FinanceFeaturePack:
+    persist_context: bool = True,
+) -> FinanceAnalysisPack:
     """Chạy Finance Agent.
 
     scenario: đường dẫn tệp cấu hình tình huống (vd ca thiếu dữ liệu).
     submission: {field_id: value} người dùng vừa điền vào form yêu cầu bổ sung —
     agent áp các giá trị này rồi chạy tiếp; trường không điền vẫn để thiếu.
     """
-    run_id = run_id or str(uuid.uuid4())
+    if persist_context:
+        from app.database.context_store import (
+            allocate_session_id,
+            validate_pipeline_schema,
+        )
+
+        validate_pipeline_schema()
+        if run_id is None:
+            run_id = allocate_session_id()
+    elif run_id is None:
+        # Local-only analysis still uses a numeric identifier, but it is never
+        # presented as a persisted pipeline session.
+        run_id = time.time_ns()
     today = _resolve_reference_date(reference_date)
     run_log: list[dict] = []
 
@@ -290,11 +319,20 @@ async def run_finance_agent(
     if not skip:
         try:
             from agents import Runner
-            from app.tools.FinanceAgent.tools import FinanceRunContext
+            from app.Agent.hooks import AppContext
 
-            ctx = FinanceRunContext(run_id=run_id, reference_date=str(today), store=store)
+            ctx = AppContext(
+                document_id=contract_id,
+                original_input=_ANALYSIS_REQUEST,
+                run_id=run_id,
+                contract_id=contract_id,
+                contract_ids=[contract_id],
+                reference_date=str(today),
+                scenario=scenario,
+                finance_store=store,
+            )
             result = await Runner.run(_get_agent(), input=_ANALYSIS_REQUEST, context=ctx, max_turns=15)
-            store = ctx.store
+            store = ctx.finance_store
             synthesis = result.final_output
             source = "llm"
             run_log.append({"mode": "agentic", "tools_called": sorted(k for k in store if k not in ("data",))})
@@ -318,9 +356,31 @@ async def run_finance_agent(
         await _emit(run_id, {"type": "data_request_required", "agent": "Finance_Agent",
                              "task": f"Cần bổ sung {len(form.fields)} trường dữ liệu còn thiếu",
                              "status": "awaiting_input",
-                             "data": asdict(form)})
+                             "data": form.model_dump(mode="json")})
 
-    pack = _assemble(run_id, store, synthesis, source, run_log, form, status, submission_report)
+    pack = assemble_finance_analysis(
+        run_id,
+        store,
+        synthesis,
+        source,
+        run_log,
+        form,
+        status,
+        submission_report,
+    )
+
+    if persist_context:
+        from app.database.context_store import insert_finance_pack
+        from app.schema.handoff_packs import FinanceBatchPack
+        from app.service.finance_handoff import build_finance_handoff
+
+        handoff_pack = build_finance_handoff(contract_id, pack, store["data"])
+        persisted_finance_pack = FinanceBatchPack(
+            contract_ids=[contract_id],
+            packs=[handoff_pack],
+            portfolio_analysis=pack.model_dump(mode="json"),
+        )
+        insert_finance_pack(run_id, persisted_finance_pack)
 
     await _emit(run_id, {"type": "run_finished", "agent": "Finance_Agent",
                          "task": "Finance Agent hoàn tất", "status": "done",
@@ -329,6 +389,13 @@ async def run_finance_agent(
                                   "funding_need": store["liquidity"].funding_need,
                                   "margin_pct": store["margin"].portfolio_margin_pct,
                                   "orchestration": pack.metadata["orchestration"]}})
+    if persist_context:
+        try:
+            from app.tools.writeLogs import persist_agent_stage_log
+
+            persist_agent_stage_log(run_id, "finance", persisted_finance_pack)
+        except Exception as exc:
+            print(f"[finance] Could not persist FinanceLogs: {type(exc).__name__}: {exc}")
     return pack
 
 
@@ -336,7 +403,7 @@ if __name__ == "__main__":
     import sys
 
     # Cờ:
-    #   --full     : in nguyên FinanceFeaturePack (JSON) thay vì bản tóm tắt.
+    #   --full     : in nguyên FinanceAnalysisPack (JSON) thay vì bản tóm tắt.
     #   --missing  : chạy demo tình huống THIẾU dữ liệu + điền form (mặc định KHÔNG chạy).
     FULL = "--full" in sys.argv
     MISSING = "--missing" in sys.argv
@@ -344,7 +411,7 @@ if __name__ == "__main__":
                    / "tools" / "FinanceAgent" / "scenarios" / "missing_data_demo.json")
 
     def _dump_pack(pack) -> None:
-        print(json.dumps(asdict(pack), ensure_ascii=False, indent=2, default=str))
+        print(pack.model_dump_json(indent=2))
 
     def _print_summary(pack) -> None:
         print("status:", pack.status)
@@ -357,15 +424,18 @@ if __name__ == "__main__":
         print("handoff_summary:", pack.handoff_summary)
 
     async def run_normal() -> None:
-        pack = await run_finance_agent(run_id="finance-run", reference_date=date(2026, 7, 17))
+        pack = await run_finance_agent(reference_date=date(2026, 7, 17))
         (_dump_pack if FULL else _print_summary)(pack)
 
     async def run_missing_demo() -> None:
         print("=" * 70)
         print("PHA 1 — Tình huống THIẾU dữ liệu (đọc từ tệp cấu hình)")
         print("=" * 70)
-        pack1 = await run_finance_agent(run_id="demo-missing-01",
-                                        reference_date=date(2026, 7, 17), scenario=SCENARIO)
+        pack1 = await run_finance_agent(
+            reference_date=date(2026, 7, 17),
+            scenario=SCENARIO,
+            persist_context=False,
+        )
         if FULL:
             _dump_pack(pack1)
         else:
@@ -386,9 +456,12 @@ if __name__ == "__main__":
         print("PHA 2 — Người dùng điền form, agent nạp và chạy tiếp")
         print("=" * 70)
         print("Người dùng điền:", submission)
-        pack2 = await run_finance_agent(run_id="demo-supplemented-01",
-                                        reference_date=date(2026, 7, 17),
-                                        scenario=SCENARIO, submission=submission)
+        pack2 = await run_finance_agent(
+            reference_date=date(2026, 7, 17),
+            scenario=SCENARIO,
+            submission=submission,
+            persist_context=False,
+        )
         if FULL:
             _dump_pack(pack2)
         else:
@@ -396,3 +469,10 @@ if __name__ == "__main__":
             _print_summary(pack2)
 
     asyncio.run(run_missing_demo() if MISSING else run_normal())
+
+
+__all__ = [
+    "assemble_finance_analysis",
+    "build_finance_agent",
+    "run_finance_agent",
+]

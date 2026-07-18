@@ -1,10 +1,19 @@
-from dataclasses import dataclass, field
+"""Strict structured output for the Decision Agent."""
+
+from __future__ import annotations
+
 from enum import Enum
+
+from pydantic import Field, model_validator
+
+from app.schema.handoff_packs import StrictModel
+
 
 class RiskLevel(str, Enum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+    CRITICAL = "critical"
 
 
 class DecisionStatus(str, Enum):
@@ -13,55 +22,64 @@ class DecisionStatus(str, Enum):
     REJECT = "reject"
 
 
-@dataclass(frozen=True, slots=True)
-class DecisionCardOutput:
+class RecommendedOption(str, Enum):
+    APPROVE = "APPROVE"
+    APPROVE_WITH_CONDITION = "APPROVE_WITH_CONDITION"
+    REJECT_MISSING_EVIDENCE = "REJECT_MISSING_EVIDENCE"
+    NO_SUITABLE_PRODUCT = "NO_SUITABLE_PRODUCT"
+
+
+class DecisionCardOutput(StrictModel):
+    """Decision-only projection.
+
+    Raw warnings and missing evidence remain authoritative in FinanceFeaturePack
+    and RiskPack.  They are intentionally not copied into this LLM-produced
+    card, which prevents stale or hallucinated duplicates.
     """
-    Kết quả cuối cùng của Decision & Partner Agent, đúng format đề bài yêu cầu:
-    Decision Card = phương án + ba lý do + một điều kiện bảo vệ.
-    """
-    contract_id: str
+
+    contract_id: str = Field(min_length=1)
     accept_opportunity: bool
-    recommended_option: str
-    protective_condition: str
-    capital_need: float
+    recommended_option: RecommendedOption
+    protective_condition: str = Field(min_length=1)
+    capital_need: float = Field(ge=0)
     risk_level: RiskLevel
     decision_status: DecisionStatus
-    reasons: list[str] = field(default_factory=list)
-    risk_warnings: list[str] = field(default_factory=list)
-    missing_information: list[str] = field(default_factory=list)
-    eligible_score: float | None = None
+    reasons: list[str] = Field(min_length=3, max_length=3)
+    eligible_score: float | None = Field(default=None, ge=0, le=100)
     precheck_note: str | None = None
     requires_founder_confirmation: bool = True
     approval_status: bool = False
     is_preliminary: bool = True
 
-    def __post_init__(self) -> None:
+    @model_validator(mode="after")
+    def validate_precheck_state(self) -> "DecisionCardOutput":
         if self.approval_status:
-            if self.eligible_score is None or self.precheck_note is None:
+            if self.eligible_score is None or not (self.precheck_note or "").strip():
                 raise ValueError(
                     "Approved precheck output requires eligible_score and precheck_note"
                 )
         elif self.eligible_score is not None or self.precheck_note is not None:
             raise ValueError(
-                "eligible_score and precheck_note must be None when approval_status is False"
+                "eligible_score and precheck_note must be null when approval_status is false"
             )
+        return self
 
 
-@dataclass(frozen=True, slots=True)
-class DecisionBatchOutput:
-    """Decision Cards for every contract submitted in one agent run."""
+class DecisionBatchOutput(StrictModel):
+    decisions: list[DecisionCardOutput] = Field(min_length=1)
 
-    decisions: list[DecisionCardOutput]
+    @model_validator(mode="after")
+    def validate_unique_contracts(self) -> "DecisionBatchOutput":
+        contract_ids = [item.contract_id for item in self.decisions]
+        if len(contract_ids) != len(set(contract_ids)):
+            raise ValueError("DecisionBatchOutput contains duplicate contract_id values")
+        return self
 
 
-
-@dataclass(frozen=True, slots=True)
-class DecisionAgentHandoff:
-    """Validated payload passed from the Decision Agent to another agent."""
-    user_request: str
-    product_type: str
-    recommended_product: str | None
-    eligible: bool
-    score: int
-    note: str
-    missing_information: list[str] = field(default_factory=list)
+__all__ = [
+    "DecisionBatchOutput",
+    "DecisionCardOutput",
+    "DecisionStatus",
+    "RecommendedOption",
+    "RiskLevel",
+]

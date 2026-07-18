@@ -134,7 +134,7 @@ function WorkflowBoard({
   onSelect: (id: AgentId) => void;
 }) {
   return (
-    <div className="workflow-circuit relative min-h-[360px] overflow-hidden rounded-[10px] border border-emerald-400/20 bg-black shadow-2xl shadow-black/60 ring-1 ring-white/10 lg:min-h-[430px] xl:min-h-[480px]">
+    <div className="workflow-circuit relative h-[360px] self-start overflow-hidden rounded-[10px] border border-emerald-400/20 bg-black shadow-2xl shadow-black/60 ring-1 ring-white/10 lg:h-[430px] xl:h-[480px]">
       {/* Circuit lines are calibrated for the 2-col desktop layout only — hide below lg to avoid misalignment */}
       <svg
         className="pointer-events-none absolute inset-0 hidden h-full w-full lg:block"
@@ -167,7 +167,7 @@ function WorkflowBoard({
         <g fill="#5e9fe8"><circle cx="260" cy="225" r="3" /><circle cx="330" cy="225" r="2.5" /></g>
       </svg>
 
-      <div className="relative grid min-h-[360px] grid-cols-1 place-items-center gap-4 px-5 py-8 sm:grid-cols-2 sm:content-between sm:justify-items-center sm:gap-x-24 sm:gap-y-8 sm:px-[9%] lg:min-h-[430px] lg:py-10 xl:min-h-[480px] xl:py-12">
+      <div className="relative grid h-full grid-cols-1 place-items-center gap-4 px-5 py-8 sm:grid-cols-2 sm:content-between sm:justify-items-center sm:gap-x-24 sm:gap-y-8 sm:px-[9%] lg:py-10 xl:py-12">
         <AgentCard id="strategy" selected={selected === "strategy"} onSelect={() => onSelect("strategy")} />
         <AgentCard id="market" selected={selected === "market"} onSelect={() => onSelect("market")} />
         <AgentCard id="risk" selected={selected === "risk"} onSelect={() => onSelect("risk")} />
@@ -187,7 +187,7 @@ export function AgentWorkspace() {
   const selectedColor = ACCENT_COLORS[selectedAgent.accent];
 
   return (
-    <div className="relative min-h-[100dvh] overflow-x-hidden bg-black text-zinc-50">
+    <div className="relative min-h-[100dvh] overflow-x-hidden bg-[var(--fin-bg)] text-[var(--fin-text)]">
       <style jsx global>{`
         .workflow-circuit {
           background-image:
@@ -200,7 +200,7 @@ export function AgentWorkspace() {
       <Bar />
 
       <div className="w-full pt-24 sm:pt-28">
-        <div className="min-h-[100dvh] w-full bg-black/80">
+        <div className="min-h-[100dvh] w-full bg-[var(--fin-bg)]/80">
           {/* <header className="flex h-14 items-center justify-between border-b border-white/10 bg-[#0c1119]/95 px-4 sm:px-6 lg:px-8 xl:px-10">
             <div className="flex min-w-0 items-center gap-5 sm:gap-8">
               <div className="flex shrink-0 items-center gap-1.5">
@@ -241,16 +241,16 @@ export function AgentWorkspace() {
               </p>
             </div> */}
 
-            <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[minmax(0,1fr)_340px]">
+            <section className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[minmax(0,1fr)_340px]">
               <WorkflowBoard selected={selected} onSelect={setSelected} />
 
-              <aside className="flex min-h-[360px] flex-col overflow-hidden rounded-[10px] border border-emerald-400/20 bg-black shadow-2xl shadow-black/60 ring-1 ring-white/10 lg:min-h-[430px] xl:min-h-[480px]">
+              <aside className="flex h-[360px] self-start flex-col overflow-hidden rounded-[10px] border border-emerald-400/20 bg-[var(--fin-surface)] shadow-2xl shadow-black/60 ring-1 ring-white/10 lg:h-[430px] xl:h-[480px]">
                 <div className="border-b border-white/10 px-5 py-4">
                   <h2 className="text-base font-semibold leading-none text-white xl:text-lg">Task Summary</h2>
                   <p className="mt-1.5 text-xs text-zinc-400">What&apos;s happening right now?</p>
                 </div>
                 <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto]">
-                  <div className="overflow-y-auto px-5 py-5 text-center xl:px-6 xl:py-6">
+                  <div className="fin-scrollbar overflow-y-auto px-5 py-5 text-center xl:px-6 xl:py-6">
                     <span
                       className="mx-auto flex size-12 items-center justify-center rounded-full text-[#0d1a14] xl:size-14"
                       style={{ backgroundColor: selectedColor, boxShadow: `0 0 24px ${selectedColor}44` }}
@@ -283,7 +283,7 @@ export function AgentWorkspace() {
               </aside>
             </section>
 
-            <section className="mt-4 rounded-[10px] border border-emerald-400/20 bg-black p-4 shadow-2xl shadow-black/60 ring-1 ring-white/10 sm:p-5">
+            <section className="mt-4 rounded-[10px] border border-emerald-400/20 bg-[var(--fin-surface)] p-4 shadow-2xl shadow-black/60 ring-1 ring-white/10 sm:p-5">
               <h2 className="mb-4 text-lg font-semibold text-white sm:text-xl">AGENT ACTIVITY DETAILS</h2>
               <div className="space-y-3">
                 {activity.map((item, index) => {

@@ -15,11 +15,11 @@ import {
 import Bar from "@/components/ui/about/Bar";
 
 const cardClass =
-  "min-w-0 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0f1210] p-5 transition-colors duration-200 hover:border-emerald-400/25 sm:p-6";
+  "min-w-0 overflow-hidden rounded-2xl border border-[var(--fin-soft-border)] bg-[var(--fin-surface)] p-5 transition-colors duration-200 hover:border-emerald-400/25 sm:p-6";
 
 const metrics = [
-  { label: "Total project budget", value: "$15.0M", note: "Approved baseline", tone: "text-white" },
-  { label: "Total spent", value: "$9.5M", note: "63% used", tone: "text-white" },
+  { label: "Total project budget", value: "$15.0M", note: "Approved baseline", tone: "text-[var(--fin-text)]" },
+  { label: "Total spent", value: "$9.5M", note: "63% used", tone: "text-[var(--fin-text)]" },
   { label: "Remaining budget", value: "$5.5M", note: "37% available", tone: "text-emerald-300" },
   { label: "Revenue forecast", value: "$22.0M", note: "46% projected ROI", tone: "text-emerald-300" },
 ] as const;
@@ -42,7 +42,7 @@ function PanelHeading({ title, description }: { title: string; description: stri
 
 export default function DashboardPage() {
   return (
-    <main className="relative min-h-[100dvh] w-full max-w-full overflow-x-clip bg-black px-4 pb-12 pt-28 text-zinc-300 sm:px-6 lg:px-8 xl:px-10">
+    <main className="relative min-h-[100dvh] w-full max-w-full overflow-x-clip bg-[var(--fin-bg)] px-4 pb-12 pt-28 text-[var(--fin-text)] sm:px-6 lg:px-8 xl:px-10">
       <Bar
         align="right"
         title={
@@ -53,17 +53,17 @@ export default function DashboardPage() {
       />
 
       <div className="min-w-0 max-w-full">
-        <section aria-label="Financial summary" className="grid overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0b0e0c] sm:grid-cols-2 xl:grid-cols-4">
+        <section aria-label="Financial summary" className="grid overflow-hidden rounded-2xl border border-[var(--fin-soft-border)] bg-[var(--fin-surface)] sm:grid-cols-2 xl:grid-cols-4">
           {metrics.map((metric, index) => (
             <div
               key={metric.label}
               className={`min-w-0 px-5 py-5 sm:px-6 ${metricBorders[index]}`}
             >
-              <p className="text-xs font-medium text-zinc-500">{metric.label}</p>
+              <p className="text-xs font-medium text-[var(--fin-muted)]">{metric.label}</p>
               <p className={`mt-2 font-mono text-2xl font-semibold tracking-[-0.04em] sm:text-3xl ${metric.tone}`}>
                 {metric.value}
               </p>
-              <p className="mt-1 text-xs text-zinc-500">{metric.note}</p>
+              <p className="mt-1 text-xs text-[var(--fin-muted)]">{metric.note}</p>
             </div>
           ))}
         </section>

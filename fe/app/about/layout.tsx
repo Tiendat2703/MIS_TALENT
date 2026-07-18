@@ -6,7 +6,7 @@ import Bar from "@/components/ui/about/Bar";
 export default function AboutLayout({ children }: { children: ReactNode }) {
   return (
     <BackgroundPaths
-      className="min-h-[100dvh] overflow-hidden bg-black"
+      className="min-h-[100dvh] overflow-hidden bg-[var(--fin-bg)]"
       svgOptions={{ duration: 8 }}
     >
       <Bar />

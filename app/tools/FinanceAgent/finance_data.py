@@ -29,11 +29,10 @@ def _use_mock() -> bool:
     return os.getenv("FINANCE_USE_MOCK", "true").strip().lower() != "false"
 
 
-# Tên bảng DB — CẦN xác nhận lại với schema Supabase thật khi tắt mock.
-# ("order" là từ khóa SQL nên phải để trong ngoặc kép khi query.)
+# Tên bảng DB (đã đối chiếu với schema Supabase thật).
 TABLES = {
     "contracts": "contract",
-    "orders": '"order"',
+    "orders": "orders",
     "invoices": "invoice",
     "bank_txn": "bank_txn",
     "cashflow": "cashflow",

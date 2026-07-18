@@ -1,0 +1,338 @@
+{
+  "version": 2,
+  "revision": 4,
+  "run_id": "f10425c4-8275-4d61-8378-f874b5d531c4",
+  "created_at": "2026-07-18T05:13:26.861125+00:00",
+  "updated_at": "2026-07-18T05:14:00.417460+00:00",
+  "workflow_status": "review",
+  "context": {
+    "document_id": "f10425c4-8275-4d61-8378-f874b5d531c4",
+    "original_input": "Đây là toàn bộ credit decision cases cần đánh giá. Hãy xử lý độc lập từng case và trả đúng một Decision Card cho mỗi contract_id, theo đúng thứ tự đầu vào:\n[\n  {\n    \"contract_id\": \"CON-004\",\n    \"finance\": {\n      \"contract_id\": \"CON-004\",\n      \"requested_amount\": 420000000,\n      \"tenor\": \"Until contract acceptance\",\n      \"funding_need_type\": \"PERFORMANCE_BOND\",\n      \"projected_cash_inflow\": 460000000,\n      \"projected_cash_outflow\": 350000000,\n      \"expected_margin\": 0.24,\n      \"cashflow_buffer\": 40000000,\n      \"receivable_quality\": \"GOOD\",\n      \"contract_payment_schedule\": [\n        {\n          \"milestone\": \"Advance payment\",\n          \"percent\": 0.3,\n          \"due_date\": \"2026-07-10\"\n        },\n        {\n          \"milestone\": \"Delivery\",\n          \"percent\": 0.5,\n          \"due_date\": \"2026-09-01\"\n        },\n        {\n          \"milestone\": \"Acceptance\",\n          \"percent\": 0.2,\n          \"due_date\": \"2026-10-15\"\n        }\n      ]\n    },\n    \"risk\": {\n      \"contract_id\": \"CON-004\",\n      \"risk_level\": \"MEDIUM\",\n      \"blocking_risk_flags\": [],\n      \"missing_evidence\": [\n        \"cashflow_buffer_confirmation\"\n      ],\n      \"supplier_confirmation_status\": \"NOT_REQUIRED\",\n      \"receivable_aging_status\": \"CURRENT\",\n      \"fraud_flags\": [\n        {\n          \"alert_id\": \"AL-001\",\n          \"alert_date\": \"2026-07-05\",\n          \"alert_type\": \"Transaction anomaly\",\n          \"related_record\": [\n            \"TXN-006\",\n            \"TXN-007\"\n          ],\n          \"severity\": \"Critical\",\n          \"risk_score\": 90,\n          \"description\": \"Two abnormal ecommerce debits at 02:13 and 02:17\",\n          \"recommended_action\": \"Hold + founder confirmation\"\n        }\n      ],\n      \"compliance_notes\": \"Cần xác nhận thêm về giao dịch bất thường trước khi duyệt.\"\n    },\n    \"funding_need\": {\n      \"need_type\": \"PERFORMANCE_BOND\",\n      \"requested_amount\": 420000000,\n      \"tenor\": \"Until contract acceptance\",\n      \"basis\": \"Contract CON-004\"\n    }\n  },\n  {\n    \"contract_id\": \"CON-007\",\n    \"finance\": {\n      \"contract_id\": \"CON-007\",\n      \"requested_amount\": 150000000,\n      \"tenor\": \"90 days\",\n      \"funding_need_type\": \"WORKING_CAPITAL\",\n      \"customer_type\": \"SME\",\n      \"receivable_list\": [\n        \"AR-CON-007-001\"\n      ],\n      \"projected_cash_inflow\": 160000000,\n      \"projected_cash_outflow\": 155000000,\n      \"expected_margin\": 0.05,\n      \"cashflow_buffer\": 5000000,\n      \"receivable_quality\": \"AVERAGE\",\n      \"contract_payment_schedule\": [\n        {\n          \"milestone\": \"Full payment\",\n          \"percent\": 1.0,\n          \"due_date\": \"2026-10-01\"\n        }\n      ]\n    },\n    \"risk\": {\n      \"contract_id\": \"CON-007\",\n      \"risk_level\": \"HIGH\",\n      \"blocking_risk_flags\": [\n        \"MISSING_SIGNED_CONTRACT\"\n      ],\n      \"missing_evidence\": [\n        \"signed_contract_copy\",\n        \"supplier_confirmation\"\n      ],\n      \"supplier_confirmation_status\": \"PENDING\",\n      \"receivable_aging_status\": \"OVERDUE_30D\",\n      \"fraud_flags\": [],\n      \"compliance_notes\": \"Hồ sơ chưa đủ điều kiện xử lý do thiếu hợp đồng ký kết.\"\n    },\n    \"funding_need\": {\n      \"need_type\": \"WORKING_CAPITAL\",\n      \"requested_amount\": 150000000,\n      \"tenor\": \"90 days\",\n      \"basis\": \"Contract CON-007\"\n    }\n  }\n]",
+    "run_id": "f10425c4-8275-4d61-8378-f874b5d531c4",
+    "brain_request_payload": null,
+    "continuation_approval_id": null
+  },
+  "user_input": "Đây là toàn bộ credit decision cases cần đánh giá. Hãy xử lý độc lập từng case và trả đúng một Decision Card cho mỗi contract_id, theo đúng thứ tự đầu vào:\n[\n  {\n    \"contract_id\": \"CON-004\",\n    \"finance\": {\n      \"contract_id\": \"CON-004\",\n      \"requested_amount\": 420000000,\n      \"tenor\": \"Until contract acceptance\",\n      \"funding_need_type\": \"PERFORMANCE_BOND\",\n      \"projected_cash_inflow\": 460000000,\n      \"projected_cash_outflow\": 350000000,\n      \"expected_margin\": 0.24,\n      \"cashflow_buffer\": 40000000,\n      \"receivable_quality\": \"GOOD\",\n      \"contract_payment_schedule\": [\n        {\n          \"milestone\": \"Advance payment\",\n          \"percent\": 0.3,\n          \"due_date\": \"2026-07-10\"\n        },\n        {\n          \"milestone\": \"Delivery\",\n          \"percent\": 0.5,\n          \"due_date\": \"2026-09-01\"\n        },\n        {\n          \"milestone\": \"Acceptance\",\n          \"percent\": 0.2,\n          \"due_date\": \"2026-10-15\"\n        }\n      ]\n    },\n    \"risk\": {\n      \"contract_id\": \"CON-004\",\n      \"risk_level\": \"MEDIUM\",\n      \"blocking_risk_flags\": [],\n      \"missing_evidence\": [\n        \"cashflow_buffer_confirmation\"\n      ],\n      \"supplier_confirmation_status\": \"NOT_REQUIRED\",\n      \"receivable_aging_status\": \"CURRENT\",\n      \"fraud_flags\": [\n        {\n          \"alert_id\": \"AL-001\",\n          \"alert_date\": \"2026-07-05\",\n          \"alert_type\": \"Transaction anomaly\",\n          \"related_record\": [\n            \"TXN-006\",\n            \"TXN-007\"\n          ],\n          \"severity\": \"Critical\",\n          \"risk_score\": 90,\n          \"description\": \"Two abnormal ecommerce debits at 02:13 and 02:17\",\n          \"recommended_action\": \"Hold + founder confirmation\"\n        }\n      ],\n      \"compliance_notes\": \"Cần xác nhận thêm về giao dịch bất thường trước khi duyệt.\"\n    },\n    \"funding_need\": {\n      \"need_type\": \"PERFORMANCE_BOND\",\n      \"requested_amount\": 420000000,\n      \"tenor\": \"Until contract acceptance\",\n      \"basis\": \"Contract CON-004\"\n    }\n  },\n  {\n    \"contract_id\": \"CON-007\",\n    \"finance\": {\n      \"contract_id\": \"CON-007\",\n      \"requested_amount\": 150000000,\n      \"tenor\": \"90 days\",\n      \"funding_need_type\": \"WORKING_CAPITAL\",\n      \"customer_type\": \"SME\",\n      \"receivable_list\": [\n        \"AR-CON-007-001\"\n      ],\n      \"projected_cash_inflow\": 160000000,\n      \"projected_cash_outflow\": 155000000,\n      \"expected_margin\": 0.05,\n      \"cashflow_buffer\": 5000000,\n      \"receivable_quality\": \"AVERAGE\",\n      \"contract_payment_schedule\": [\n        {\n          \"milestone\": \"Full payment\",\n          \"percent\": 1.0,\n          \"due_date\": \"2026-10-01\"\n        }\n      ]\n    },\n    \"risk\": {\n      \"contract_id\": \"CON-007\",\n      \"risk_level\": \"HIGH\",\n      \"blocking_risk_flags\": [\n        \"MISSING_SIGNED_CONTRACT\"\n      ],\n      \"missing_evidence\": [\n        \"signed_contract_copy\",\n        \"supplier_confirmation\"\n      ],\n      \"supplier_confirmation_status\": \"PENDING\",\n      \"receivable_aging_status\": \"OVERDUE_30D\",\n      \"fraud_flags\": [],\n      \"compliance_notes\": \"Hồ sơ chưa đủ điều kiện xử lý do thiếu hợp đồng ký kết.\"\n    },\n    \"funding_need\": {\n      \"need_type\": \"WORKING_CAPITAL\",\n      \"requested_amount\": 150000000,\n      \"tenor\": \"90 days\",\n      \"basis\": \"Contract CON-007\"\n    }\n  }\n]",
+  "metadata": {
+    "contract_ids": [
+      "CON-004",
+      "CON-007"
+    ],
+    "input_cases": [
+      {
+        "contract_id": "CON-004",
+        "finance": {
+          "contract_id": "CON-004",
+          "requested_amount": 420000000,
+          "tenor": "Until contract acceptance",
+          "funding_need_type": "PERFORMANCE_BOND",
+          "projected_cash_inflow": 460000000,
+          "projected_cash_outflow": 350000000,
+          "expected_margin": 0.24,
+          "cashflow_buffer": 40000000,
+          "receivable_quality": "GOOD",
+          "contract_payment_schedule": [
+            {
+              "milestone": "Advance payment",
+              "percent": 0.3,
+              "due_date": "2026-07-10"
+            },
+            {
+              "milestone": "Delivery",
+              "percent": 0.5,
+              "due_date": "2026-09-01"
+            },
+            {
+              "milestone": "Acceptance",
+              "percent": 0.2,
+              "due_date": "2026-10-15"
+            }
+          ]
+        },
+        "risk": {
+          "contract_id": "CON-004",
+          "risk_level": "MEDIUM",
+          "blocking_risk_flags": [],
+          "missing_evidence": [
+            "cashflow_buffer_confirmation"
+          ],
+          "supplier_confirmation_status": "NOT_REQUIRED",
+          "receivable_aging_status": "CURRENT",
+          "fraud_flags": [
+            {
+              "alert_id": "AL-001",
+              "alert_date": "2026-07-05",
+              "alert_type": "Transaction anomaly",
+              "related_record": [
+                "TXN-006",
+                "TXN-007"
+              ],
+              "severity": "Critical",
+              "risk_score": 90,
+              "description": "Two abnormal ecommerce debits at 02:13 and 02:17",
+              "recommended_action": "Hold + founder confirmation"
+            }
+          ],
+          "compliance_notes": "Cần xác nhận thêm về giao dịch bất thường trước khi duyệt."
+        },
+        "funding_need": {
+          "need_type": "PERFORMANCE_BOND",
+          "requested_amount": 420000000,
+          "tenor": "Until contract acceptance",
+          "basis": "Contract CON-004"
+        }
+      },
+      {
+        "contract_id": "CON-007",
+        "finance": {
+          "contract_id": "CON-007",
+          "requested_amount": 150000000,
+          "tenor": "90 days",
+          "funding_need_type": "WORKING_CAPITAL",
+          "customer_type": "SME",
+          "receivable_list": [
+            "AR-CON-007-001"
+          ],
+          "projected_cash_inflow": 160000000,
+          "projected_cash_outflow": 155000000,
+          "expected_margin": 0.05,
+          "cashflow_buffer": 5000000,
+          "receivable_quality": "AVERAGE",
+          "contract_payment_schedule": [
+            {
+              "milestone": "Full payment",
+              "percent": 1.0,
+              "due_date": "2026-10-01"
+            }
+          ]
+        },
+        "risk": {
+          "contract_id": "CON-007",
+          "risk_level": "HIGH",
+          "blocking_risk_flags": [
+            "MISSING_SIGNED_CONTRACT"
+          ],
+          "missing_evidence": [
+            "signed_contract_copy",
+            "supplier_confirmation"
+          ],
+          "supplier_confirmation_status": "PENDING",
+          "receivable_aging_status": "OVERDUE_30D",
+          "fraud_flags": [],
+          "compliance_notes": "Hồ sơ chưa đủ điều kiện xử lý do thiếu hợp đồng ký kết."
+        },
+        "funding_need": {
+          "need_type": "WORKING_CAPITAL",
+          "requested_amount": 150000000,
+          "tenor": "90 days",
+          "basis": "Contract CON-007"
+        }
+      }
+    ]
+  },
+  "approval_requests": [
+    {
+      "approval_id": "5957dee3-e2bf-40c5-8bbc-2494d3b04c65",
+      "fingerprint": "063489c343f13f7149873889366941f2863a9e5cc47c6176eed95e7d441bbc8e",
+      "contract_id": "CON-004",
+      "tool": "precheck_performance_bond",
+      "arguments": {
+        "contract_id": "CON-004",
+        "amount": 420000000.0
+      },
+      "status": "pending",
+      "requested_at": "2026-07-18T05:13:32.928647+00:00",
+      "decided_at": null,
+      "execution_started_at": null,
+      "executed_at": null,
+      "decision_applied_at": null,
+      "result": null,
+      "error": null
+    },
+    {
+      "approval_id": "2e05a09a-35d5-4dd6-b2a2-c8dcda5299ef",
+      "fingerprint": "e36a8975e1acafdab3fe6bc2b6cf743dd047f081680f3c33d561e66d67fbc533",
+      "contract_id": "CON-007",
+      "tool": "precheck_micro_credit",
+      "arguments": {
+        "contract_id": "CON-007",
+        "customer_type": "SME",
+        "amount": 150000000.0,
+        "receivable_list": [
+          "AR-CON-007-001"
+        ]
+      },
+      "status": "pending",
+      "requested_at": "2026-07-18T05:13:32.929745+00:00",
+      "decided_at": null,
+      "execution_started_at": null,
+      "executed_at": null,
+      "decision_applied_at": null,
+      "result": null,
+      "error": null
+    }
+  ],
+  "decision_result": {
+    "decisions": [
+      {
+        "contract_id": "CON-004",
+        "accept_opportunity": true,
+        "recommended_option": "APPROVE_WITH_CONDITION",
+        "protective_condition": "Chưa gọi API ngân hàng; pre-check bảo lãnh thực hiện hợp đồng với VietinBank đang chờ người có thẩm quyền xác nhận. Trước khi gửi hồ sơ chính thức, cần xác nhận cashflow_buffer_confirmation và founder confirmation đối với cảnh báo giao dịch bất thường AL-001.",
+        "capital_need": 420000000.0,
+        "risk_level": "medium",
+        "decision_status": "review",
+        "reasons": [
+          "Tài chính: expected_margin 0.24, projected_cash_inflow 460000000, projected_cash_outflow 350000000, cashflow_buffer 40000000 và funding gap/capital_need 420000000 cho bảo lãnh thực hiện hợp đồng; biên lợi nhuận và dòng tiền dự kiến hỗ trợ phương án nhưng buffer vẫn cần chứng từ xác nhận.",
+          "Rủi ro / hồ sơ: risk_level MEDIUM, không có blocking_risk_flags nhưng thiếu cashflow_buffer_confirmation; có fraud alert AL-001 severity Critical, risk_score 90 về hai giao dịch ecommerce bất thường, recommended_action là Hold + founder confirmation.",
+          "Product fit: sản phẩm phù hợp nhất là VietinBank Performance bond (BANKPROD-002), match_status MATCHED, annual_rate_or_fee 0.012; need type khớp PERFORMANCE_BOND và requested_amount 420000000 đáp ứng điều kiện tối thiểu, nhưng pre-check đang pending human approval."
+        ],
+        "risk_warnings": [
+          "AL-001: Transaction anomaly, severity Critical, risk_score 90, related_record TXN-006/TXN-007; cần Hold + founder confirmation.",
+          "Missing evidence: cashflow_buffer_confirmation"
+        ],
+        "missing_information": [
+          "cashflow_buffer_confirmation"
+        ],
+        "eligible_score": null,
+        "precheck_note": null,
+        "requires_founder_confirmation": true,
+        "approval_status": false,
+        "is_preliminary": true
+      },
+      {
+        "contract_id": "CON-007",
+        "accept_opportunity": false,
+        "recommended_option": "REJECT_MISSING_EVIDENCE",
+        "protective_condition": "Không gửi hồ sơ chính thức cho ngân hàng ở trạng thái hiện tại. Chưa gọi API ngân hàng; pre-check vay vốn lưu động nhỏ với CoopBank đang chờ người có thẩm quyền xác nhận, nhưng cần bổ sung signed_contract_copy và supplier_confirmation, đồng thời xử lý blocking flag MISSING_SIGNED_CONTRACT trước khi tái xét.",
+        "capital_need": 150000000.0,
+        "risk_level": "high",
+        "decision_status": "reject",
+        "reasons": [
+          "Tài chính: expected_margin 0.05, projected_cash_inflow 160000000, projected_cash_outflow 155000000, cashflow_buffer 5000000 và capital_need 150000000 cho WORKING_CAPITAL; biên lợi nhuận và buffer thấp, dư địa dòng tiền hạn chế.",
+          "Rủi ro / hồ sơ: risk_level HIGH, có blocking_risk_flags MISSING_SIGNED_CONTRACT; thiếu signed_contract_copy và supplier_confirmation, supplier_confirmation_status PENDING, receivable_aging_status OVERDUE_30D; hồ sơ chưa đủ điều kiện xử lý do thiếu hợp đồng ký kết.",
+          "Product fit: sản phẩm phù hợp nhất là CoopBank Micro working capital (BANKPROD-006), match_status MATCHED, annual_rate_or_fee 0.118; lựa chọn VietinBank SME working capital line chỉ PARTIAL vì requested_amount 150000000 thấp hơn minimum 500000000. Dù có product fit, hồ sơ bị chặn bởi thiếu chứng từ trọng yếu."
+        ],
+        "risk_warnings": [
+          "Blocking risk flag: MISSING_SIGNED_CONTRACT",
+          "Missing evidence: signed_contract_copy",
+          "Missing evidence: supplier_confirmation",
+          "Receivable aging status: OVERDUE_30D"
+        ],
+        "missing_information": [
+          "signed_contract_copy",
+          "supplier_confirmation"
+        ],
+        "eligible_score": null,
+        "precheck_note": null,
+        "requires_founder_confirmation": true,
+        "approval_status": false,
+        "is_preliminary": true
+      }
+    ]
+  },
+  "conversation_items": [
+    {
+      "content": "Execution context for mandatory logging:\n{\"run_id\": \"f10425c4-8275-4d61-8378-f874b5d531c4\"}\n\nĐây là toàn bộ credit decision cases cần đánh giá. Hãy xử lý độc lập từng case và trả đúng một Decision Card cho mỗi contract_id, theo đúng thứ tự đầu vào:\n[\n  {\n    \"contract_id\": \"CON-004\",\n    \"finance\": {\n      \"contract_id\": \"CON-004\",\n      \"requested_amount\": 420000000,\n      \"tenor\": \"Until contract acceptance\",\n      \"funding_need_type\": \"PERFORMANCE_BOND\",\n      \"projected_cash_inflow\": 460000000,\n      \"projected_cash_outflow\": 350000000,\n      \"expected_margin\": 0.24,\n      \"cashflow_buffer\": 40000000,\n      \"receivable_quality\": \"GOOD\",\n      \"contract_payment_schedule\": [\n        {\n          \"milestone\": \"Advance payment\",\n          \"percent\": 0.3,\n          \"due_date\": \"2026-07-10\"\n        },\n        {\n          \"milestone\": \"Delivery\",\n          \"percent\": 0.5,\n          \"due_date\": \"2026-09-01\"\n        },\n        {\n          \"milestone\": \"Acceptance\",\n          \"percent\": 0.2,\n          \"due_date\": \"2026-10-15\"\n        }\n      ]\n    },\n    \"risk\": {\n      \"contract_id\": \"CON-004\",\n      \"risk_level\": \"MEDIUM\",\n      \"blocking_risk_flags\": [],\n      \"missing_evidence\": [\n        \"cashflow_buffer_confirmation\"\n      ],\n      \"supplier_confirmation_status\": \"NOT_REQUIRED\",\n      \"receivable_aging_status\": \"CURRENT\",\n      \"fraud_flags\": [\n        {\n          \"alert_id\": \"AL-001\",\n          \"alert_date\": \"2026-07-05\",\n          \"alert_type\": \"Transaction anomaly\",\n          \"related_record\": [\n            \"TXN-006\",\n            \"TXN-007\"\n          ],\n          \"severity\": \"Critical\",\n          \"risk_score\": 90,\n          \"description\": \"Two abnormal ecommerce debits at 02:13 and 02:17\",\n          \"recommended_action\": \"Hold + founder confirmation\"\n        }\n      ],\n      \"compliance_notes\": \"Cần xác nhận thêm về giao dịch bất thường trước khi duyệt.\"\n    },\n    \"funding_need\": {\n      \"need_type\": \"PERFORMANCE_BOND\",\n      \"requested_amount\": 420000000,\n      \"tenor\": \"Until contract acceptance\",\n      \"basis\": \"Contract CON-004\"\n    }\n  },\n  {\n    \"contract_id\": \"CON-007\",\n    \"finance\": {\n      \"contract_id\": \"CON-007\",\n      \"requested_amount\": 150000000,\n      \"tenor\": \"90 days\",\n      \"funding_need_type\": \"WORKING_CAPITAL\",\n      \"customer_type\": \"SME\",\n      \"receivable_list\": [\n        \"AR-CON-007-001\"\n      ],\n      \"projected_cash_inflow\": 160000000,\n      \"projected_cash_outflow\": 155000000,\n      \"expected_margin\": 0.05,\n      \"cashflow_buffer\": 5000000,\n      \"receivable_quality\": \"AVERAGE\",\n      \"contract_payment_schedule\": [\n        {\n          \"milestone\": \"Full payment\",\n          \"percent\": 1.0,\n          \"due_date\": \"2026-10-01\"\n        }\n      ]\n    },\n    \"risk\": {\n      \"contract_id\": \"CON-007\",\n      \"risk_level\": \"HIGH\",\n      \"blocking_risk_flags\": [\n        \"MISSING_SIGNED_CONTRACT\"\n      ],\n      \"missing_evidence\": [\n        \"signed_contract_copy\",\n        \"supplier_confirmation\"\n      ],\n      \"supplier_confirmation_status\": \"PENDING\",\n      \"receivable_aging_status\": \"OVERDUE_30D\",\n      \"fraud_flags\": [],\n      \"compliance_notes\": \"Hồ sơ chưa đủ điều kiện xử lý do thiếu hợp đồng ký kết.\"\n    },\n    \"funding_need\": {\n      \"need_type\": \"WORKING_CAPITAL\",\n      \"requested_amount\": 150000000,\n      \"tenor\": \"90 days\",\n      \"basis\": \"Contract CON-007\"\n    }\n  }\n]",
+      "role": "user"
+    },
+    {
+      "arguments": "{\"funding_need\": {\"need_type\": \"PERFORMANCE_BOND\", \"requested_amount\": 420000000}}",
+      "call_id": "call_dUkR3ldeMeJS1ZdR13gbfrs1",
+      "name": "match_bank_product",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E2reZbjKJWSDp1VrbaMvMgQGb0hox"
+      }
+    },
+    {
+      "arguments": "{\"funding_need\": {\"need_type\": \"WORKING_CAPITAL\", \"requested_amount\": 150000000}}",
+      "call_id": "call_yzqhpbBpl5yqGl7pxjbM6rME",
+      "name": "match_bank_product",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E2reZbjKJWSDp1VrbaMvMgQGb0hox"
+      }
+    },
+    {
+      "call_id": "call_dUkR3ldeMeJS1ZdR13gbfrs1",
+      "output": "{'best_match': {'bank_product_id': 'BANKPROD-002', 'bank': 'VietinBank', 'product_name': 'Performance bond', 'annual_rate_or_fee': 0.012, 'automation_level': 'Human approval', 'match_status': 'MATCHED', 'match_reasons': ['Need type matches Performance bond.', 'Requested amount is above minimum amount.', 'Collateral ratio 20% is within acceptable range.'], 'human_approval_required': True, 'precheck_status': 'PENDING_HUMAN_APPROVAL'}, 'all_candidates': [{'bank_product_id': 'BANKPROD-002', 'bank': 'VietinBank', 'product_name': 'Performance bond', 'annual_rate_or_fee': 0.012, 'automation_level': 'Human approval', 'match_status': 'MATCHED', 'match_reasons': ['Need type matches Performance bond.', 'Requested amount is above minimum amount.', 'Collateral ratio 20% is within acceptable range.'], 'human_approval_required': True, 'precheck_status': 'PENDING_HUMAN_APPROVAL'}]}",
+      "type": "function_call_output"
+    },
+    {
+      "call_id": "call_yzqhpbBpl5yqGl7pxjbM6rME",
+      "output": "{'best_match': {'bank_product_id': 'BANKPROD-006', 'bank': 'CoopBank', 'product_name': 'Micro working capital', 'annual_rate_or_fee': 0.118, 'automation_level': 'Review', 'match_status': 'MATCHED', 'match_reasons': ['Need type matches Micro working capital.', 'Requested amount is above minimum amount.', 'Collateral ratio 10% is within acceptable range.'], 'human_approval_required': True, 'precheck_status': 'PENDING_HUMAN_APPROVAL'}, 'all_candidates': [{'bank_product_id': 'BANKPROD-006', 'bank': 'CoopBank', 'product_name': 'Micro working capital', 'annual_rate_or_fee': 0.118, 'automation_level': 'Review', 'match_status': 'MATCHED', 'match_reasons': ['Need type matches Micro working capital.', 'Requested amount is above minimum amount.', 'Collateral ratio 10% is within acceptable range.'], 'human_approval_required': True, 'precheck_status': 'PENDING_HUMAN_APPROVAL'}, {'bank_product_id': 'BANKPROD-004', 'bank': 'VietinBank', 'product_name': 'SME working capital line', 'annual_rate_or_fee': 0.105, 'automation_level': 'Human approval', 'match_status': 'PARTIAL', 'match_reasons': ['Need type matches SME working capital line.', 'Requested amount below minimum (500,000,000).', 'Collateral ratio 15% is within acceptable range.'], 'human_approval_required': True, 'precheck_status': 'PENDING_HUMAN_APPROVAL'}]}",
+      "type": "function_call_output"
+    },
+    {
+      "arguments": "{\"amount\": 420000000, \"contract_id\": \"CON-004\"}",
+      "call_id": "call_ay3edW7OdbyY5GEMvoQ7T11U",
+      "name": "precheck_performance_bond",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E2reczUJz6LnWYkRAFXzlEhRxX168"
+      }
+    },
+    {
+      "arguments": "{\"amount\": 150000000, \"contract_id\": \"CON-007\", \"customer_type\": \"SME\", \"receivable_list\": [\"AR-CON-007-001\"]}",
+      "call_id": "call_fHlwmvIPOJlSqQ1ftx8BUrqh",
+      "name": "precheck_micro_credit",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E2reczUJz6LnWYkRAFXzlEhRxX168"
+      }
+    },
+    {
+      "call_id": "call_ay3edW7OdbyY5GEMvoQ7T11U",
+      "output": "{'approval_id': '5957dee3-e2bf-40c5-8bbc-2494d3b04c65', 'approval_state': 'pending', 'approval_status': False, 'eligible': None, 'score': None, 'note': None, 'eligible_score': None, 'precheck_note': None}",
+      "type": "function_call_output"
+    },
+    {
+      "call_id": "call_fHlwmvIPOJlSqQ1ftx8BUrqh",
+      "output": "{'approval_id': '2e05a09a-35d5-4dd6-b2a2-c8dcda5299ef', 'approval_state': 'pending', 'approval_status': False, 'eligible': None, 'score': None, 'note': None, 'eligible_score': None, 'precheck_note': None}",
+      "type": "function_call_output"
+    },
+    {
+      "arguments": "{\"decisionlog\":\"{\\\"response\\\":{\\\"decisions\\\":[{\\\"accept_opportunity\\\":true,\\\"approval_status\\\":false,\\\"capital_need\\\":420000000,\\\"contract_id\\\":\\\"CON-004\\\",\\\"decision_status\\\":\\\"review\\\",\\\"eligible_score\\\":null,\\\"is_preliminary\\\":true,\\\"missing_information\\\":[\\\"cashflow_buffer_confirmation\\\"],\\\"precheck_note\\\":null,\\\"protective_condition\\\":\\\"Chưa gọi API ngân hàng; pre-check bảo lãnh thực hiện hợp đồng với VietinBank đang chờ người có thẩm quyền xác nhận. Trước khi gửi hồ sơ chính thức, cần xác nhận cashflow_buffer_confirmation và founder confirmation đối với cảnh báo giao dịch bất thường AL-001.\\\",\\\"reasons\\\":[\\\"Tài chính: expected_margin 0.24, projected_cash_inflow 460000000, projected_cash_outflow 350000000, cashflow_buffer 40000000 và funding gap/capital_need 420000000 cho bảo lãnh thực hiện hợp đồng; biên lợi nhuận và dòng tiền dự kiến hỗ trợ phương án nhưng buffer vẫn cần chứng từ xác nhận.\\\",\\\"Rủi ro / hồ sơ: risk_level MEDIUM, không có blocking_risk_flags nhưng thiếu cashflow_buffer_confirmation; có fraud alert AL-001 severity Critical, risk_score 90 về hai giao dịch ecommerce bất thường, recommended_action là Hold + founder confirmation.\\\",\\\"Product fit: sản phẩm phù hợp nhất là VietinBank Performance bond (BANKPROD-002), match_status MATCHED, annual_rate_or_fee 0.012; need type khớp PERFORMANCE_BOND và requested_amount 420000000 đáp ứng điều kiện tối thiểu, nhưng pre-check đang pending human approval.\\\"],\\\"recommended_option\\\":\\\"APPROVE_WITH_CONDITION\\\",\\\"requires_founder_confirmation\\\":true,\\\"risk_level\\\":\\\"medium\\\",\\\"risk_warnings\\\":[\\\"AL-001: Transaction anomaly, severity Critical, risk_score 90, related_record TXN-006/TXN-007; cần Hold + founder confirmation.\\\",\\\"Missing evidence: cashflow_buffer_confirmation\\\"]},{\\\"accept_opportunity\\\":false,\\\"approval_status\\\":false,\\\"capital_need\\\":150000000,\\\"contract_id\\\":\\\"CON-007\\\",\\\"decision_status\\\":\\\"reject\\\",\\\"eligible_score\\\":null,\\\"is_preliminary\\\":true,\\\"missing_information\\\":[\\\"signed_contract_copy\\\",\\\"supplier_confirmation\\\"],\\\"precheck_note\\\":null,\\\"protective_condition\\\":\\\"Không gửi hồ sơ chính thức cho ngân hàng ở trạng thái hiện tại. Chưa gọi API ngân hàng; pre-check vay vốn lưu động nhỏ với CoopBank đang chờ người có thẩm quyền xác nhận, nhưng cần bổ sung signed_contract_copy và supplier_confirmation, đồng thời xử lý blocking flag MISSING_SIGNED_CONTRACT trước khi tái xét.\\\",\\\"reasons\\\":[\\\"Tài chính: expected_margin 0.05, projected_cash_inflow 160000000, projected_cash_outflow 155000000, cashflow_buffer 5000000 và capital_need 150000000 cho WORKING_CAPITAL; biên lợi nhuận và buffer thấp, dư địa dòng tiền hạn chế.\\\",\\\"Rủi ro / hồ sơ: risk_level HIGH, có blocking_risk_flags MISSING_SIGNED_CONTRACT; thiếu signed_contract_copy và supplier_confirmation, supplier_confirmation_status PENDING, receivable_aging_status OVERDUE_30D; hồ sơ chưa đủ điều kiện xử lý do thiếu hợp đồng ký kết.\\\",\\\"Product fit: sản phẩm phù hợp nhất là CoopBank Micro working capital (BANKPROD-006), match_status MATCHED, annual_rate_or_fee 0.118; lựa chọn VietinBank SME working capital line chỉ PARTIAL vì requested_amount 150000000 thấp hơn minimum 500000000. Dù có product fit, hồ sơ bị chặn bởi thiếu chứng từ trọng yếu.\\\"],\\\"recommended_option\\\":\\\"REJECT_MISSING_EVIDENCE\\\",\\\"requires_founder_confirmation\\\":true,\\\"risk_level\\\":\\\"high\\\",\\\"risk_warnings\\\":[\\\"Blocking risk flag: MISSING_SIGNED_CONTRACT\\\",\\\"Missing evidence: signed_contract_copy\\\",\\\"Missing evidence: supplier_confirmation\\\",\\\"Receivable aging status: OVERDUE_30D\\\"]}]}}\",\"financelogs\":null,\"id\":\"f10425c4-8275-4d61-8378-f874b5d531c4\",\"risklogs\":null,\"validatorlogs\":null}",
+      "call_id": "call_PxRHrEeRygrGmJr68rkcHkKg",
+      "name": "write_logs",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E2refWlcSAxI5XoNmVLuFFfB6hPaa"
+      }
+    },
+    {
+      "call_id": "call_PxRHrEeRygrGmJr68rkcHkKg",
+      "output": "{'status': 'upserted', 'id': 'f10425c4-8275-4d61-8378-f874b5d531c4', 'columns': ['DecisionLogs'], 'table': 'LogsAgent'}",
+      "type": "function_call_output"
+    },
+    {
+      "id": "__fake_id__",
+      "content": [
+        {
+          "annotations": [],
+          "text": "{\"response\":{\"decisions\":[{\"accept_opportunity\":true,\"approval_status\":false,\"capital_need\":420000000,\"contract_id\":\"CON-004\",\"decision_status\":\"review\",\"eligible_score\":null,\"is_preliminary\":true,\"missing_information\":[\"cashflow_buffer_confirmation\"],\"precheck_note\":null,\"protective_condition\":\"Chưa gọi API ngân hàng; pre-check bảo lãnh thực hiện hợp đồng với VietinBank đang chờ người có thẩm quyền xác nhận. Trước khi gửi hồ sơ chính thức, cần xác nhận cashflow_buffer_confirmation và founder confirmation đối với cảnh báo giao dịch bất thường AL-001.\",\"reasons\":[\"Tài chính: expected_margin 0.24, projected_cash_inflow 460000000, projected_cash_outflow 350000000, cashflow_buffer 40000000 và funding gap/capital_need 420000000 cho bảo lãnh thực hiện hợp đồng; biên lợi nhuận và dòng tiền dự kiến hỗ trợ phương án nhưng buffer vẫn cần chứng từ xác nhận.\",\"Rủi ro / hồ sơ: risk_level MEDIUM, không có blocking_risk_flags nhưng thiếu cashflow_buffer_confirmation; có fraud alert AL-001 severity Critical, risk_score 90 về hai giao dịch ecommerce bất thường, recommended_action là Hold + founder confirmation.\",\"Product fit: sản phẩm phù hợp nhất là VietinBank Performance bond (BANKPROD-002), match_status MATCHED, annual_rate_or_fee 0.012; need type khớp PERFORMANCE_BOND và requested_amount 420000000 đáp ứng điều kiện tối thiểu, nhưng pre-check đang pending human approval.\"],\"recommended_option\":\"APPROVE_WITH_CONDITION\",\"requires_founder_confirmation\":true,\"risk_level\":\"medium\",\"risk_warnings\":[\"AL-001: Transaction anomaly, severity Critical, risk_score 90, related_record TXN-006/TXN-007; cần Hold + founder confirmation.\",\"Missing evidence: cashflow_buffer_confirmation\"]},{\"accept_opportunity\":false,\"approval_status\":false,\"capital_need\":150000000,\"contract_id\":\"CON-007\",\"decision_status\":\"reject\",\"eligible_score\":null,\"is_preliminary\":true,\"missing_information\":[\"signed_contract_copy\",\"supplier_confirmation\"],\"precheck_note\":null,\"protective_condition\":\"Không gửi hồ sơ chính thức cho ngân hàng ở trạng thái hiện tại. Chưa gọi API ngân hàng; pre-check vay vốn lưu động nhỏ với CoopBank đang chờ người có thẩm quyền xác nhận, nhưng cần bổ sung signed_contract_copy và supplier_confirmation, đồng thời xử lý blocking flag MISSING_SIGNED_CONTRACT trước khi tái xét.\",\"reasons\":[\"Tài chính: expected_margin 0.05, projected_cash_inflow 160000000, projected_cash_outflow 155000000, cashflow_buffer 5000000 và capital_need 150000000 cho WORKING_CAPITAL; biên lợi nhuận và buffer thấp, dư địa dòng tiền hạn chế.\",\"Rủi ro / hồ sơ: risk_level HIGH, có blocking_risk_flags MISSING_SIGNED_CONTRACT; thiếu signed_contract_copy và supplier_confirmation, supplier_confirmation_status PENDING, receivable_aging_status OVERDUE_30D; hồ sơ chưa đủ điều kiện xử lý do thiếu hợp đồng ký kết.\",\"Product fit: sản phẩm phù hợp nhất là CoopBank Micro working capital (BANKPROD-006), match_status MATCHED, annual_rate_or_fee 0.118; lựa chọn VietinBank SME working capital line chỉ PARTIAL vì requested_amount 150000000 thấp hơn minimum 500000000. Dù có product fit, hồ sơ bị chặn bởi thiếu chứng từ trọng yếu.\"],\"recommended_option\":\"REJECT_MISSING_EVIDENCE\",\"requires_founder_confirmation\":true,\"risk_level\":\"high\",\"risk_warnings\":[\"Blocking risk flag: MISSING_SIGNED_CONTRACT\",\"Missing evidence: signed_contract_copy\",\"Missing evidence: supplier_confirmation\",\"Receivable aging status: OVERDUE_30D\"]}]}}",
+          "type": "output_text",
+          "logprobs": []
+        }
+      ],
+      "role": "assistant",
+      "status": "completed",
+      "type": "message",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E2rewjDZkfqeEE5D5WFW5NyIwLtuZ"
+      }
+    }
+  ]
+}

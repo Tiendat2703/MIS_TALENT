@@ -43,8 +43,8 @@ INPUT_TABLES = ["04_CONTRACTS", "06_ORDERS", "07_INVOICES", "08_BANK_TXN", "09_C
 _ANALYSIS_REQUEST = (
     "Hãy phân tích sức khỏe tài chính của OPC. Gọi lần lượt đủ 6 tool để lấy các "
     "chỉ số (load_and_validate, reconcile_bank, liquidity_funding, classify_invoice, "
-    "margin_analysis, missing_data), rồi tổng hợp thành FinanceSynthesis dựa hoàn "
-    "toàn trên số các tool trả về."
+    "margin_analysis, missing_data), rồi viết handoff_summary TÓM TẮT SỐ LIỆU dựa "
+    "hoàn toàn trên số các tool trả về. Không đánh giá rủi ro, không kết luận."
 )
 
 
@@ -132,58 +132,24 @@ def _facts_from_store(store: dict) -> dict:
 
 
 def _fallback_synthesis(facts: dict) -> FinanceSynthesis:
-    """Diễn giải rule-based khi không gọi được LLM, để luồng vẫn chạy đủ."""
-    val = facts["validation"]
+    """Tóm tắt SỐ LIỆU (rule-based) khi không gọi được LLM. Chỉ nêu con số, không
+    đánh giá rủi ro/readiness/human-approval."""
     liq = facts["liquidity_brief"]
     rec = facts["reconciliation"]
     inv = facts["invoice_classification"]
     mar = facts["margin_analysis"]
     mdata = facts["missing_data_request"]
 
-    if val["error_count"] > 0:
-        readiness = "Insufficient"
-    elif liq["funding_need"] > 0 or mdata or mar["margin_pressure_flag"]:
-        readiness = "Conditional"
-    else:
-        readiness = "Ready"
-
     n_below = len(liq["months_below_reserve"])
-    if n_below >= 3 or liq["max_reserve_gap"] >= 500_000_000:
-        pressure = "High"
-    elif n_below >= 1:
-        pressure = "Medium"
-    else:
-        pressure = "Low"
-
-    if val["error_count"] > 0:
-        confidence = "Low"
-    elif val["warning_count"] > 0 or mdata:
-        confidence = "Medium"
-    else:
-        confidence = "High"
-
-    low = ", ".join(mar["low_margin_contracts"]) or "không có"
-    margin_interp = (f"Margin danh mục {mar['portfolio_margin_pct'] * 100:.1f}% so với target "
-                     f"{mar['target_margin_pct'] * 100:.1f}%. Hợp đồng dưới target: {low}.")
-
-    attention: list[str] = []
-    if liq["months_below_reserve"]:
-        attention.append(f"Áp lực thanh khoản {n_below} tháng, funding need {money(liq['funding_need'])}.")
-    if rec["open_without_cash_in"]:
-        attention.append("Kiểm tra khả năng thu các invoice Open chưa có tiền về.")
-    if rec["suspicious_credits"]:
-        attention.append("Có giao dịch đáng ngờ cần soi (chuyển Risk).")
-    if mar["margin_pressure_flag"]:
-        attention.append("Margin dưới target, cần soi rủi ro thực hiện.")
-    if mdata:
-        attention.append(f"{len(mdata)} mục dữ liệu còn thiếu cần bổ sung.")
-
-    summary = (f"OPC có funding need {money(liq['funding_need'])}, {n_below} tháng dưới ngưỡng dự trữ. "
-               f"Confirmed cash {money(rec['confirmed_cash_total'])}; open AR chưa thu; "
-               f"not-issued {money(inv['not_issued_total'])} là upside chưa chắc chắn. "
-               f"Margin danh mục {mar['portfolio_margin_pct'] * 100:.1f}% so target {mar['target_margin_pct'] * 100:.1f}%.")
-
-    return FinanceSynthesis(readiness, pressure, confidence, margin_interp, attention, summary)
+    summary = (
+        f"Funding need {money(liq['funding_need'])}; {n_below} tháng dưới ngưỡng dự trữ "
+        f"(tối đa reserve gap {money(liq['max_reserve_gap'])}). "
+        f"Confirmed cash {money(rec['confirmed_cash_total'])}; overdue {money(inv['overdue_total'])}; "
+        f"open {money(inv['open_current_total'])}; not-issued {money(inv['not_issued_total'])}. "
+        f"Margin danh mục {mar['portfolio_margin_pct'] * 100:.1f}% so target {mar['target_margin_pct'] * 100:.1f}%. "
+        f"{len(mdata)} mục dữ liệu còn thiếu."
+    )
+    return FinanceSynthesis(handoff_summary=summary)
 
 
 async def _run_steps_deterministic(run_id: str, store: dict, today: date) -> None:
@@ -224,16 +190,35 @@ def _assemble(run_id: str, store: dict, synthesis: FinanceSynthesis, source: str
               run_log: list[dict], form, status: str, submission_report) -> FinanceFeaturePack:
     liquidity = store["liquidity"]
     margin = store["margin"]
-    signals = {
-        "finance_readiness_status": synthesis.finance_readiness_status,
-        "liquidity_pressure_level": synthesis.liquidity_pressure_level,
-        "data_confidence": synthesis.data_confidence,
-        "reserve_breach_flag": liquidity.max_reserve_gap > 0,
-        "margin_pressure_flag": margin.margin_pressure_flag,
-        "stress_month_count": len(liquidity.months_below_reserve),
+    reconciliation = store["reconciliation"]
+    invoice_class = store["invoices"]
+    validation = store["validation"]
+    missing = store["missing"]
+    # CHỈ số liệu/sự thật cho Risk — KHÔNG phán đoán (readiness/mức áp lực/human-approval
+    # do Risk quyết theo rule R1–R7 / RR-005).
+    key_facts = {
         "funding_need": liquidity.funding_need,
-        "requires_human_approval": liquidity.requires_human_approval,
-        "risk_agent_attention_points": synthesis.risk_agent_attention_points,
+        "max_reserve_gap": liquidity.max_reserve_gap,
+        "reserve_breach_flag": liquidity.max_reserve_gap > 0,
+        "months_below_reserve": liquidity.months_below_reserve,
+        "months_negative_cash": liquidity.months_negative_cash,
+        "confirmed_cash_total": reconciliation.confirmed_cash_total,
+        "open_invoice_current_total": invoice_class.open_current_total,
+        "overdue_invoice_total": invoice_class.overdue_total,
+        "not_issued_invoice_total": invoice_class.not_issued_total,
+        "paid_invoice_total": invoice_class.paid_total,
+        "portfolio_margin_pct": margin.portfolio_margin_pct,
+        "target_margin_pct": margin.target_margin_pct,
+        "margin_gap": margin.margin_gap,
+        "margin_below_target": margin.margin_pressure_flag,
+        "low_margin_contracts": margin.low_margin_contracts,
+        "unmatched_customer_credit_txn": [c.get("txn_id") for c in reconciliation.unmatched_customer_credits],
+        "non_operating_credit_txn": [c.get("txn_id") for c in reconciliation.non_operating_credits],
+        "suspicious_credit_txn": [c.get("txn_id") for c in reconciliation.suspicious_credits],
+        "unidentified_counterparties": validation.unidentified_counterparties,
+        "data_error_count": validation.error_count,
+        "data_warning_count": validation.warning_count,
+        "missing_data_count": len(missing),
         "synthesis_source": source,
     }
     metadata = {
@@ -255,7 +240,7 @@ def _assemble(run_id: str, store: dict, synthesis: FinanceSynthesis, source: str
         bank_reconciliation_summary=store["reconciliation"],
         margin_analysis=margin,
         missing_data_request=store["missing"],
-        financial_capacity_signals=signals,
+        key_facts=key_facts,
         handoff_summary=synthesis.handoff_summary,
         status=status,
         data_request_form=form if form.fields else None,
@@ -342,33 +327,57 @@ async def run_finance_agent(
                          "data": {"analysis_id": pack.metadata["analysis_id"],
                                   "status": status,
                                   "funding_need": store["liquidity"].funding_need,
-                                  "readiness": synthesis.finance_readiness_status,
+                                  "margin_pct": store["margin"].portfolio_margin_pct,
                                   "orchestration": pack.metadata["orchestration"]}})
     return pack
 
 
 if __name__ == "__main__":
+    import sys
+
+    # Cờ:
+    #   --full     : in nguyên FinanceFeaturePack (JSON) thay vì bản tóm tắt.
+    #   --missing  : chạy demo tình huống THIẾU dữ liệu + điền form (mặc định KHÔNG chạy).
+    FULL = "--full" in sys.argv
+    MISSING = "--missing" in sys.argv
     SCENARIO = str(Path(__file__).resolve().parents[1]
                    / "tools" / "FinanceAgent" / "scenarios" / "missing_data_demo.json")
 
-    async def main():
+    def _dump_pack(pack) -> None:
+        print(json.dumps(asdict(pack), ensure_ascii=False, indent=2, default=str))
+
+    def _print_summary(pack) -> None:
+        print("status:", pack.status)
+        print("funding_need:", pack.liquidity_brief.funding_need)
+        print("overdue:", pack.invoice_classification.overdue_total)
+        print("not_issued:", pack.invoice_classification.not_issued_total)
+        print("margin portfolio_pct:", pack.margin_analysis.portfolio_margin_pct,
+              "| below_target:", pack.key_facts["margin_below_target"])
+        print("missing_data_count:", pack.key_facts["missing_data_count"])
+        print("handoff_summary:", pack.handoff_summary)
+
+    async def run_normal() -> None:
+        pack = await run_finance_agent(run_id="finance-run", reference_date=date(2026, 7, 17))
+        (_dump_pack if FULL else _print_summary)(pack)
+
+    async def run_missing_demo() -> None:
         print("=" * 70)
-        print("PHA 1 — Chạy với tình huống THIẾU dữ liệu (đọc từ tệp cấu hình)")
+        print("PHA 1 — Tình huống THIẾU dữ liệu (đọc từ tệp cấu hình)")
         print("=" * 70)
         pack1 = await run_finance_agent(run_id="demo-missing-01",
                                         reference_date=date(2026, 7, 17), scenario=SCENARIO)
-        print("status:", pack1.status)
-        print("tháng thiếu projected_closing_cash:", pack1.liquidity_brief.months_missing_data)
-        print("order thiếu revenue/cost:", pack1.margin_analysis.orders_missing_data)
-        if pack1.data_request_form:
-            print(f"\nFORM YÊU CẦU BỔ SUNG ({pack1.data_request_form.form_id}):")
-            print(" ", pack1.data_request_form.description)
-            for f in pack1.data_request_form.fields:
-                req = "bắt buộc" if f.required else "tùy chọn"
-                print(f"  • [{f.field_id}] {f.label} — kiểu {f.data_type}, {req}\n    lý do: {f.reason}")
+        if FULL:
+            _dump_pack(pack1)
+        else:
+            print("status:", pack1.status)
+            print("tháng thiếu projected_closing_cash:", pack1.liquidity_brief.months_missing_data)
+            print("order thiếu revenue/cost:", pack1.margin_analysis.orders_missing_data)
+            if pack1.data_request_form:
+                print(f"\nFORM YÊU CẦU BỔ SUNG ({pack1.data_request_form.form_id}):")
+                for f in pack1.data_request_form.fields:
+                    req = "bắt buộc" if f.required else "tùy chọn"
+                    print(f"  • [{f.field_id}] {f.label} — {f.data_type}, {req}")
 
-        # Người dùng điền form. Đây là giá trị THẬT do người dùng cung cấp;
-        # agent KHÔNG tự bịa. Trường nào không điền sẽ vẫn báo thiếu.
         submission = {
             "orders|ORD-004|estimated_cost": 198000000,
             "cashflow|2026-08|projected_closing_cash": -155000000,
@@ -380,12 +389,10 @@ if __name__ == "__main__":
         pack2 = await run_finance_agent(run_id="demo-supplemented-01",
                                         reference_date=date(2026, 7, 17),
                                         scenario=SCENARIO, submission=submission)
-        print("submission_report:", pack2.submission_report)
-        print("status:", pack2.status)
-        print("funding_need:", pack2.liquidity_brief.funding_need)
-        print("margin portfolio_pct:", pack2.margin_analysis.portfolio_margin_pct)
-        print("readiness:", pack2.financial_capacity_signals["finance_readiness_status"])
-        print("còn thiếu (months/orders):",
-              pack2.liquidity_brief.months_missing_data, pack2.margin_analysis.orders_missing_data)
+        if FULL:
+            _dump_pack(pack2)
+        else:
+            print("submission_report:", pack2.submission_report)
+            _print_summary(pack2)
 
-    asyncio.run(main())
+    asyncio.run(run_missing_demo() if MISSING else run_normal())

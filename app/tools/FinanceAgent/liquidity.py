@@ -11,10 +11,6 @@ from __future__ import annotations
 from app.schema.financeAgent import LiquidityBrief, LiquidityMonth
 from app.tools.FinanceAgent.util import to_float
 
-# Ngưỡng theo governance_rule của OPC: quyết định tài chính > 300M cần human approval.
-GOVERNANCE_APPROVAL_THRESHOLD = 300_000_000
-
-
 def analyze_liquidity(cashflow: list[dict], profile: dict | None = None) -> LiquidityBrief:
     months: list[LiquidityMonth] = []
     months_missing_data: list[str] = []
@@ -50,6 +46,4 @@ def analyze_liquidity(cashflow: list[dict], profile: dict | None = None) -> Liqu
         months_below_reserve=months_below_reserve,
         months_negative_cash=months_negative_cash,
         months_missing_data=months_missing_data,
-        governance_threshold=float(GOVERNANCE_APPROVAL_THRESHOLD),
-        requires_human_approval=funding_need > GOVERNANCE_APPROVAL_THRESHOLD,
     )

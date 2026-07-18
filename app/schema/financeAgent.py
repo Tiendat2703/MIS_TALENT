@@ -63,8 +63,6 @@ class LiquidityBrief:
     months_below_reserve: list[str] = field(default_factory=list)
     months_negative_cash: list[str] = field(default_factory=list)
     months_missing_data: list[str] = field(default_factory=list)  # tháng thiếu projected_closing_cash -> bỏ qua, không bịa
-    governance_threshold: float = 0.0
-    requires_human_approval: bool = False
 
 
 # ============ Bước 4: Phân loại invoice ============
@@ -132,13 +130,9 @@ class MissingDataForm:
 # ============ Bước 7: LLM synthesis (output_type của Agent) ============
 @dataclass(frozen=True)
 class FinanceSynthesis:
-    """Phần DUY NHẤT do LLM sinh. LLM chỉ diễn giải dựa trên số đã tính,
-    không được tạo hay sửa bất kỳ con số nào."""
-    finance_readiness_status: str          # Ready | Conditional | Insufficient
-    liquidity_pressure_level: str          # Low | Medium | High
-    data_confidence: str                   # Low | Medium | High
-    margin_interpretation: str
-    risk_agent_attention_points: list[str]
+    """Phần LLM sinh: CHỈ tóm tắt SỐ LIỆU tài chính bằng lời để bàn giao cho Risk.
+    KHÔNG đánh giá rủi ro, KHÔNG kết luận readiness/mức áp lực/human-approval,
+    KHÔNG khuyến nghị. Chỉ nêu lại con số đã tính."""
     handoff_summary: str
 
 
@@ -151,7 +145,7 @@ class FinanceFeaturePack:
     bank_reconciliation_summary: BankReconciliationSummary
     margin_analysis: MarginAnalysis
     missing_data_request: list[MissingDataItem]
-    financial_capacity_signals: dict       # cờ từ code + mức từ LLM
+    key_facts: dict                        # số liệu/sự thật cô đọng cho Risk (KHÔNG phán đoán)
     handoff_summary: str
     status: str = "COMPLETE"               # COMPLETE | AWAITING_INPUT (đang chờ điền form)
     data_request_form: MissingDataForm | None = None

@@ -68,10 +68,45 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
      Nếu pre-check cần thiết nhưng đang chờ duyệt thì dùng `review`.
    - **Phương án đề xuất** (option): APPROVE / APPROVE_WITH_CONDITION /
      REJECT_MISSING_EVIDENCE / NO_SUITABLE_PRODUCT
-   - **Ba lý do**, mỗi lý do ứng với một khía cạnh:
-     1. Lý do tài chính (margin, cashflow, funding gap)
-     2. Lý do rủi ro / hồ sơ (risk level, evidence thiếu, alert)
-     3. Lý do product fit (sản phẩm ngân hàng nào phù hợp, vì sao)
+   - **Ba lý do**, mỗi lý do phải là một LẬP LUẬN có kết luận, KHÔNG phải liệt kê số.
+     Mỗi lý do bắt buộc kết thúc bằng mệnh đề nhân quả "→ do đó [ảnh hưởng tới quyết
+     định nhận/không nhận CHÍNH hợp đồng này]". Khi trích số, phải ghi rõ số đó là
+     của **hợp đồng này** hay của **toàn công ty OPC** để không lẫn lộn.
+
+     **Cách viết (rất quan trọng)**: viết bằng tiếng Việt kinh doanh tự nhiên cho nhà
+     sáng lập đọc, KHÔNG chép tên trường kỹ thuật trong dữ liệu (như `requested_amount`,
+     `capital_need`, `cash_impact`, `net_contract_margin`, `additional_funding_need`,
+     `worst_month_after`, `projected_closing_cash`, `confirmed_cash_total`,
+     `funding_need`, `gross_margin`...). Hãy diễn giải Ý NGHĨA kèm con số tiền. Ví dụ
+     cách nói thay thế:
+     - `requested_amount`/`capital_need` → "nhu cầu vốn (bảo lãnh) cần cho hợp đồng"
+     - `gross_margin`/`net_contract_margin` → "biên lợi nhuận" / "lợi nhuận hợp đồng đem lại"
+     - `additional_funding_need` → "vốn cần thêm nếu nhận hợp đồng"
+     - `worst_month_after`/`projected_closing_cash` → "tháng thiếu tiền nhất" / "số dư
+       tiền mặt cuối tháng thấp nhất còn khoảng …"
+     - `confirmed_cash_total` → "tiền mặt thực có đã xác nhận của công ty"
+     - `funding_need` (danh mục) → "tổng nhu cầu vốn của cả công ty"
+     - tháng dưới dự trữ / cash âm → "số tháng tiền mặt xuống dưới ngưỡng dự trữ an toàn"
+     1. **Lý do tài chính** — nối kinh tế riêng của hợp đồng với NĂNG LỰC tài chính
+        của OPC để gánh hợp đồng này. Bắt buộc: (a) nêu kinh tế hợp đồng
+        (`requested_amount`, `capital_need`, gross margin của case); (b) đối chiếu với
+        năng lực OPC bằng số đang có — `confirmed_cash_total` so với `requested_amount`
+        (khả năng tự phủ bao nhiêu), tình trạng thủng dự trữ (`months_below_reserve`,
+        `months_negative_cash`), `funding_need` danh mục; (c) kết luận OPC có đủ sức
+        nhận thêm hợp đồng này hay cần vốn ngoài → dẫn tới phương án.
+        - **Nếu case có trường `cash_impact`** (hợp đồng mới được định lượng tác động
+          dòng tiền), PHẢI dùng số what-if này làm căn cứ chính, trích tối thiểu:
+          `additional_funding_need` (vốn cần TĂNG THÊM nếu nhận hợp đồng),
+          `worst_month_after` so với `worst_month_before` (đáy tiền mặt xấu đi thế nào),
+          và `net_contract_margin`. Lập luận rõ hợp đồng tự phủ được bao nhiêu và còn
+          hụt bao nhiêu phải bù bằng phương án tài chính. Con số phải lấy đúng từ
+          `cash_impact`, không tự tính lại.
+     2. **Lý do rủi ro / hồ sơ** — từ `overall_risk_level`, rule triggered, alert và
+        evidence thiếu, kết luận vì sao chọn `review`/`reject` thay vì approve thẳng
+        cho hợp đồng này.
+     3. **Lý do product fit** — sản phẩm ngân hàng nào khớp `funding_need` của hợp
+        đồng, vì sao (need type, rate, collateral, match_status), và trạng thái
+        pre-check → điều kiện để phương án khả thi.
    - **Một điều kiện cần con người xác nhận** (human confirmation point): mô tả rõ
      hành động nào (ví dụ gọi precheck với ngân hàng hoặc gửi hồ sơ chính thức) đang
      chờ người có thẩm quyền duyệt. Luôn phải có trường này, dù phương án là gì.

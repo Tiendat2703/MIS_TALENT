@@ -1,0 +1,305 @@
+{
+  "version": 2,
+  "revision": 3,
+  "run_id": 8,
+  "created_at": "2026-07-18T16:30:34.483114+00:00",
+  "updated_at": "2026-07-18T16:31:06.861605+00:00",
+  "workflow_status": "review",
+  "context": {
+    "document_id": "BATCH-8",
+    "original_input": "{\"session_id\": 8, \"mode\": \"upload\", \"contract_ids\": [\"CON-UPLOAD-001\"], \"instruction\": \"Run Finance once for the complete contract batch, persist a FinanceBatchPack, hand off to Risk by this session_id, then hand off to Decision by the same session_id.\"}",
+    "run_id": 8,
+    "contract_id": "CON-UPLOAD-001",
+    "contract_ids": [
+      "CON-UPLOAD-001"
+    ],
+    "reference_date": null,
+    "scenario": null,
+    "finance_store": {},
+    "brain_request_payload": null,
+    "continuation_approval_id": null
+  },
+  "user_input": "{\"session_id\": 8, \"mode\": \"upload\", \"contract_ids\": [\"CON-UPLOAD-001\"], \"instruction\": \"Run Finance once for the complete contract batch, persist a FinanceBatchPack, hand off to Risk by this session_id, then hand off to Decision by the same session_id.\"}",
+  "metadata": {
+    "mode": "upload",
+    "contract_ids": [
+      "CON-UPLOAD-001"
+    ],
+    "uploaded_contract_id": "CON-UPLOAD-001"
+  },
+  "approval_requests": [
+    {
+      "approval_id": "bf45d174-6523-4dda-acdf-37720b7b6e39",
+      "fingerprint": "f03903ab55eb0009b8140c134c370ee1abce54083853f6194df510c97a604e13",
+      "contract_id": "CON-UPLOAD-001",
+      "tool": "precheck_performance_bond",
+      "arguments": {
+        "contract_id": "CON-UPLOAD-001",
+        "amount": 300000000.0
+      },
+      "status": "pending",
+      "requested_at": "2026-07-18T16:31:00.022123+00:00",
+      "decided_at": null,
+      "execution_started_at": null,
+      "executed_at": null,
+      "decision_applied_at": null,
+      "result": null,
+      "error": null
+    }
+  ],
+  "decision_result": {
+    "decisions": [
+      {
+        "contract_id": "CON-UPLOAD-001",
+        "accept_opportunity": false,
+        "recommended_option": "APPROVE_WITH_CONDITION",
+        "protective_condition": "Chưa gọi API ngân hàng, đang chờ xác nhận của người dùng cho pre-check bảo lãnh thực hiện hợp đồng và chưa được gửi hồ sơ chính thức. Chỉ xem xét tiếp khi người có thẩm quyền xác nhận pre-check, rà soát pricing/scope, phương án dòng tiền hoặc chia pha triển khai, và xử lý các điểm hồ sơ/rủi ro còn thiếu theo Risk Pack.",
+        "capital_need": 300000000.0,
+        "risk_level": "high",
+        "decision_status": "review",
+        "reasons": [
+          "Tài chính: nhu cầu vốn theo case là 300000000.0 cho PERFORMANCE_BOND; danh mục có funding need tổng thể 710000000.0, 6 tháng dưới ngưỡng dự trữ và 3 tháng cash âm. Gross margin case là 0.25, thấp hơn target danh mục 0.28; danh mục cũng có margin pressure flag với portfolio margin 0.2762 và margin gap -0.0038.",
+          "Rủi ro / hồ sơ: Risk Pack đánh giá HIGH, có rule RR-002 cashflow shortage và RR-003 margin pressure triggered; đồng thời có insufficient evidence ở các điểm trọng yếu như transaction risk score, document sent to partner, confidence score và delivery delay days. Risk Pack yêu cầu human review, nên không nên approve tự động.",
+          "Product fit: sản phẩm phù hợp nhất là VietinBank Performance bond, match_status MATCHED, phí/năm 0.012; need type khớp PERFORMANCE_BOND, requested amount 300000000.0 vượt mức tối thiểu theo tool và collateral ratio 20% trong ngưỡng chấp nhận. Tuy nhiên sản phẩm yêu cầu human approval và pre-check hiện pending nên chỉ đề xuất review có điều kiện."
+        ],
+        "eligible_score": null,
+        "precheck_note": null,
+        "requires_founder_confirmation": true,
+        "approval_status": false,
+        "is_preliminary": true
+      }
+    ]
+  },
+  "conversation_items": [
+    {
+      "content": "{\"session_id\": 8, \"mode\": \"upload\", \"contract_ids\": [\"CON-UPLOAD-001\"], \"instruction\": \"Run Finance once for the complete contract batch, persist a FinanceBatchPack, hand off to Risk by this session_id, then hand off to Decision by the same session_id.\"}",
+      "role": "user"
+    },
+    {
+      "arguments": "{}",
+      "call_id": "call_149OA3ZYZk17AngPPHyO4NdK",
+      "name": "load_and_validate",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E32DsZ9dZoTJnd0XJmsdZQ7XgJNDq"
+      }
+    },
+    {
+      "arguments": "{}",
+      "call_id": "call_9ea7eBcpNYrEUBaNBeyNykQQ",
+      "name": "reconcile_bank",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E32DsZ9dZoTJnd0XJmsdZQ7XgJNDq"
+      }
+    },
+    {
+      "arguments": "{}",
+      "call_id": "call_bphh0EqJ2KgVlB9ANOg7QHF0",
+      "name": "liquidity_funding",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E32DsZ9dZoTJnd0XJmsdZQ7XgJNDq"
+      }
+    },
+    {
+      "arguments": "{}",
+      "call_id": "call_XPgZwY30dxXk9qcrsmkmLMf3",
+      "name": "classify_invoice",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E32DsZ9dZoTJnd0XJmsdZQ7XgJNDq"
+      }
+    },
+    {
+      "arguments": "{}",
+      "call_id": "call_4d02Ul5mBpFIHg8zS8eTnm1s",
+      "name": "margin_analysis",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E32DsZ9dZoTJnd0XJmsdZQ7XgJNDq"
+      }
+    },
+    {
+      "call_id": "call_149OA3ZYZk17AngPPHyO4NdK",
+      "output": "{'data_source': 'mock+upload', 'readiness': 'Conditional', 'error_count': 0, 'warning_count': 2, 'customer_counterparties': ['CUS-001', 'CUS-003', 'CUS-006'], 'external_counterparties': ['FOUNDER', 'SUP-002', 'SUP-003', 'SUP-004', 'TAX'], 'unidentified_counterparties': ['UNK-ECOM'], 'issues': [{'kind': 'unidentified_counterparty', 'table': '08_BANK_TXN', 'record': 'TXN-006', 'detail': 'counterparty UNK-ECOM chưa định danh', 'severity': 'warning', 'column': ''}, {'kind': 'unidentified_counterparty', 'table': '08_BANK_TXN', 'record': 'TXN-007', 'detail': 'counterparty UNK-ECOM chưa định danh', 'severity': 'warning', 'column': ''}]}",
+      "type": "function_call_output"
+    },
+    {
+      "call_id": "call_9ea7eBcpNYrEUBaNBeyNykQQ",
+      "output": "{'confirmed_cash_total': 45000000.0, 'matched': [{'invoice_id': 'INV-001', 'txn_id': 'TXN-004', 'amount': 45000000.0}], 'open_without_cash_in': ['INV-002', 'INV-003', 'INV-004'], 'unmatched_customer_credits': [{'txn_id': 'TXN-001', 'counterparty_id': 'CUS-006', 'amount': 52000000.0, 'description': 'CUS-006 monthly service'}, {'txn_id': 'TXN-002', 'counterparty_id': 'CUS-003', 'amount': 36000000.0, 'description': 'CUS-003 setup deposit'}], 'non_operating_credits': [{'txn_id': 'TXN-010', 'counterparty_id': 'FOUNDER', 'amount': 300000000.0, 'description': 'Founder capital injection'}], 'suspicious_credits': [], 'note': 'Confirmed cash (khớp invoice) = 45,000,000. 1 credit ngoài hoạt động (vd góp vốn) không tính là doanh thu. 2 credit của khách chưa gắn invoice.'}",
+      "type": "function_call_output"
+    },
+    {
+      "call_id": "call_bphh0EqJ2KgVlB9ANOg7QHF0",
+      "output": "{'by_month': [{'month': '2026-06', 'projected_closing_cash': -160000000.0, 'cash_reserve_minimum': 550000000.0, 'reserve_gap': 710000000.0, 'net_operating_flow': -182000000.0}, {'month': '2026-07', 'projected_closing_cash': -130000000.0, 'cash_reserve_minimum': 550000000.0, 'reserve_gap': 680000000.0, 'net_operating_flow': -640000000.0}, {'month': '2026-08', 'projected_closing_cash': -155000000.0, 'cash_reserve_minimum': 550000000.0, 'reserve_gap': 705000000.0, 'net_operating_flow': -460000000.0}, {'month': '2026-09', 'projected_closing_cash': 350000000.0, 'cash_reserve_minimum': 550000000.0, 'reserve_gap': 200000000.0, 'net_operating_flow': 720000000.0}, {'month': '2026-10', 'projected_closing_cash': 150000000.0, 'cash_reserve_minimum': 550000000.0, 'reserve_gap': 400000000.0, 'net_operating_flow': 160000000.0}, {'month': '2026-11', 'projected_closing_cash': 300000000.0, 'cash_reserve_minimum': 550000000.0, 'reserve_gap': 250000000.0, 'net_operating_flow': 300000000.0}], 'max_reserve_gap': 710000000.0, 'minimum_liquidity_need': 710000000.0, 'funding_need': 710000000.0, 'months_below_reserve': ['2026-06', '2026-07', '2026-08', '2026-09', '2026-10', '2026-11'], 'months_negative_cash': ['2026-06', '2026-07', '2026-08'], 'months_missing_data': []}",
+      "type": "function_call_output"
+    },
+    {
+      "call_id": "call_XPgZwY30dxXk9qcrsmkmLMf3",
+      "output": "{'paid_total': 45000000.0, 'open_current_total': 310000000.0, 'overdue_total': 325000000.0, 'not_issued_total': 2760000000.0, 'buckets': {'paid': [{'invoice_id': 'INV-001', 'customer_id': 'CUS-001', 'order_id': 'ORD-001', 'amount': 45000000.0, 'due_date': '2026-06-06', 'status': 'Paid'}], 'open_current': [{'invoice_id': 'INV-004', 'customer_id': 'CUS-004', 'order_id': 'ORD-004', 'amount': 310000000.0, 'due_date': '2026-08-01', 'status': 'Open'}], 'overdue': [{'invoice_id': 'INV-002', 'customer_id': 'CUS-002', 'order_id': 'ORD-003', 'amount': 280000000.0, 'due_date': '2026-07-10', 'status': 'Open', 'days_overdue': 8}, {'invoice_id': 'INV-003', 'customer_id': 'CUS-001', 'order_id': 'ORD-002', 'amount': 45000000.0, 'due_date': '2026-07-10', 'status': 'Open', 'days_overdue': 8}], 'not_issued': [{'invoice_id': 'INV-005', 'customer_id': 'CUS-005', 'order_id': 'ORD-005', 'amount': 1600000000.0, 'due_date': '2026-09-29', 'status': 'Not issued'}, {'invoice_id': 'INV-006', 'customer_id': 'CUS-008', 'order_id': 'ORD-007', 'amount': 800000000.0, 'due_date': '2026-10-15', 'status': 'Not issued'}, {'invoice_id': 'INV-007', 'customer_id': 'CUS-002', 'order_id': 'ORD-009', 'amount': 360000000.0, 'due_date': '2026-08-29', 'status': 'Not issued'}]}}",
+      "type": "function_call_output"
+    },
+    {
+      "call_id": "call_4d02Ul5mBpFIHg8zS8eTnm1s",
+      "output": "{'portfolio_revenue': 5405000000.0, 'portfolio_cost': 3912400000.0, 'portfolio_margin_amount': 1492600000.0, 'portfolio_margin_pct': 0.2762, 'committed_revenue': 730000000.0, 'committed_margin_pct': 0.3152, 'target_margin_pct': 0.28, 'margin_gap': -0.0038, 'margin_pressure_flag': True, 'by_contract': [{'contract_id': 'CON-001', 'revenue': 135000000.0, 'cost': 43000000.0, 'margin_amount': 92000000.0, 'margin_pct': 0.6815, 'below_target': False}, {'contract_id': 'CON-002', 'revenue': 640000000.0, 'cost': 471400000.0, 'margin_amount': 168600000.0, 'margin_pct': 0.2634, 'below_target': True}, {'contract_id': 'CON-003', 'revenue': 730000000.0, 'cost': 474000000.0, 'margin_amount': 256000000.0, 'margin_pct': 0.3507, 'below_target': False}, {'contract_id': 'CON-004', 'revenue': 3100000000.0, 'cost': 2356000000.0, 'margin_amount': 744000000.0, 'margin_pct': 0.24, 'below_target': True}, {'contract_id': 'CON-005', 'revenue': 800000000.0, 'cost': 568000000.0, 'margin_amount': 232000000.0, 'margin_pct': 0.29, 'below_target': False}], 'by_order': [{'order_id': 'ORD-001', 'contract_id': 'CON-001', 'status': 'Delivered', 'revenue': 45000000.0, 'cost': 14000000.0, 'margin_amount': 31000000.0, 'margin_pct': 0.6889}, {'order_id': 'ORD-002', 'contract_id': 'CON-001', 'status': 'In progress', 'revenue': 45000000.0, 'cost': 14500000.0, 'margin_amount': 30500000.0, 'margin_pct': 0.6778}, {'order_id': 'ORD-003', 'contract_id': 'CON-002', 'status': 'Delivered', 'revenue': 280000000.0, 'cost': 205000000.0, 'margin_amount': 75000000.0, 'margin_pct': 0.2679}, {'order_id': 'ORD-004', 'contract_id': 'CON-003', 'status': 'At risk', 'revenue': 310000000.0, 'cost': 198000000.0, 'margin_amount': 112000000.0, 'margin_pct': 0.3613}, {'order_id': 'ORD-005', 'contract_id': 'CON-004', 'status': 'Pending approval', 'revenue': 1600000000.0, 'cost': 1216000000.0, 'margin_amount': 384000000.0, 'margin_pct': 0.24}, {'order_id': 'ORD-006', 'contract_id': 'CON-004', 'status': 'Planned', 'revenue': 1500000000.0, 'cost': 1140000000.0, 'margin_amount': 360000000.0, 'margin_pct': 0.24}, {'order_id': 'ORD-007', 'contract_id': 'CON-005', 'status': 'Planned', 'revenue': 800000000.0, 'cost': 568000000.0, 'margin_amount': 232000000.0, 'margin_pct': 0.29}, {'order_id': 'ORD-008', 'contract_id': 'CON-003', 'status': 'Planned', 'revenue': 420000000.0, 'cost': 276000000.0, 'margin_amount': 144000000.0, 'margin_pct': 0.3429}, {'order_id': 'ORD-009', 'contract_id': 'CON-002', 'status': 'In progress', 'revenue': 360000000.0, 'cost': 266400000.0, 'margin_amount': 93600000.0, 'margin_pct': 0.26}, {'order_id': 'ORD-010', 'contract_id': 'CON-001', 'status': 'Planned', 'revenue': 45000000.0, 'cost': 14500000.0, 'margin_amount': 30500000.0, 'margin_pct': 0.6778}], 'low_margin_contracts': ['CON-002', 'CON-004'], 'orders_missing_data': []}",
+      "type": "function_call_output"
+    },
+    {
+      "arguments": "{}",
+      "call_id": "call_cQlYhwfIXh3oySp8Mjbf0sYm",
+      "name": "missing_data",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E32DtPjesQzQev3uI6fcn8iUZ6GaI"
+      }
+    },
+    {
+      "call_id": "call_cQlYhwfIXh3oySp8Mjbf0sYm",
+      "output": "{'count': 9, 'items': [{'related_table': '07_INVOICES', 'related_record': 'INV-002', 'missing_item': 'Chưa có giao dịch ngân hàng xác nhận đã thu', 'business_impact': 'Ảnh hưởng giả định thu 280,000,000 công nợ', 'priority': 'High'}, {'related_table': '07_INVOICES', 'related_record': 'INV-003', 'missing_item': 'Chưa có giao dịch ngân hàng xác nhận đã thu', 'business_impact': 'Ảnh hưởng giả định thu 45,000,000 công nợ', 'priority': 'High'}, {'related_table': '07_INVOICES', 'related_record': 'INV-004', 'missing_item': 'Chưa có giao dịch ngân hàng xác nhận đã thu', 'business_impact': 'Ảnh hưởng giả định thu 310,000,000 công nợ', 'priority': 'High'}, {'related_table': '06_ORDERS', 'related_record': 'ORD-005', 'missing_item': \"Order đang 'Pending approval', chưa đủ cơ sở phát hành invoice INV-005\", 'business_impact': 'Ảnh hưởng khả năng phát hành 1,600,000,000', 'priority': 'Medium'}, {'related_table': '06_ORDERS', 'related_record': 'ORD-007', 'missing_item': \"Order đang 'Planned', chưa đủ cơ sở phát hành invoice INV-006\", 'business_impact': 'Ảnh hưởng khả năng phát hành 800,000,000', 'priority': 'Medium'}, {'related_table': '06_ORDERS', 'related_record': 'ORD-009', 'missing_item': \"Order đang 'In progress', chưa đủ cơ sở phát hành invoice INV-007\", 'business_impact': 'Ảnh hưởng khả năng phát hành 360,000,000', 'priority': 'Medium'}, {'related_table': '08_BANK_TXN', 'related_record': 'TXN-001', 'missing_item': 'Credit 52,000,000 từ CUS-006 không gắn invoice', 'business_impact': 'Thiếu liên kết chứng từ để ghi nhận đúng doanh thu/AR', 'priority': 'Medium'}, {'related_table': '08_BANK_TXN', 'related_record': 'TXN-002', 'missing_item': 'Credit 36,000,000 từ CUS-003 không gắn invoice', 'business_impact': 'Thiếu liên kết chứng từ để ghi nhận đúng doanh thu/AR', 'priority': 'Medium'}, {'related_table': '08_BANK_TXN', 'related_record': 'UNK-ECOM', 'missing_item': 'Counterparty chưa định danh', 'business_impact': 'Cần xác minh danh tính, có thể là giao dịch bất thường', 'priority': 'High'}]}",
+      "type": "function_call_output"
+    },
+    {
+      "arguments": "{\"contract_ids\":[\"CON-UPLOAD-001\"],\"handoff_summary\":\"Funding need 710,000,000; 6 tháng dưới ngưỡng dự trữ: 2026-06, 2026-07, 2026-08, 2026-09, 2026-10, 2026-11; 3 tháng cash âm: 2026-06, 2026-07, 2026-08. Confirmed cash khớp invoice: 45,000,000. Invoice overdue: 325,000,000; open current: 310,000,000; not-issued: 2,760,000,000; paid: 45,000,000. Portfolio revenue 5,405,000,000; cost 3,912,400,000; margin amount 1,492,600,000; margin pct 27.62% so với target 28%, margin gap -0.38 điểm %. Committed revenue 730,000,000; committed margin pct 31.52%. Dữ liệu còn thiếu: 9 mục; validation có 2 warning; customer credits chưa gắn invoice: 52,000,000 và 36,000,000; non-operating credit: 300,000,000 không tính vào confirmed cash.\",\"session_id\":8}",
+      "call_id": "call_b8gtyAUfomc2nsP5DRMhqNQr",
+      "name": "prepare_finance_handoff",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E32DvjfIqP7C92c0gzyFG9LMkPnx0"
+      }
+    },
+    {
+      "call_id": "call_b8gtyAUfomc2nsP5DRMhqNQr",
+      "output": "{'session_id': 8, 'contract_ids': ['CON-UPLOAD-001'], 'case_count': 1, 'statuses': {'CON-UPLOAD-001': 'COMPLETE'}, 'persisted': True}",
+      "type": "function_call_output"
+    },
+    {
+      "arguments": "{\"session_id\":8}",
+      "call_id": "call_6qit5EVtM3TAQ8aX8Vds6W0u",
+      "name": "transfer_to_risk_agent",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E32E1cNmTntDTeTfUYjqZwaayOEYC"
+      }
+    },
+    {
+      "call_id": "call_6qit5EVtM3TAQ8aX8Vds6W0u",
+      "output": "{\"assistant\": \"Risk_Agent\"}",
+      "type": "function_call_output"
+    },
+    {
+      "arguments": "{\"session_id\":8}",
+      "call_id": "call_36K2s3qLGjRmxTibO8d1Argm",
+      "name": "process_risk_context",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E32E23TQd87Zsix4ut8uaoT5LDdty"
+      }
+    },
+    {
+      "call_id": "call_36K2s3qLGjRmxTibO8d1Argm",
+      "output": "{'contract_ids': ['CON-UPLOAD-001'], 'packs': [{'case_id': 'CASE-CON-UPLOAD-001', 'contract_id': 'CON-UPLOAD-001', 'generated_at': '2026-07-18T16:30:49.258801Z', 'overall_risk_level': 'HIGH', 'rule_evaluations': [{'rule_id': 'RR-001', 'status': 'INSUFFICIENT_EVIDENCE', 'owner_agent': 'Risk & Compliance Agent', 'severity': 'CRITICAL', 'observed_value': None, 'required_action': 'Temporarily hold transaction and require founder approval', 'findings': [], 'missing_fields': ['transaction_risk_score'], 'message': 'Finance Feature Pack does not contain enough evidence.'}, {'rule_id': 'RR-002', 'status': 'TRIGGERED', 'owner_agent': 'Finance Agent', 'severity': 'HIGH', 'observed_value': '[CONFIDENTIAL_VALUE]', 'required_action': 'Recommend working capital option or phase delivery', 'findings': [], 'missing_fields': [], 'message': 'The Finance Feature Pack satisfies the rule condition.'}, {'rule_id': 'RR-003', 'status': 'TRIGGERED', 'owner_agent': 'Finance Agent', 'severity': 'MEDIUM', 'observed_value': '[CONFIDENTIAL_VALUE]', 'required_action': 'Flag pricing/cost review', 'findings': [], 'missing_fields': [], 'message': 'The Finance Feature Pack satisfies the rule condition.'}, {'rule_id': 'RR-004', 'status': 'INSUFFICIENT_EVIDENCE', 'owner_agent': 'Document Agent', 'severity': 'HIGH', 'observed_value': None, 'required_action': 'Human approval required', 'findings': [], 'missing_fields': ['document_sent_to_partner'], 'message': 'Finance Feature Pack does not contain enough evidence.'}, {'rule_id': 'RR-005', 'status': 'NOT_TRIGGERED', 'owner_agent': 'CEO/Planner Agent', 'severity': 'HIGH', 'observed_value': '[CONFIDENTIAL_VALUE]', 'required_action': 'Human approval required', 'findings': [], 'missing_fields': [], 'message': 'The Finance Feature Pack does not satisfy the rule condition.'}, {'rule_id': 'RR-006', 'status': 'INSUFFICIENT_EVIDENCE', 'owner_agent': 'Decision Agent', 'severity': 'MEDIUM', 'observed_value': None, 'required_action': 'Ask for missing data or provide no-recommendation', 'findings': [], 'missing_fields': ['confidence_score'], 'message': 'Finance Feature Pack does not contain enough evidence.'}, {'rule_id': 'RR-007', 'status': 'INSUFFICIENT_EVIDENCE', 'owner_agent': 'Operations Agent', 'severity': 'HIGH', 'observed_value': None, 'required_action': 'Escalate operations plan and penalty exposure', 'findings': [], 'missing_fields': ['delivery_delay_days'], 'message': 'Finance Feature Pack does not contain enough evidence.'}], 'triggered_rule_ids': ['RR-002', 'RR-003'], 'alerts': [{'alert': {'alert_id': 'AL-002', 'alert_date': '2026-06-17', 'alert_type': 'Cashflow shortage', 'related_record': '2026-07', 'severity': 'HIGH', 'risk_score': 76, 'description': 'Projected closing cash below reserve minimum', 'recommended_action': 'Evaluate working capital line'}, 'matched_rule_ids': ['RR-002'], 'match_basis': 'EXACT_RISK_TYPE'}, {'alert': {'alert_id': 'AL-005', 'alert_date': '2026-06-17', 'alert_type': 'Margin pressure', 'related_record': 'TOK-ORD-E0FB4F29', 'severity': 'MEDIUM', 'risk_score': 55, 'description': 'Cost/revenue ratio high', 'recommended_action': 'Review pricing or scope'}, 'matched_rule_ids': ['RR-003'], 'match_basis': 'EXACT_RISK_TYPE'}], 'proposed_alerts': [], 'required_actions': ['Recommend working capital option or phase delivery', 'Flag pricing/cost review'], 'insufficient_evidence': ['RR-001:transaction_risk_score', 'RR-004:document_sent_to_partner', 'RR-006:confidence_score', 'RR-007:delivery_delay_days'], 'human_approval_required': True, 'masked_data': {'masking_applied': True, 'masking_policy_source': '20_DATA_CLASS', 'masked_fields': [{'field_name': 'closing_cash', 'classification': 'confidential', 'masked_value': '[CONFIDENTIAL_VALUE]'}, {'field_name': 'gross_margin', 'classification': 'confidential', 'masked_value': '[CONFIDENTIAL_VALUE]'}, {'field_name': 'requested_amount', 'classification': 'confidential', 'masked_value': '[CONFIDENTIAL_VALUE]'}, {'field_name': 'related_record', 'classification': 'internal', 'masked_value': 'TOK-ORD-E0FB4F29'}]}, 'summary': {'total_rules_triggered': 2, 'triggered_rule_ids': ['RR-002', 'RR-003'], 'total_alerts_detected': 2, 'total_proposed_alerts': 0, 'unmapped_rule_ids': [], 'highest_severity': 'HIGH', 'human_review_required': True}, 'handoff_summary': 'Risk level HIGH; 2 rules triggered; 4 evidence gaps; human review required.', 'decision_made_by_risk_agent': False}]}",
+      "type": "function_call_output"
+    },
+    {
+      "arguments": "{\"session_id\":8}",
+      "call_id": "call_SR0eKxnRhCEpegE5iX6kYlzW",
+      "name": "transfer_to_decision_agent",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E32E6IwbYREPkQF4UFYlgXJTi0L8r"
+      }
+    },
+    {
+      "call_id": "call_SR0eKxnRhCEpegE5iX6kYlzW",
+      "output": "{\"assistant\": \"Decision_Agent\"}",
+      "type": "function_call_output"
+    },
+    {
+      "arguments": "{\"session_id\":8}",
+      "call_id": "call_aj2F669hLshGJL1FKDuztNqY",
+      "name": "load_decision_context",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E32E9akF5c5hJuzxvMyJjuYKMCcRV"
+      }
+    },
+    {
+      "call_id": "call_aj2F669hLshGJL1FKDuztNqY",
+      "output": "{'session_id': 8, 'contract_ids': ['CON-UPLOAD-001'], 'portfolio_finance': {'metadata': {'agent': 'Finance Agent', 'analysis_id': 'FIN-8', 'generated_at': '2026-07-18T16:30:44.489557+00:00', 'scope': 'portfolio', 'data_source': 'mock+upload', 'scenario': None, 'orchestration': 'agentic', 'input_tables': ['04_CONTRACTS', '06_ORDERS', '07_INVOICES', '08_BANK_TXN', '09_CASHFLOW', '02_OPC_PROFILE', '03_CUSTOMERS', '05_PRODUCTS'], 'output_for': 'Risk Agent', 'final_decision_allowed': False}, 'liquidity_brief': {'by_month': [{'month': '2026-06', 'projected_closing_cash': -160000000.0, 'cash_reserve_minimum': 550000000.0, 'reserve_gap': 710000000.0, 'net_operating_flow': -182000000.0}, {'month': '2026-07', 'projected_closing_cash': -130000000.0, 'cash_reserve_minimum': 550000000.0, 'reserve_gap': 680000000.0, 'net_operating_flow': -640000000.0}, {'month': '2026-08', 'projected_closing_cash': -155000000.0, 'cash_reserve_minimum': 550000000.0, 'reserve_gap': 705000000.0, 'net_operating_flow': -460000000.0}, {'month': '2026-09', 'projected_closing_cash': 350000000.0, 'cash_reserve_minimum': 550000000.0, 'reserve_gap': 200000000.0, 'net_operating_flow': 720000000.0}, {'month': '2026-10', 'projected_closing_cash': 150000000.0, 'cash_reserve_minimum': 550000000.0, 'reserve_gap': 400000000.0, 'net_operating_flow': 160000000.0}, {'month': '2026-11', 'projected_closing_cash': 300000000.0, 'cash_reserve_minimum': 550000000.0, 'reserve_gap': 250000000.0, 'net_operating_flow': 300000000.0}], 'max_reserve_gap': 710000000.0, 'minimum_liquidity_need': 710000000.0, 'funding_need': 710000000.0, 'months_below_reserve': ['2026-06', '2026-07', '2026-08', '2026-09', '2026-10', '2026-11'], 'months_negative_cash': ['2026-06', '2026-07', '2026-08'], 'months_missing_data': []}, 'invoice_classification': {'paid_total': 45000000.0, 'open_current_total': 310000000.0, 'overdue_total': 325000000.0, 'not_issued_total': 2760000000.0, 'buckets': {'paid': [{'invoice_id': 'INV-001', 'customer_id': 'CUS-001', 'order_id': 'ORD-001', 'amount': 45000000.0, 'due_date': '2026-06-06', 'status': 'Paid'}], 'open_current': [{'invoice_id': 'INV-004', 'customer_id': 'CUS-004', 'order_id': 'ORD-004', 'amount': 310000000.0, 'due_date': '2026-08-01', 'status': 'Open'}], 'overdue': [{'invoice_id': 'INV-002', 'customer_id': 'CUS-002', 'order_id': 'ORD-003', 'amount': 280000000.0, 'due_date': '2026-07-10', 'status': 'Open', 'days_overdue': 8}, {'invoice_id': 'INV-003', 'customer_id': 'CUS-001', 'order_id': 'ORD-002', 'amount': 45000000.0, 'due_date': '2026-07-10', 'status': 'Open', 'days_overdue': 8}], 'not_issued': [{'invoice_id': 'INV-005', 'customer_id': 'CUS-005', 'order_id': 'ORD-005', 'amount': 1600000000.0, 'due_date': '2026-09-29', 'status': 'Not issued'}, {'invoice_id': 'INV-006', 'customer_id': 'CUS-008', 'order_id': 'ORD-007', 'amount': 800000000.0, 'due_date': '2026-10-15', 'status': 'Not issued'}, {'invoice_id': 'INV-007', 'customer_id': 'CUS-002', 'order_id': 'ORD-009', 'amount': 360000000.0, 'due_date': '2026-08-29', 'status': 'Not issued'}]}}, 'bank_reconciliation_summary': {'confirmed_cash_total': 45000000.0, 'matched': [{'invoice_id': 'INV-001', 'txn_id': 'TXN-004', 'amount': 45000000.0}], 'open_without_cash_in': ['INV-002', 'INV-003', 'INV-004'], 'unmatched_customer_credits': [{'txn_id': 'TXN-001', 'counterparty_id': 'CUS-006', 'amount': 52000000.0, 'description': 'CUS-006 monthly service'}, {'txn_id': 'TXN-002', 'counterparty_id': 'CUS-003', 'amount': 36000000.0, 'description': 'CUS-003 setup deposit'}], 'non_operating_credits': [{'txn_id': 'TXN-010', 'counterparty_id': 'FOUNDER', 'amount': 300000000.0, 'description': 'Founder capital injection'}], 'suspicious_credits': [], 'note': 'Confirmed cash (khớp invoice) = 45,000,000. 1 credit ngoài hoạt động (vd góp vốn) không tính là doanh thu. 2 credit của khách chưa gắn invoice.'}, 'margin_analysis': {'portfolio_revenue': 5405000000.0, 'portfolio_cost': 3912400000.0, 'portfolio_margin_amount': 1492600000.0, 'portfolio_margin_pct': 0.2762, 'committed_revenue': 730000000.0, 'committed_margin_pct': 0.3152, 'target_margin_pct': 0.28, 'margin_gap': -0.0038, 'margin_pressure_flag': True, 'by_contract': [{'contract_id': 'CON-001', 'revenue': 135000000.0, 'cost': 43000000.0, 'margin_amount': 92000000.0, 'margin_pct': 0.6815, 'below_target': False}, {'contract_id': 'CON-002', 'revenue': 640000000.0, 'cost': 471400000.0, 'margin_amount': 168600000.0, 'margin_pct': 0.2634, 'below_target': True}, {'contract_id': 'CON-003', 'revenue': 730000000.0, 'cost': 474000000.0, 'margin_amount': 256000000.0, 'margin_pct': 0.3507, 'below_target': False}, {'contract_id': 'CON-004', 'revenue': 3100000000.0, 'cost': 2356000000.0, 'margin_amount': 744000000.0, 'margin_pct': 0.24, 'below_target': True}, {'contract_id': 'CON-005', 'revenue': 800000000.0, 'cost': 568000000.0, 'margin_amount': 232000000.0, 'margin_pct': 0.29, 'below_target': False}], 'by_order': [{'order_id': 'ORD-001', 'contract_id': 'CON-001', 'status': 'Delivered', 'revenue': 45000000.0, 'cost': 14000000.0, 'margin_amount': 31000000.0, 'margin_pct': 0.6889}, {'order_id': 'ORD-002', 'contract_id': 'CON-001', 'status': 'In progress', 'revenue': 45000000.0, 'cost': 14500000.0, 'margin_amount': 30500000.0, 'margin_pct': 0.6778}, {'order_id': 'ORD-003', 'contract_id': 'CON-002', 'status': 'Delivered', 'revenue': 280000000.0, 'cost': 205000000.0, 'margin_amount': 75000000.0, 'margin_pct': 0.2679}, {'order_id': 'ORD-004', 'contract_id': 'CON-003', 'status': 'At risk', 'revenue': 310000000.0, 'cost': 198000000.0, 'margin_amount': 112000000.0, 'margin_pct': 0.3613}, {'order_id': 'ORD-005', 'contract_id': 'CON-004', 'status': 'Pending approval', 'revenue': 1600000000.0, 'cost': 1216000000.0, 'margin_amount': 384000000.0, 'margin_pct': 0.24}, {'order_id': 'ORD-006', 'contract_id': 'CON-004', 'status': 'Planned', 'revenue': 1500000000.0, 'cost': 1140000000.0, 'margin_amount': 360000000.0, 'margin_pct': 0.24}, {'order_id': 'ORD-007', 'contract_id': 'CON-005', 'status': 'Planned', 'revenue': 800000000.0, 'cost': 568000000.0, 'margin_amount': 232000000.0, 'margin_pct': 0.29}, {'order_id': 'ORD-008', 'contract_id': 'CON-003', 'status': 'Planned', 'revenue': 420000000.0, 'cost': 276000000.0, 'margin_amount': 144000000.0, 'margin_pct': 0.3429}, {'order_id': 'ORD-009', 'contract_id': 'CON-002', 'status': 'In progress', 'revenue': 360000000.0, 'cost': 266400000.0, 'margin_amount': 93600000.0, 'margin_pct': 0.26}, {'order_id': 'ORD-010', 'contract_id': 'CON-001', 'status': 'Planned', 'revenue': 45000000.0, 'cost': 14500000.0, 'margin_amount': 30500000.0, 'margin_pct': 0.6778}], 'low_margin_contracts': ['CON-002', 'CON-004'], 'orders_missing_data': []}, 'missing_data_request': [{'related_table': '07_INVOICES', 'related_record': 'INV-002', 'missing_item': 'Chưa có giao dịch ngân hàng xác nhận đã thu', 'business_impact': 'Ảnh hưởng giả định thu 280,000,000 công nợ', 'priority': 'High'}, {'related_table': '07_INVOICES', 'related_record': 'INV-003', 'missing_item': 'Chưa có giao dịch ngân hàng xác nhận đã thu', 'business_impact': 'Ảnh hưởng giả định thu 45,000,000 công nợ', 'priority': 'High'}, {'related_table': '07_INVOICES', 'related_record': 'INV-004', 'missing_item': 'Chưa có giao dịch ngân hàng xác nhận đã thu', 'business_impact': 'Ảnh hưởng giả định thu 310,000,000 công nợ', 'priority': 'High'}, {'related_table': '06_ORDERS', 'related_record': 'ORD-005', 'missing_item': \"Order đang 'Pending approval', chưa đủ cơ sở phát hành invoice INV-005\", 'business_impact': 'Ảnh hưởng khả năng phát hành 1,600,000,000', 'priority': 'Medium'}, {'related_table': '06_ORDERS', 'related_record': 'ORD-007', 'missing_item': \"Order đang 'Planned', chưa đủ cơ sở phát hành invoice INV-006\", 'business_impact': 'Ảnh hưởng khả năng phát hành 800,000,000', 'priority': 'Medium'}, {'related_table': '06_ORDERS', 'related_record': 'ORD-009', 'missing_item': \"Order đang 'In progress', chưa đủ cơ sở phát hành invoice INV-007\", 'business_impact': 'Ảnh hưởng khả năng phát hành 360,000,000', 'priority': 'Medium'}, {'related_table': '08_BANK_TXN', 'related_record': 'TXN-001', 'missing_item': 'Credit 52,000,000 từ CUS-006 không gắn invoice', 'business_impact': 'Thiếu liên kết chứng từ để ghi nhận đúng doanh thu/AR', 'priority': 'Medium'}, {'related_table': '08_BANK_TXN', 'related_record': 'TXN-002', 'missing_item': 'Credit 36,000,000 từ CUS-003 không gắn invoice', 'business_impact': 'Thiếu liên kết chứng từ để ghi nhận đúng doanh thu/AR', 'priority': 'Medium'}, {'related_table': '08_BANK_TXN', 'related_record': 'UNK-ECOM', 'missing_item': 'Counterparty chưa định danh', 'business_impact': 'Cần xác minh danh tính, có thể là giao dịch bất thường', 'priority': 'High'}], 'key_facts': {'funding_need': 710000000.0, 'max_reserve_gap': 710000000.0, 'reserve_breach_flag': True, 'months_below_reserve': ['2026-06', '2026-07', '2026-08', '2026-09', '2026-10', '2026-11'], 'months_negative_cash': ['2026-06', '2026-07', '2026-08'], 'confirmed_cash_total': 45000000.0, 'open_invoice_current_total': 310000000.0, 'overdue_invoice_total': 325000000.0, 'not_issued_invoice_total': 2760000000.0, 'paid_invoice_total': 45000000.0, 'portfolio_margin_pct': 0.2762, 'target_margin_pct': 0.28, 'margin_gap': -0.0038, 'margin_below_target': True, 'low_margin_contracts': ['CON-002', 'CON-004'], 'unmatched_customer_credit_txn': ['TXN-001', 'TXN-002'], 'non_operating_credit_txn': ['TXN-010'], 'suspicious_credit_txn': [], 'unidentified_counterparties': ['UNK-ECOM'], 'data_error_count': 0, 'data_warning_count': 2, 'missing_data_count': 9, 'synthesis_source': 'llm'}, 'handoff_summary': 'Funding need 710,000,000; 6 tháng dưới ngưỡng dự trữ: 2026-06, 2026-07, 2026-08, 2026-09, 2026-10, 2026-11; 3 tháng cash âm: 2026-06, 2026-07, 2026-08. Confirmed cash khớp invoice: 45,000,000. Invoice overdue: 325,000,000; open current: 310,000,000; not-issued: 2,760,000,000; paid: 45,000,000. Portfolio revenue 5,405,000,000; cost 3,912,400,000; margin amount 1,492,600,000; margin pct 27.62% so với target 28%, margin gap -0.38 điểm %. Committed revenue 730,000,000; committed margin pct 31.52%. Dữ liệu còn thiếu: 9 mục; validation có 2 warning; customer credits chưa gắn invoice: 52,000,000 và 36,000,000; non-operating credit: 300,000,000 không tính vào confirmed cash.', 'status': 'COMPLETE', 'data_request_form': None, 'submission_report': None, 'agent_run_log': [{'mode': 'agentic', 'tools_called': ['invoices', 'liquidity', 'margin', 'missing', 'reconciliation', 'validation']}]}, 'cases': [{'finance': {'case_id': 'CASE-CON-UPLOAD-001', 'contract_id': 'CON-UPLOAD-001', 'company_id': 'OPC-001', 'generated_at': '2026-07-18T16:30:44.489744Z', 'transaction_risk_score': None, 'projected_closing_cash': -160000000.0, 'cash_reserve_minimum': 550000000.0, 'gross_margin': 0.25, 'document_sent_to_partner': None, 'contract_value': 1200000000.0, 'requested_amount': 300000000.0, 'confidence_score': None, 'delivery_delay_days': None, 'funding_need_type': 'PERFORMANCE_BOND', 'tenor': '7 months', 'customer_type': 'Cooperative', 'supplier_docs': [], 'receivable_list': [], 'source_record_ids': ['CON-UPLOAD-001'], 'handoff_summary': 'Funding need 710,000,000; 6 tháng dưới ngưỡng dự trữ: 2026-06, 2026-07, 2026-08, 2026-09, 2026-10, 2026-11; 3 tháng cash âm: 2026-06, 2026-07, 2026-08. Confirmed cash khớp invoice: 45,000,000. Invoice overdue: 325,000,000; open current: 310,000,000; not-issued: 2,760,000,000; paid: 45,000,000. Portfolio revenue 5,405,000,000; cost 3,912,400,000; margin amount 1,492,600,000; margin pct 27.62% so với target 28%, margin gap -0.38 điểm %. Committed revenue 730,000,000; committed margin pct 31.52%. Dữ liệu còn thiếu: 9 mục; validation có 2 warning; customer credits chưa gắn invoice: 52,000,000 và 36,000,000; non-operating credit: 300,000,000 không tính vào confirmed cash.', 'status': 'COMPLETE', 'finance_details': {'contract_margin': None, 'contract_status': 'Pending approval', 'payment_terms': 'Performance bond required; 30% advance, 50% delivery, 20% acceptance', 'description': 'Triển khai hệ thống quản lý chuỗi cung ứng cho 12 kho nông sản'}}, 'risk': {'case_id': 'CASE-CON-UPLOAD-001', 'contract_id': 'CON-UPLOAD-001', 'generated_at': '2026-07-18T16:30:49.258801Z', 'overall_risk_level': 'HIGH', 'rule_evaluations': [{'rule_id': 'RR-001', 'status': 'INSUFFICIENT_EVIDENCE', 'owner_agent': 'Risk & Compliance Agent', 'severity': 'CRITICAL', 'observed_value': None, 'required_action': 'Temporarily hold transaction and require founder approval', 'findings': [], 'missing_fields': ['transaction_risk_score'], 'message': 'Finance Feature Pack does not contain enough evidence.'}, {'rule_id': 'RR-002', 'status': 'TRIGGERED', 'owner_agent': 'Finance Agent', 'severity': 'HIGH', 'observed_value': '[CONFIDENTIAL_VALUE]', 'required_action': 'Recommend working capital option or phase delivery', 'findings': [], 'missing_fields': [], 'message': 'The Finance Feature Pack satisfies the rule condition.'}, {'rule_id': 'RR-003', 'status': 'TRIGGERED', 'owner_agent': 'Finance Agent', 'severity': 'MEDIUM', 'observed_value': '[CONFIDENTIAL_VALUE]', 'required_action': 'Flag pricing/cost review', 'findings': [], 'missing_fields': [], 'message': 'The Finance Feature Pack satisfies the rule condition.'}, {'rule_id': 'RR-004', 'status': 'INSUFFICIENT_EVIDENCE', 'owner_agent': 'Document Agent', 'severity': 'HIGH', 'observed_value': None, 'required_action': 'Human approval required', 'findings': [], 'missing_fields': ['document_sent_to_partner'], 'message': 'Finance Feature Pack does not contain enough evidence.'}, {'rule_id': 'RR-005', 'status': 'NOT_TRIGGERED', 'owner_agent': 'CEO/Planner Agent', 'severity': 'HIGH', 'observed_value': '[CONFIDENTIAL_VALUE]', 'required_action': 'Human approval required', 'findings': [], 'missing_fields': [], 'message': 'The Finance Feature Pack does not satisfy the rule condition.'}, {'rule_id': 'RR-006', 'status': 'INSUFFICIENT_EVIDENCE', 'owner_agent': 'Decision Agent', 'severity': 'MEDIUM', 'observed_value': None, 'required_action': 'Ask for missing data or provide no-recommendation', 'findings': [], 'missing_fields': ['confidence_score'], 'message': 'Finance Feature Pack does not contain enough evidence.'}, {'rule_id': 'RR-007', 'status': 'INSUFFICIENT_EVIDENCE', 'owner_agent': 'Operations Agent', 'severity': 'HIGH', 'observed_value': None, 'required_action': 'Escalate operations plan and penalty exposure', 'findings': [], 'missing_fields': ['delivery_delay_days'], 'message': 'Finance Feature Pack does not contain enough evidence.'}], 'triggered_rule_ids': ['RR-002', 'RR-003'], 'alerts': [{'alert': {'alert_id': 'AL-002', 'alert_date': '2026-06-17', 'alert_type': 'Cashflow shortage', 'related_record': '2026-07', 'severity': 'HIGH', 'risk_score': 76, 'description': 'Projected closing cash below reserve minimum', 'recommended_action': 'Evaluate working capital line'}, 'matched_rule_ids': ['RR-002'], 'match_basis': 'EXACT_RISK_TYPE'}, {'alert': {'alert_id': 'AL-005', 'alert_date': '2026-06-17', 'alert_type': 'Margin pressure', 'related_record': 'TOK-ORD-E0FB4F29', 'severity': 'MEDIUM', 'risk_score': 55, 'description': 'Cost/revenue ratio high', 'recommended_action': 'Review pricing or scope'}, 'matched_rule_ids': ['RR-003'], 'match_basis': 'EXACT_RISK_TYPE'}], 'proposed_alerts': [], 'required_actions': ['Recommend working capital option or phase delivery', 'Flag pricing/cost review'], 'insufficient_evidence': ['RR-001:transaction_risk_score', 'RR-004:document_sent_to_partner', 'RR-006:confidence_score', 'RR-007:delivery_delay_days'], 'human_approval_required': True, 'masked_data': {'masking_applied': True, 'masking_policy_source': '20_DATA_CLASS', 'masked_fields': [{'field_name': 'closing_cash', 'classification': 'confidential', 'masked_value': '[CONFIDENTIAL_VALUE]'}, {'field_name': 'gross_margin', 'classification': 'confidential', 'masked_value': '[CONFIDENTIAL_VALUE]'}, {'field_name': 'requested_amount', 'classification': 'confidential', 'masked_value': '[CONFIDENTIAL_VALUE]'}, {'field_name': 'related_record', 'classification': 'internal', 'masked_value': 'TOK-ORD-E0FB4F29'}]}, 'summary': {'total_rules_triggered': 2, 'triggered_rule_ids': ['RR-002', 'RR-003'], 'total_alerts_detected': 2, 'total_proposed_alerts': 0, 'unmapped_rule_ids': [], 'highest_severity': 'HIGH', 'human_review_required': True}, 'handoff_summary': 'Risk level HIGH; 2 rules triggered; 4 evidence gaps; human review required.', 'decision_made_by_risk_agent': False}, 'funding_need': {'need_type': 'PERFORMANCE_BOND', 'requested_amount': 300000000.0, 'tenor': '7 months', 'basis': 'Contract CON-UPLOAD-001'}}]}",
+      "type": "function_call_output"
+    },
+    {
+      "arguments": "{\"funding_need\":{\"need_type\":\"PERFORMANCE_BOND\",\"requested_amount\":300000000.0}}",
+      "call_id": "call_d2rsYjLz3JS1kkKXrn9PYYPt",
+      "name": "match_bank_product",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E32ECTSq7qwNrmdnnQINxomFMXWo5"
+      }
+    },
+    {
+      "call_id": "call_d2rsYjLz3JS1kkKXrn9PYYPt",
+      "output": "{'best_match': {'bank_product_id': 'BANKPROD-002', 'bank': 'VietinBank', 'product_name': 'Performance bond', 'annual_rate_or_fee': 0.012, 'automation_level': 'Human approval', 'match_status': 'MATCHED', 'match_reasons': ['Need type matches Performance bond.', 'Requested amount is above minimum amount.', 'Collateral ratio 20% is within acceptable range.'], 'human_approval_required': True, 'precheck_status': 'PENDING_HUMAN_APPROVAL'}, 'all_candidates': [{'bank_product_id': 'BANKPROD-002', 'bank': 'VietinBank', 'product_name': 'Performance bond', 'annual_rate_or_fee': 0.012, 'automation_level': 'Human approval', 'match_status': 'MATCHED', 'match_reasons': ['Need type matches Performance bond.', 'Requested amount is above minimum amount.', 'Collateral ratio 20% is within acceptable range.'], 'human_approval_required': True, 'precheck_status': 'PENDING_HUMAN_APPROVAL'}]}",
+      "type": "function_call_output"
+    },
+    {
+      "arguments": "{\"amount\":300000000.0,\"contract_id\":\"CON-UPLOAD-001\"}",
+      "call_id": "call_8LhF3zrxoeFzfVgfHuXUdxPB",
+      "name": "precheck_performance_bond",
+      "type": "function_call",
+      "id": "__fake_id__",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E32EFj8Te7ZFElovPWLCCgZod7hBF"
+      }
+    },
+    {
+      "call_id": "call_8LhF3zrxoeFzfVgfHuXUdxPB",
+      "output": "{'approval_id': 'bf45d174-6523-4dda-acdf-37720b7b6e39', 'approval_state': 'pending', 'approval_status': False, 'eligible': None, 'score': None, 'note': None, 'eligible_score': None, 'precheck_note': None}",
+      "type": "function_call_output"
+    },
+    {
+      "id": "__fake_id__",
+      "content": [
+        {
+          "annotations": [],
+          "text": "{\"decisions\":[{\"accept_opportunity\":false,\"approval_status\":false,\"capital_need\":300000000.0,\"contract_id\":\"CON-UPLOAD-001\",\"decision_status\":\"review\",\"eligible_score\":null,\"is_preliminary\":true,\"precheck_note\":null,\"protective_condition\":\"Chưa gọi API ngân hàng, đang chờ xác nhận của người dùng cho pre-check bảo lãnh thực hiện hợp đồng và chưa được gửi hồ sơ chính thức. Chỉ xem xét tiếp khi người có thẩm quyền xác nhận pre-check, rà soát pricing/scope, phương án dòng tiền hoặc chia pha triển khai, và xử lý các điểm hồ sơ/rủi ro còn thiếu theo Risk Pack.\",\"reasons\":[\"Tài chính: nhu cầu vốn theo case là 300000000.0 cho PERFORMANCE_BOND; danh mục có funding need tổng thể 710000000.0, 6 tháng dưới ngưỡng dự trữ và 3 tháng cash âm. Gross margin case là 0.25, thấp hơn target danh mục 0.28; danh mục cũng có margin pressure flag với portfolio margin 0.2762 và margin gap -0.0038.\",\"Rủi ro / hồ sơ: Risk Pack đánh giá HIGH, có rule RR-002 cashflow shortage và RR-003 margin pressure triggered; đồng thời có insufficient evidence ở các điểm trọng yếu như transaction risk score, document sent to partner, confidence score và delivery delay days. Risk Pack yêu cầu human review, nên không nên approve tự động.\",\"Product fit: sản phẩm phù hợp nhất là VietinBank Performance bond, match_status MATCHED, phí/năm 0.012; need type khớp PERFORMANCE_BOND, requested amount 300000000.0 vượt mức tối thiểu theo tool và collateral ratio 20% trong ngưỡng chấp nhận. Tuy nhiên sản phẩm yêu cầu human approval và pre-check hiện pending nên chỉ đề xuất review có điều kiện.\"],\"recommended_option\":\"APPROVE_WITH_CONDITION\",\"requires_founder_confirmation\":true,\"risk_level\":\"high\"}]}",
+          "type": "output_text",
+          "logprobs": []
+        }
+      ],
+      "role": "assistant",
+      "status": "completed",
+      "type": "message",
+      "provider_data": {
+        "model": "gpt-5.5",
+        "response_id": "chatcmpl-E32EGGYcB2lCw31vmKImmE7BOqEDw"
+      }
+    }
+  ]
+}

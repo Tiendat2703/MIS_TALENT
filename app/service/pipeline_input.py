@@ -46,9 +46,9 @@ def merge_contract_package(
         "contract_id",
         package.model_dump(mode="json"),
     )
-    data["upload"] = {
-        "contract_id": package.contract_id,
-    }
+    # Lưu nguyên gói upload để Finance tính what-if dòng tiền (điều khoản thanh
+    # toán, giá trị, mốc thời gian) cho hợp đồng mới này.
+    data["upload"] = package.model_dump(mode="json")
     data["source"] = f"{base_data.get('source', 'unknown')}+upload"
     return data
 

@@ -7,6 +7,7 @@ from typing import Any
 
 from app.schema.financeAgent import FinanceAnalysisPack
 from app.schema.handoff_packs import FinanceFeaturePack
+from app.tools.FinanceAgent.contract_impact import analyze_contract_cashflow_impact
 
 
 def _funding_need_type(payment_terms: str) -> str:
@@ -68,6 +69,24 @@ def build_finance_handoff(
         ),
         None,
     )
+    # What-if dòng tiền: chỉ tính cho hợp đồng MỚI vừa upload (chưa nằm trong
+    # cashflow gốc). Hợp đồng có sẵn trong danh mục thì tác động đã phản ánh ở
+    # cashflow rồi nên để None.
+    upload = source_data.get("upload") or {}
+    cash_impact = None
+    if upload.get("contract_id") == contract_id:
+        cash_impact = analyze_contract_cashflow_impact(
+            upload,
+            [
+                {
+                    "month": month.month,
+                    "projected_closing_cash": month.projected_closing_cash,
+                    "cash_reserve_minimum": month.cash_reserve_minimum,
+                }
+                for month in liquidity_months
+            ],
+        )
+
     source_record_ids = [contract_id]
     source_record_ids.extend(sorted(order_ids))
     source_record_ids.extend(
@@ -137,6 +156,7 @@ def build_finance_handoff(
         source_record_ids=source_record_ids,
         handoff_summary=analysis.handoff_summary,
         status=analysis.status,
+        cash_impact=cash_impact,
         finance_details={
             "contract_margin": contract_margin,
             "contract_status": contract.get("status"),

@@ -50,6 +50,9 @@ class FinanceFeaturePack(StrictModel):
     handoff_summary: str
     status: Literal["COMPLETE", "AWAITING_INPUT"] = "COMPLETE"
     finance_details: dict[str, Any] = Field(default_factory=dict)
+    # What-if dòng tiền cho hợp đồng MỚI (chỉ có với hợp đồng upload). None nếu hợp
+    # đồng đã nằm sẵn trong cashflow gốc.
+    cash_impact: dict[str, Any] | None = None
 
 
 class FinanceBatchPack(StrictModel):

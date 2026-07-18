@@ -1,26 +1,65 @@
-# Python
+# ===== Python =====
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.installed.cfg
+*.egg
+
+# Virtual environments
 .venv/
 venv/
+env/
+ENV/
+.python-version
 
-# Environment variables and secrets
+# Test / lint / type caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ===== Environment variables and secrets =====
 .env
 .env.*
 !.env.example
 
-# Frontend build artifacts
+# ===== Logs =====
+*.log
+logs/
+
+# ===== Frontend (React) =====
 node_modules/
 .next/
 .vercel/
+frontend/build/
+frontend/dist/
+coverage/
+.turbo/
 
-# OS and editor files
+# ===== OS and editor files =====
 .DS_Store
+Thumbs.db
 .idea/
 .vscode/
+<<<<<<< HEAD
 
 # Test and coverage artifacts
 .pytest_cache/
 .coverage
 htmlcov/
+=======
+*.swp
+*.swo
+>>>>>>> origin/feat/financeAgent

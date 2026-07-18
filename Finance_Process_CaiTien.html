@@ -1,0 +1,230 @@
+<style>
+  :root{
+    --ground:#F4F6F8; --surface:#FFFFFF; --ink:#16212E; --muted:#5B6773; --line:#E2E7EC;
+    --fin:#17786A; --code:#1E7A5A; --ai:#5B4B9A; --rule:#BE851F; --data:#2E6291;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0}
+  .wrap{font-family:var(--sans);color:var(--ink);background:var(--ground);padding:28px 22px 52px;line-height:1.55}
+  .head{max-width:960px;margin:0 auto}
+  .kicker{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--fin);font-weight:700}
+  h1{font-size:26px;line-height:1.2;margin:6px 0 6px;letter-spacing:-.01em;text-wrap:balance}
+  .sub{font-size:14.5px;color:var(--muted);max-width:70ch;margin:0}
+
+  .legend{max-width:960px;margin:18px auto 0;display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center}
+  .tag{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:20px}
+  .t-code{color:#125B41;background:#DFF2EA;border:1px solid #B7E0D0}
+  .t-ai{color:#3E3374;background:#EBE8F6;border:1px solid #CFC7E9}
+  .t-rule{color:#7A5410;background:#FBEFD6;border:1px solid #EBD39A}
+  .legtxt{font-size:12px;color:var(--muted)}
+
+  .phase{max-width:960px;margin:22px auto 0;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .ph-head{display:flex;align-items:center;gap:10px;padding:12px 18px;background:var(--fin);color:#fff}
+  .ph-head .pn{font-size:11px;letter-spacing:.1em;text-transform:uppercase;opacity:.8;font-weight:700}
+  .ph-head .pt{font-size:15.5px;font-weight:700}
+  .steps{padding:6px 18px 16px}
+
+  .step{position:relative;padding:14px 0 14px 40px;border-bottom:1px solid #EEF1F4}
+  .step:last-child{border-bottom:none}
+  .step::before{content:"";position:absolute;left:13px;top:36px;bottom:-1px;width:2px;background:#E4E9EE}
+  .step:last-child::before{display:none}
+  .num{position:absolute;left:0;top:12px;width:28px;height:28px;border-radius:8px;background:#EEF2F6;border:1px solid #DCE3EA;font-family:var(--mono);font-size:12px;font-weight:700;color:#33414F;display:flex;align-items:center;justify-content:center;z-index:1}
+  .step-top{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+  .st-title{font-size:14px;font-weight:700}
+  .st-desc{font-size:12.8px;color:#39485A;margin-top:5px}
+  .meta{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .mk{font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-right:2px}
+  .chip{font-family:var(--mono);font-size:10.5px;background:#EDF1F5;border:1px solid #DBE2E9;color:#294056;padding:1px 6px;border-radius:4px;white-space:nowrap}
+  .chip.col{background:#EAF0F7;border-color:#CFDDEC;color:#274a6e}
+  .out{margin-top:8px;font-size:12.3px;background:#F2F7F4;border:1px solid #D9E8DF;border-radius:6px;padding:7px 10px}
+  .out .k{color:#12694C;font-weight:700}
+  .rulebox{margin-top:9px;font-size:12.3px;color:#6b4a12;background:#FBF1DA;border:1px solid #ECD9AE;border-left:3px solid var(--rule);border-radius:6px;padding:8px 11px}
+  .rulebox b{color:#6b4a12}
+
+  .callouts{max-width:960px;margin:30px auto 0}
+  .callouts h2{font-size:19px;margin:0 0 4px}
+  .callouts .h2s{font-size:13px;color:var(--muted);margin:0 0 14px}
+  .co{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+  .co-h{font-size:14.5px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+  .co-badge{font-size:10px;font-weight:800;color:#12694C;background:#DFF2EA;border:1px solid #B7E0D0;border-radius:20px;padding:1px 8px}
+  .tbl{overflow-x:auto;border:1px solid var(--line);border-radius:8px;margin-top:6px}
+  table{border-collapse:collapse;width:100%;min-width:460px;font-size:12px;background:#fff}
+  th{background:#EEF2F6;text-align:left;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:#3B4A59;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:7px 10px;border-bottom:1px solid #EEF1F4;font-variant-numeric:tabular-nums}
+  tr:last-child td{border-bottom:none}
+  .flow3{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin-top:4px}
+  .lvl{flex:1;min-width:180px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:#FAFBFC}
+  .lvl .n{font-size:12.5px;font-weight:700;color:var(--fin);margin-bottom:3px}
+  .lvl .d{font-size:11.8px;color:#41505F}
+  .arrow{align-self:center;color:var(--muted);font-weight:700;font-size:16px}
+  .foot{max-width:960px;margin:18px auto 0;font-size:11.5px;color:var(--muted)}
+  .mono{font-family:var(--mono)}
+</style>
+
+<div class="wrap">
+  <div class="head">
+    <div class="kicker">OPC · Finance Agent · Quy trình cải tiến</div>
+    <h1>Quy trình Finance Agent (bản cải tiến): tính theo từng tháng, nối tiền thật vào nhu cầu vốn</h1>
+    <p class="sub">Bốn giai đoạn, mỗi bước ghi rõ dùng bảng nào, cột nào, và ai làm: máy tự tính hay phần AI diễn giải. Tên bảng và tên cột giữ nguyên tiếng Anh cho dễ đối chiếu với dữ liệu.</p>
+  </div>
+
+  <div class="legend">
+    <span class="tag t-code">▪ Máy tính</span>
+    <span class="legtxt">phép tính do chương trình chạy, luôn chính xác</span>
+    <span style="width:14px"></span>
+    <span class="tag t-ai">◆ AI diễn giải</span>
+    <span class="legtxt">phần OpenAI đọc kết quả rồi giải thích, đánh giá</span>
+    <span style="width:14px"></span>
+    <span class="tag t-rule">◇ Cần quy tắc</span>
+    <span class="legtxt">chỗ dễ sai, phải đặt quy tắc rõ trước</span>
+  </div>
+
+  <!-- PHASE A -->
+  <div class="phase">
+    <div class="ph-head"><span class="pn">Giai đoạn A</span><span class="pt">Chuẩn bị &amp; kiểm tra dữ liệu</span></div>
+    <div class="steps">
+      <div class="step">
+        <span class="num">A1</span>
+        <div class="step-top"><span class="st-title">Nạp và kiểm tra dữ liệu</span><span class="tag t-code">Máy tính</span></div>
+        <div class="st-desc">Đọc 5 bảng bắt buộc, kiểm tra thiếu trường, số âm bất thường, thiếu tháng. Quan trọng: phân rõ lỗi nào phải <b>dừng và đòi bổ sung</b>, lỗi nào chỉ <b>giảm độ tin cậy</b> nhưng vẫn chạy tiếp.</div>
+        <div class="meta"><span class="mk">Bảng</span><span class="chip">04_CONTRACTS</span><span class="chip">06_ORDERS</span><span class="chip">07_INVOICES</span><span class="chip">08_BANK_TXN</span><span class="chip">09_CASHFLOW</span></div>
+      </div>
+      <div class="step">
+        <span class="num">A2</span>
+        <div class="step-top"><span class="st-title">Nối hợp đồng ↔ đơn hàng ↔ hóa đơn</span><span class="tag t-code">Máy tính</span></div>
+        <div class="st-desc">Ghép các bảng lại để biết hợp đồng nào sinh ra đơn nào, đơn nào có hóa đơn nào.</div>
+        <div class="meta"><span class="mk">Nối theo cột</span><span class="chip col">contract_id</span><span class="chip col">order_id</span><span class="chip col">customer_id</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PHASE B -->
+  <div class="phase">
+    <div class="ph-head"><span class="pn">Giai đoạn B</span><span class="pt">Dựng bức tranh tiền thật</span></div>
+    <div class="steps">
+      <div class="step">
+        <span class="num">B1</span>
+        <div class="step-top"><span class="st-title">Phân loại hóa đơn</span><span class="tag t-code">Máy tính</span></div>
+        <div class="st-desc">Chia hóa đơn thành 4 nhóm: đã thu, đang mở, quá hạn, chưa phát hành.</div>
+        <div class="meta"><span class="mk">Cột</span><span class="chip col">status</span><span class="chip col">invoice_amount</span><span class="chip col">due_date</span></div>
+      </div>
+      <div class="step">
+        <span class="num">B2</span>
+        <div class="step-top"><span class="st-title">Đối chiếu ngân hàng</span><span class="tag t-code">Máy tính</span><span class="tag t-rule">Cần quy tắc</span></div>
+        <div class="st-desc">So khớp hóa đơn với tiền thật đã vào tài khoản, để biết khoản nào mới là tiền thật, khoản nào vẫn chỉ là công nợ.</div>
+        <div class="meta"><span class="mk">Cột</span><span class="chip col">counterparty_id</span><span class="chip col">amount</span><span class="chip col">txn_date</span><span class="chip col">transaction_risk_score</span></div>
+        <div class="rulebox"><b>Quy tắc 1 —</b> Dữ liệu không có cột nối trực tiếp giữa hóa đơn và giao dịch. Đặt luật khớp: cùng <span class="mono">counterparty_id</span> + cùng <span class="mono">amount</span> + <span class="mono">txn_date</span> gần ngày hóa đơn, kèm mức độ chắc chắn. Nếu mập mờ (ví dụ 2 khoản 45M cùng một khách) thì để là chưa khớp, cần xác nhận — không đoán.</div>
+      </div>
+      <div class="step">
+        <span class="num">B3</span>
+        <div class="step-top"><span class="st-title">Xác định tiền thật đang có làm mốc</span><span class="tag t-code">Máy tính</span></div>
+        <div class="st-desc">Lấy số dư tiền thật hiện tại từ giao dịch ngân hàng làm điểm bắt đầu, thay vì chỉ tin con số dự báo. Lưu ý tách khoản góp vốn của chủ (không phải tiền từ kinh doanh).</div>
+        <div class="meta"><span class="mk">Cột</span><span class="chip col">direction</span><span class="chip col">amount</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PHASE C -->
+  <div class="phase">
+    <div class="ph-head"><span class="pn">Giai đoạn C</span><span class="pt">Tính theo từng tháng · trọng tâm cải tiến</span></div>
+    <div class="steps">
+      <div class="step">
+        <span class="num">C1</span>
+        <div class="step-top"><span class="st-title">Tính khoản thiếu tiền theo từng tháng</span><span class="tag t-code">Máy tính</span></div>
+        <div class="st-desc">Với mỗi tháng: lấy mức dự trữ tối thiểu trừ đi số tiền còn lại cuối tháng. Ra khoản thiếu của riêng tháng đó.</div>
+        <div class="meta"><span class="mk">Cột</span><span class="chip col">projected_closing_cash</span><span class="chip col">cash_reserve_minimum</span></div>
+        <div class="out"><span class="k">Kết quả</span> Bảng thiếu tiền theo tháng (xem phần dưới), thay vì một con số tổng.</div>
+      </div>
+      <div class="step">
+        <span class="num">C2</span>
+        <div class="step-top"><span class="st-title">Kế hoạch thu công nợ theo tháng</span><span class="tag t-code">Máy tính</span></div>
+        <div class="st-desc">Xếp các hóa đơn đang mở vào đúng tháng dự kiến thu (theo ngày đáo hạn), và cân nhắc mức độ tin cậy thanh toán của từng khách để ước lượng khoản thu thực tế.</div>
+        <div class="meta"><span class="mk">Cột</span><span class="chip col">due_date</span><span class="chip col">payment_reliability</span><span class="chip col">invoice_amount</span></div>
+      </div>
+      <div class="step">
+        <span class="num">C3</span>
+        <div class="step-top"><span class="st-title">Kế hoạch phát hành hóa đơn</span><span class="tag t-code">Máy tính</span><span class="tag t-rule">Cần quy tắc</span></div>
+        <div class="st-desc">Tìm các đơn có thể xuất hóa đơn để tạo nguồn thu, nhưng chỉ tính vào kịch bản phụ, chưa coi là tiền chắc chắn.</div>
+        <div class="meta"><span class="mk">Cột</span><span class="chip col">status</span><span class="chip col">delivery_note</span><span class="chip col">payment_terms</span></div>
+        <div class="rulebox"><b>Quy tắc 2 —</b> Dữ liệu không có cột nghiệm thu/bàn giao. Đặt điều kiện rõ để được phép xuất hóa đơn, ví dụ <span class="mono">status = Delivered</span> và hợp đồng có <span class="mono">payment_terms</span> rõ. Ghi rõ đây là giả định của đội.</div>
+      </div>
+      <div class="step">
+        <span class="num">C4</span>
+        <div class="step-top"><span class="st-title">Phân tích biên lợi nhuận ở 3 mức</span><span class="tag t-code">Máy tính</span></div>
+        <div class="st-desc">Tính biên lợi nhuận cho từng đơn, từng hợp đồng, và toàn bộ gộp lại. Khi phục vụ quyết định nhận hợp đồng thì nhìn biên của chính hợp đồng đó. Tách đơn đã giao khỏi đơn tương lai.</div>
+        <div class="meta"><span class="mk">Cột</span><span class="chip col">order_revenue</span><span class="chip col">estimated_cost</span><span class="chip col">target_gross_margin</span></div>
+      </div>
+      <div class="step">
+        <span class="num">C5</span>
+        <div class="step-top"><span class="st-title">Nhu cầu vốn theo tháng, qua 3 mức</span><span class="tag t-code">Máy tính</span></div>
+        <div class="st-desc">Đây là chỗ nối tiền thật vào con số nhu cầu vốn: đi từ dự báo gốc, đến tiền chắc chắn, rồi đến có thu công nợ. Chi tiết ở phần dưới.</div>
+        <div class="out"><span class="k">Kết quả</span> Nhu cầu vốn còn lại của từng tháng = khoản thiếu tháng đó − khoản thu được trong đúng tháng đó.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PHASE D -->
+  <div class="phase">
+    <div class="ph-head"><span class="pn">Giai đoạn D</span><span class="pt">Diễn giải &amp; bàn giao</span></div>
+    <div class="steps">
+      <div class="step">
+        <span class="num">D1</span>
+        <div class="step-top"><span class="st-title">Đọc kết quả và đánh giá áp lực tài chính</span><span class="tag t-ai">AI diễn giải</span></div>
+        <div class="st-desc">Phần OpenAI đọc các con số máy đã tính, giải thích bằng lời, đánh giá mức độ áp lực, và nêu điểm Risk Agent cần chú ý. AI không tự làm phép tính.</div>
+      </div>
+      <div class="step">
+        <span class="num">D2</span>
+        <div class="step-top"><span class="st-title">Lập yêu cầu bổ sung dữ liệu</span><span class="tag t-code">Máy tính</span><span class="tag t-ai">AI diễn giải</span></div>
+        <div class="st-desc">Liệt kê chỗ còn thiếu (ví dụ chưa có giao dịch xác nhận cho một hóa đơn, chưa có bằng chứng bàn giao) kèm mức ảnh hưởng. Đây là điểm mạnh về kiểm soát, nên giữ.</div>
+      </div>
+      <div class="step">
+        <span class="num">D3</span>
+        <div class="step-top"><span class="st-title">Đóng gói Finance Feature Pack và bàn giao Risk Agent</span><span class="tag t-code">Máy tính</span></div>
+        <div class="st-desc">Finance Feature Pack là gói kết quả tài chính gửi cho Risk Agent (agent đánh giá rủi ro) xử lý tiếp. Finance Agent không ra quyết định cuối.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CALLOUTS -->
+  <div class="callouts">
+    <h2>Ba cải tiến cốt lõi (giải thích kỹ)</h2>
+    <p class="h2s">Ba điểm dưới đây là khác biệt chính so với bản gốc.</p>
+
+    <div class="co">
+      <div class="co-h">1 · Tính theo từng tháng, không gộp thành một số <span class="co-badge">quan trọng nhất</span></div>
+      <div class="st-desc">Thay vì nói tổng thiếu bao nhiêu, ta trả lời thiếu bao nhiêu vào từng tháng. Nhờ đó biết rõ tháng nào cần tiền, và khoản thu về có kịp cứu tháng đó không.</div>
+      <div class="tbl">
+        <table>
+          <thead><tr><th>Tháng</th><th>Thiếu so với mức dự trữ</th><th>Công nợ về trong tháng</th><th>Nhu cầu vốn còn lại</th></tr></thead>
+          <tbody>
+            <tr><td>Tháng 1</td><td>Thiếu nhiều</td><td>Chưa có</td><td>Cần vốn (công nợ chưa về kịp)</td></tr>
+            <tr><td>Tháng 2</td><td>Thiếu vừa</td><td>Có một phần</td><td>Giảm bớt</td></tr>
+            <tr><td>Tháng 3</td><td>Thiếu ít</td><td>Về nhiều</td><td>Gần như đủ</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="foot" style="margin-top:8px">Bảng minh họa cách trình bày; con số thực do máy tính từ <span class="mono">09_CASHFLOW</span>, <span class="mono">07_INVOICES.due_date</span>.</div>
+    </div>
+
+    <div class="co">
+      <div class="co-h">2 · Nối tiền thật vào nhu cầu vốn, qua 3 mức</div>
+      <div class="st-desc">Để phần đối chiếu ngân hàng và công nợ thật sự tác động lên con số nhu cầu vốn, thay vì chỉ để đọc cho biết.</div>
+      <div class="flow3">
+        <div class="lvl"><div class="n">Mức 1 · Dự báo gốc</div><div class="d">Lấy đúng số trong bảng dòng tiền <span class="mono">09_CASHFLOW</span>.</div></div>
+        <span class="arrow">→</span>
+        <div class="lvl"><div class="n">Mức 2 · Tiền chắc chắn</div><div class="d">Điều chỉnh theo tiền đã thật sự vào tài khoản (từ đối chiếu <span class="mono">08_BANK_TXN</span>).</div></div>
+        <span class="arrow">→</span>
+        <div class="lvl"><div class="n">Mức 3 · Có thu công nợ</div><div class="d">Cộng thêm công nợ dự kiến thu, theo đúng tháng nó về.</div></div>
+      </div>
+    </div>
+
+    <div class="co">
+      <div class="co-h">3 · Máy tính lo phép tính, AI lo diễn giải</div>
+      <div class="st-desc">Mọi con số do chương trình tính để luôn chính xác. Phần OpenAI chỉ đọc kết quả rồi giải thích, đánh giá, và chỉ ra chỗ thiếu dữ liệu. Đây cũng là cách dùng OpenAI hợp lệ theo đề: tham gia suy luận và diễn giải, không phải làm máy tính.</div>
+    </div>
+  </div>
+
+  <p class="foot">Ghi chú: Finance Agent = agent phân tích tài chính; Risk Agent = agent đánh giá rủi ro; Finance Feature Pack = gói kết quả tài chính bàn giao sang Risk Agent. Tên bảng (04_CONTRACTS…) và tên cột (projected_closing_cash…) giữ nguyên theo Team Pack.</p>
+</div>

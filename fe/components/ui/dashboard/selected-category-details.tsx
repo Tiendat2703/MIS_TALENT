@@ -46,20 +46,11 @@ const categoryDetails: Record<string, CategoryData> = {
 
 interface SelectedCategoryDetailsProps {
   category: string | null;
+  onClose: () => void;
 }
 
-export function SelectedCategoryDetails({ category }: SelectedCategoryDetailsProps) {
-  if (!category) {
-    return (
-      <article className="h-full flex flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--fin-soft-border)] bg-[var(--fin-surface)]/20 p-6 text-center text-[var(--fin-muted)] min-h-[350px] transition-colors duration-200">
-        <span className="text-2xl mb-2">📊</span>
-        <h4 className="text-sm font-semibold text-[var(--fin-text)]">No Category Selected</h4>
-        <p className="mt-1 text-xs text-[var(--fin-muted)] max-w-[200px] mx-auto leading-relaxed">
-          Click a row in the Budget vs Actuals table to view variance details and risk mitigation.
-        </p>
-      </article>
-    );
-  }
+export function SelectedCategoryDetails({ category, onClose }: SelectedCategoryDetailsProps) {
+  if (!category) return null;
 
   const data = categoryDetails[category] || categoryDetails.Land;
 
@@ -82,10 +73,20 @@ export function SelectedCategoryDetails({ category }: SelectedCategoryDetailsPro
             {data.fullName}
           </h3>
         </div>
-        <div className="flex flex-col gap-1.5 items-end shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusBadgeColor}`}>
             {data.status}
           </span>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1 hover:bg-white/5 text-[var(--fin-muted)] hover:text-[var(--fin-text)] transition-colors active:scale-95"
+            aria-label="Close details"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
         </div>
       </header>
 

@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dashboard";
 import Bar from "@/components/ui/about/Bar";
 import { PageTransition } from "@/components/ui/page-transition";
+import { motion, AnimatePresence } from "motion/react";
 
 const cardClass =
   "min-w-0 overflow-hidden rounded-2xl border border-[var(--fin-soft-border)] bg-[var(--fin-surface)] p-5 transition-colors duration-200 hover:border-emerald-400/25 sm:p-6";
@@ -77,8 +78,12 @@ export default function DashboardPage() {
           </section>
 
           <div className="mt-4 grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-12">
-            <section className={`${cardClass} lg:col-span-8`}>
-              <PanelHeading title="Budget vs actuals" description="Planned and recorded spend by cost category." />
+            <motion.section
+              layout
+              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+              className={`${cardClass} ${selectedCategory ? "lg:col-span-8" : "lg:col-span-12"}`}
+            >
+              <PanelHeading title="Budget vs actuals" description="Planned and recorded spend by cost category. Click a row to view reasoning." />
               <BudgetActualsChart />
               <div className="mt-6 min-w-0 max-w-full">
                 <BudgetActualsTable
@@ -86,11 +91,24 @@ export default function DashboardPage() {
                   onSelectCategory={setSelectedCategory}
                 />
               </div>
-            </section>
+            </motion.section>
 
-            <section className="lg:col-span-4 min-w-0 h-full">
-              <SelectedCategoryDetails category={selectedCategory} />
-            </section>
+            <AnimatePresence mode="popLayout">
+              {selectedCategory && (
+                <motion.section
+                  initial={{ opacity: 0, x: 30, scale: 0.98 }}
+                  animate={{ opacity: 1, x: 0, scale: 1 }}
+                  exit={{ opacity: 0, x: 30, scale: 0.98 }}
+                  transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                  className="lg:col-span-4 min-w-0 h-full"
+                >
+                  <SelectedCategoryDetails
+                    category={selectedCategory}
+                    onClose={() => setSelectedCategory(null)}
+                  />
+                </motion.section>
+              )}
+            </AnimatePresence>
 
             <section className={`${cardClass} lg:col-span-8`}>
               <PanelHeading title="Credit Case Approvals" description="Loan requests validation pipeline." />

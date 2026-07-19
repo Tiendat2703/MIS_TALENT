@@ -110,13 +110,9 @@ export default function DashboardPage() {
               )}
             </AnimatePresence>
 
-            <section className={`${cardClass} lg:col-span-8`}>
+            <section className={`${cardClass} lg:col-span-12`}>
               <PanelHeading title="Credit Case Approvals" description="Loan requests validation pipeline." />
               <CreditCasesTable />
-            </section>
-
-            <section className="lg:col-span-4 min-w-0 h-full">
-              <RiskSummaryCard />
             </section>
 
             <section className={`${cardClass} lg:col-span-8`}>
@@ -124,10 +120,14 @@ export default function DashboardPage() {
               <CashFlowChart />
             </section>
 
-            <div className="min-w-0 lg:col-span-4"><ProjectOverview /></div>
+            <section className="lg:col-span-4 min-w-0 h-full">
+              <RiskSummaryCard />
+            </section>
+
             <div className="min-w-0 lg:col-span-8"><FinancialSummary /></div>
-            <div className="min-w-0 lg:col-span-4"><ContingencyUsageChart /></div>
+            <div className="min-w-0 lg:col-span-4"><ProjectOverview /></div>
             <div className="min-w-0 lg:col-span-8"><ScheduleRiskChart /></div>
+            <div className="min-w-0 lg:col-span-4"><ContingencyUsageChart /></div>
             <div className="min-w-0 lg:col-span-12"><FundingSourcesChart /></div>
 
             <div className="min-w-0 lg:col-span-7"><AiPredictionsCard /></div>

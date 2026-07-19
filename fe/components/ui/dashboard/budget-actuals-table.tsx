@@ -5,9 +5,14 @@ const rows = [
   { category: "Materials", budgeted: "1,000,000", actual: "950,000", variance: "50,000", spent: "95%", over: false },
 ] as const;
 
-export function BudgetActualsTable() {
+interface BudgetActualsTableProps {
+  selectedCategory: string;
+  onSelectCategory: (category: string) => void;
+}
+
+export function BudgetActualsTable({ selectedCategory, onSelectCategory }: BudgetActualsTableProps) {
   return (
-    <div className="max-w-full overflow-x-auto rounded-xl border border-white/[0.08] bg-black/20">
+    <div className="max-w-full overflow-x-auto rounded-xl border border-[var(--fin-soft-border)] bg-black/20">
       <table className="w-full min-w-[640px] text-left text-xs">
         <thead className="bg-white/[0.035] text-zinc-500">
           <tr>
@@ -19,19 +24,30 @@ export function BudgetActualsTable() {
           </tr>
         </thead>
         <tbody className="divide-y divide-white/[0.06]">
-          {rows.map((row) => (
-            <tr key={row.category} className="transition-colors hover:bg-white/[0.025]">
-              <td className="px-4 py-3.5 font-medium text-zinc-200">{row.category}</td>
-              <td className="px-4 py-3.5 text-right font-mono text-zinc-400">{row.budgeted}</td>
-              <td className="px-4 py-3.5 text-right font-mono text-zinc-300">{row.actual}</td>
-              <td className={`px-4 py-3.5 text-right font-mono font-semibold ${row.over ? "text-red-400" : "text-emerald-300"}`}>
-                {row.variance}
-              </td>
-              <td className={`px-4 py-3.5 text-right font-mono font-semibold ${row.over ? "bg-red-400/[0.05] text-red-400" : "bg-emerald-400/[0.04] text-emerald-300"}`}>
-                {row.spent}
-              </td>
-            </tr>
-          ))}
+          {rows.map((row) => {
+            const isActive = selectedCategory === row.category;
+            return (
+              <tr
+                key={row.category}
+                onClick={() => onSelectCategory(row.category)}
+                className={`transition-colors cursor-pointer ${
+                  isActive
+                    ? "bg-emerald-400/10 hover:bg-emerald-400/15"
+                    : "hover:bg-white/[0.025]"
+                }`}
+              >
+                <td className="px-4 py-3.5 font-bold text-zinc-200">{row.category}</td>
+                <td className="px-4 py-3.5 text-right font-mono text-zinc-400">{row.budgeted}</td>
+                <td className="px-4 py-3.5 text-right font-mono text-zinc-300">{row.actual}</td>
+                <td className={`px-4 py-3.5 text-right font-mono font-semibold ${row.over ? "text-red-400" : "text-emerald-300"}`}>
+                  {row.variance}
+                </td>
+                <td className={`px-4 py-3.5 text-right font-mono font-semibold ${row.over ? "bg-red-400/[0.05] text-red-400" : "bg-emerald-400/[0.04] text-emerald-300"}`}>
+                  {row.spent}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

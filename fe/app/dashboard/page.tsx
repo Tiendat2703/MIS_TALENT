@@ -1,16 +1,20 @@
+"use client";
+
+import { useState } from "react";
 import {
   AiBackingCard,
   AiPredictionsCard,
   BudgetActualsChart,
   BudgetActualsTable,
-  BudgetAllocationChart,
-  BudgetBreakdownRadar,
   CashFlowChart,
   ContingencyUsageChart,
   FinancialSummary,
   FundingSourcesChart,
   ProjectOverview,
   ScheduleRiskChart,
+  SelectedCategoryDetails,
+  RiskSummaryCard,
+  CreditCasesTable,
 } from "@/components/ui/dashboard";
 import Bar from "@/components/ui/about/Bar";
 import { PageTransition } from "@/components/ui/page-transition";
@@ -42,6 +46,8 @@ function PanelHeading({ title, description }: { title: string; description: stri
 }
 
 export default function DashboardPage() {
+  const [selectedCategory, setSelectedCategory] = useState<string>("Land");
+
   return (
     <PageTransition>
       <main className="relative min-h-[100dvh] w-full max-w-full overflow-x-clip bg-[var(--fin-bg)] px-4 pb-12 pt-28 text-[var(--fin-text)] sm:px-6 lg:px-8 xl:px-10">
@@ -74,22 +80,30 @@ export default function DashboardPage() {
             <section className={`${cardClass} lg:col-span-8`}>
               <PanelHeading title="Budget vs actuals" description="Planned and recorded spend by cost category." />
               <BudgetActualsChart />
-              <div className="mt-6 min-w-0 max-w-full"><BudgetActualsTable /></div>
+              <div className="mt-6 min-w-0 max-w-full">
+                <BudgetActualsTable
+                  selectedCategory={selectedCategory}
+                  onSelectCategory={setSelectedCategory}
+                />
+              </div>
             </section>
 
-            <section className={`${cardClass} lg:col-span-4`}>
-              <PanelHeading title="Budget allocation" description="How the approved budget is currently distributed." />
-              <BudgetAllocationChart />
+            <section className="lg:col-span-4 min-w-0 h-full">
+              <SelectedCategoryDetails category={selectedCategory} />
             </section>
 
             <section className={`${cardClass} lg:col-span-8`}>
-              <PanelHeading title="Cash flow" description="Monthly inflow, outflow and net cash position." />
-              <CashFlowChart />
+              <PanelHeading title="Credit Case Approvals" description="Loan requests validation pipeline." />
+              <CreditCasesTable />
             </section>
 
-            <section className={`${cardClass} lg:col-span-4`}>
-              <PanelHeading title="Budget variance" description="Category exposure against the approved plan." />
-              <BudgetBreakdownRadar />
+            <section className="lg:col-span-4 min-w-0 h-full">
+              <RiskSummaryCard />
+            </section>
+
+            <section className={`${cardClass} lg:col-span-12`}>
+              <PanelHeading title="Cash flow" description="Monthly inflow, outflow and net cash position." />
+              <CashFlowChart />
             </section>
 
             <div className="min-w-0 lg:col-span-4"><ProjectOverview /></div>

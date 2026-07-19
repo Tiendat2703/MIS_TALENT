@@ -10,3 +10,6 @@ export { FinancialSummary } from "./financial-summary";
 export { FundingSourcesChart } from "./funding-sources-chart";
 export { ProjectOverview } from "./project-overview";
 export { ScheduleRiskChart } from "./schedule-risk-chart";
+export { SelectedCategoryDetails } from "./selected-category-details";
+export { RiskSummaryCard } from "./risk-summary-card";
+export { CreditCasesTable } from "./credit-cases-table";

@@ -155,6 +155,7 @@ def _persist_available_stage_logs(session_id: int) -> None:
 async def run_pipeline(
     contract: ContractUploadPackage | dict[str, Any] | str | Path | None = None,
     *,
+    session_id: int | None = None,
     reference_date: date | None = None,
     scenario: str | None = None,
     submission: dict[str, Any] | None = None,
@@ -177,7 +178,8 @@ async def run_pipeline(
         else None
     )
     await asyncio.to_thread(validate_pipeline_schema)
-    session_id = await asyncio.to_thread(allocate_session_id)
+    if session_id is None:
+        session_id = await asyncio.to_thread(allocate_session_id)
 
     data = await asyncio.to_thread(load_all, scenario)
     data, contract_ids, mode = await asyncio.to_thread(

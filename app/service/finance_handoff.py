@@ -106,6 +106,9 @@ def build_finance_handoff(
         contract_id=contract_id,
         company_id=str(source_data.get("profile", {}).get("company_id") or "UNKNOWN"),
         generated_at=datetime.now(UTC),
+        contract_name=contract.get("description"),
+        start_date=contract.get("start_date"),
+        end_date=contract.get("end_date"),
         transaction_risk_score=contract.get("transaction_risk_score"),
         projected_closing_cash=(
             lowest_month.projected_closing_cash if lowest_month else None

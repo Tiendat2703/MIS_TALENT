@@ -27,6 +27,9 @@ class FinanceFeaturePack(StrictModel):
     contract_id: str
     company_id: str
     generated_at: datetime
+    contract_name: str | None = None
+    start_date: date | None = None
+    end_date: date | None = None
     transaction_risk_score: int | None = Field(default=None, ge=0, le=100)
     projected_closing_cash: float | None = None
     cash_reserve_minimum: float | None = None

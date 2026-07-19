@@ -101,6 +101,97 @@ def load_finance_pack(session_id: int) -> FinanceBatchPack:
     return load_pipeline_context(session_id).finance_pack
 
 
+def _as_json_obj(value: Any) -> Any:
+    """Cột json có thể về dạng dict hoặc chuỗi tùy driver — chuẩn hóa về object."""
+    if isinstance(value, str):
+        import json
+
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    return value
+
+
+def fetch_context_rows(limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+    """Đọc THÔ mọi row context (không ép schema), mới nhất trước.
+
+    Trả nguyên finance/risk/decision pack dạng dict để lớp trên tự bung — chịu được
+    cả schema batch mới lẫn pack phẳng cũ, nên KHÔNG bỏ sót hợp đồng nào đã chạy.
+    """
+    rows = query_db(
+        """
+        SELECT session_id, finance_pack, risk_pack, decision_pack
+        FROM public.context
+        ORDER BY session_id DESC
+        LIMIT %s OFFSET %s
+        """,
+        (max(1, limit), max(0, offset)),
+    )
+    return [
+        {
+            "session_id": int(row["session_id"]),
+            "finance_pack": _as_json_obj(row["finance_pack"]),
+            "risk_pack": _as_json_obj(row["risk_pack"]),
+            "decision_pack": _as_json_obj(row["decision_pack"]),
+        }
+        for row in rows or []
+    ]
+
+
+def fetch_context_row(session_id: int) -> dict[str, Any] | None:
+    """Đọc THÔ một run theo id (không ép schema). None nếu không có."""
+    rows = query_db(
+        """
+        SELECT session_id, finance_pack, risk_pack, decision_pack
+        FROM public.context
+        WHERE session_id = %s
+        """,
+        (session_id,),
+    )
+    if not rows:
+        return None
+    row = rows[0]
+    return {
+        "session_id": int(row["session_id"]),
+        "finance_pack": _as_json_obj(row["finance_pack"]),
+        "risk_pack": _as_json_obj(row["risk_pack"]),
+        "decision_pack": _as_json_obj(row["decision_pack"]),
+    }
+
+
+def count_pipeline_contexts() -> int:
+    """Tổng số run đã lưu trong bảng context (cho phân trang dashboard)."""
+    rows = query_db("SELECT count(*) AS n FROM public.context")
+    return int(rows[0]["n"]) if rows else 0
+
+
+def list_pipeline_contexts(limit: int = 100, offset: int = 0) -> list[PipelineContextRecord]:
+    """Đọc nhiều run, mới nhất trước (session_id lớn hơn = mới hơn).
+
+    Row nào sai schema thì bỏ qua (không làm hỏng cả danh sách dashboard).
+    """
+    rows = query_db(
+        """
+        SELECT session_id, finance_pack, risk_pack, decision_pack
+        FROM public.context
+        ORDER BY session_id DESC
+        LIMIT %s OFFSET %s
+        """,
+        (max(1, limit), max(0, offset)),
+    )
+    records: list[PipelineContextRecord] = []
+    for row in rows or []:
+        try:
+            records.append(PipelineContextRecord.model_validate(row))
+        except Exception as exc:  # row cũ/lệch schema -> bỏ qua, ghi log gọn một dòng
+            print(
+                "[context_store] skip legacy/malformed context row "
+                f"session_id={row.get('session_id')} ({type(exc).__name__})"
+            )
+    return records
+
+
 def load_decision_inputs(session_id: int) -> tuple[FinanceBatchPack, RiskBatchPack]:
     record = load_pipeline_context(session_id)
     if record.risk_pack is None:
@@ -179,8 +270,12 @@ def decision_input_payload(session_id: int) -> dict[str, Any]:
 __all__ = [
     "PipelineContextRecord",
     "allocate_session_id",
+    "count_pipeline_contexts",
     "decision_input_payload",
+    "fetch_context_row",
+    "fetch_context_rows",
     "insert_finance_pack",
+    "list_pipeline_contexts",
     "load_decision_inputs",
     "load_finance_pack",
     "load_pipeline_context",

@@ -1,0 +1,15 @@
+# MIS Talent 2026 backend — reproducible integration environment
+openai-agents==0.18.2
+openai==2.45.0
+pydantic==2.13.4
+
+psycopg2-binary==2.9.12
+python-dotenv==1.2.2
+requests>=2.32.0,<3
+
+langgraph>=0.2.0
+fastapi>=0.110.0
+uvicorn>=0.27.0
+
+pytest==8.4.2
+pytest-asyncio==1.2.0

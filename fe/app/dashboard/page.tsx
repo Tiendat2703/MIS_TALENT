@@ -46,7 +46,7 @@ function PanelHeading({ title, description }: { title: string; description: stri
 }
 
 export default function DashboardPage() {
-  const [selectedCategory, setSelectedCategory] = useState<string>("Land");
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   return (
     <PageTransition>
@@ -82,7 +82,7 @@ export default function DashboardPage() {
               <BudgetActualsChart />
               <div className="mt-6 min-w-0 max-w-full">
                 <BudgetActualsTable
-                  selectedCategory={selectedCategory}
+                  selectedCategory={selectedCategory || ""}
                   onSelectCategory={setSelectedCategory}
                 />
               </div>
@@ -101,15 +101,15 @@ export default function DashboardPage() {
               <RiskSummaryCard />
             </section>
 
-            <section className={`${cardClass} lg:col-span-12`}>
+            <section className={`${cardClass} lg:col-span-8`}>
               <PanelHeading title="Cash flow" description="Monthly inflow, outflow and net cash position." />
               <CashFlowChart />
             </section>
 
             <div className="min-w-0 lg:col-span-4"><ProjectOverview /></div>
             <div className="min-w-0 lg:col-span-8"><FinancialSummary /></div>
-            <div className="min-w-0 lg:col-span-8"><ScheduleRiskChart /></div>
             <div className="min-w-0 lg:col-span-4"><ContingencyUsageChart /></div>
+            <div className="min-w-0 lg:col-span-8"><ScheduleRiskChart /></div>
             <div className="min-w-0 lg:col-span-12"><FundingSourcesChart /></div>
 
             <div className="min-w-0 lg:col-span-7"><AiPredictionsCard /></div>

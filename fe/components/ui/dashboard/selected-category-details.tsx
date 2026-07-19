@@ -45,10 +45,22 @@ const categoryDetails: Record<string, CategoryData> = {
 };
 
 interface SelectedCategoryDetailsProps {
-  category: string;
+  category: string | null;
 }
 
 export function SelectedCategoryDetails({ category }: SelectedCategoryDetailsProps) {
+  if (!category) {
+    return (
+      <article className="h-full flex flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--fin-soft-border)] bg-[var(--fin-surface)]/20 p-6 text-center text-[var(--fin-muted)] min-h-[350px] transition-colors duration-200">
+        <span className="text-2xl mb-2">📊</span>
+        <h4 className="text-sm font-semibold text-[var(--fin-text)]">No Category Selected</h4>
+        <p className="mt-1 text-xs text-[var(--fin-muted)] max-w-[200px] mx-auto leading-relaxed">
+          Click a row in the Budget vs Actuals table to view variance details and risk mitigation.
+        </p>
+      </article>
+    );
+  }
+
   const data = categoryDetails[category] || categoryDetails.Land;
 
   const riskBadgeColor = {

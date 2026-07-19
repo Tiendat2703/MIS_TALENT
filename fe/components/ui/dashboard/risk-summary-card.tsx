@@ -72,7 +72,7 @@ export function RiskSummaryCard() {
         </div>
       </header>
 
-      <div className="mt-4 flex-1 overflow-y-auto pr-1 max-h-[360px] space-y-3 divide-y divide-[var(--fin-soft-border)]/50">
+      <div className="mt-4 flex-1 fin-scrollbar overflow-y-auto pr-1 max-h-[360px] space-y-3 divide-y divide-[var(--fin-soft-border)]/50">
         {mockRisks.map((risk, index) => (
           <div key={risk.id} className={`pt-3 ${index === 0 ? "pt-0" : ""}`}>
             <div className="flex items-start justify-between gap-4">

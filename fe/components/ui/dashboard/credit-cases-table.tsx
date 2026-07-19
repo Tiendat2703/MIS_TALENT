@@ -128,7 +128,7 @@ export function CreditCasesTable() {
 
   return (
     <div className="space-y-4">
-      <div className="max-w-full overflow-x-auto rounded-xl border border-[var(--fin-soft-border)] bg-[var(--fin-surface)]">
+      <div className="max-w-full fin-scrollbar overflow-x-auto rounded-xl border border-[var(--fin-soft-border)] bg-[var(--fin-surface)]">
         <table className="w-full min-w-[1000px] text-left text-xs">
           <thead className="bg-white/[0.02] text-[var(--fin-muted)] border-b border-[var(--fin-soft-border)]">
             <tr>

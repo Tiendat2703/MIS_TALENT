@@ -53,7 +53,17 @@ _ANALYSIS_REQUEST = (
 _AGENT = None
 
 
-def build_finance_agent(*, handoffs: Sequence[Any] = ()):
+def build_finance_agent(
+    *,
+    handoffs: Sequence[Any] = (),
+    include_handoff_tool: bool = False,
+):
+    """Build Finance Agent.
+
+    ``include_handoff_tool`` đăng ký ``prepare_finance_handoff`` (persist
+    FinanceBatchPack) ngay cả khi KHÔNG có handoff xuống Risk — dùng cho orchestrator
+    gate chạy Finance rời rạc rồi để Validator kiểm trước khi sang Risk.
+    """
     from agents import Agent, ModelSettings, OpenAIChatCompletionsModel
     from agents.extensions.handoff_prompt import prompt_with_handoff_instructions
     from app.Agent.config import OPENAI_MODEL, get_openai_client
@@ -64,6 +74,7 @@ def build_finance_agent(*, handoffs: Sequence[Any] = ()):
     prompt = load_prompt(PROMPT_PATH)
     if handoffs:
         prompt = prompt_with_handoff_instructions(prompt)
+    want_handoff_tool = bool(handoffs) or include_handoff_tool
     return Agent(
         name="Finance_Agent",
         model=OpenAIChatCompletionsModel(
@@ -72,7 +83,7 @@ def build_finance_agent(*, handoffs: Sequence[Any] = ()):
         ),
         instructions=prompt,
         output_type=FinanceSynthesis,
-        tools=[*FINANCE_TOOLS, *([prepare_finance_handoff] if handoffs else [])],
+        tools=[*FINANCE_TOOLS, *([prepare_finance_handoff] if want_handoff_tool else [])],
         handoffs=list(handoffs),
         model_settings=ModelSettings(parallel_tool_calls=True),
         hooks=CustomAgentHooks("Finance_Agent"),

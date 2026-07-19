@@ -68,6 +68,13 @@ async def create_run(contract: ContractUploadPackage | None = None):
     payload = contract.model_dump(mode="json") if contract is not None else None
     return await _pipeline_service().start_pipeline_run(contract=payload)
 
+@app.post("/runs/validated")                               # chạy pipeline CÓ CỔNG QC
+async def create_validated_run(contract: ContractUploadPackage | None = None):
+    # Finance → Validate → Risk → Validate → Decision → Validate. Dừng tại cổng đầu
+    # tiên không PASS. Validation event phát trên cùng session_id (xem qua SSE).
+    payload = contract.model_dump(mode="json") if contract is not None else None
+    return await _pipeline_service().start_validated_pipeline_run(contract=payload)
+
 @app.get("/runs/{session_id}/events")                      # SSE cho dashboard
 async def run_events(session_id: int):
     async def gen():
@@ -90,6 +97,10 @@ async def run_result(session_id: int):
 @app.get("/runs/{session_id}/decision")                    # Decision Card đầy đủ + reasons
 async def run_decision(session_id: int):
     return await _pipeline_service().get_decision_cards(session_id)
+
+@app.get("/runs/{session_id}/validations")                 # ValidationReport của validator
+async def run_validations(session_id: int):
+    return await _pipeline_service().get_validation_reports(session_id)
 
 @app.get("/runs/{session_id}/approvals")
 async def approvals(session_id: int):

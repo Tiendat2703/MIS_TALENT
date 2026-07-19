@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
   title: "Agent Execution Pipeline | FinWise",
-  description: "Trace the Finance Engine, risk agents, tool calls, and trading execution in one live run.",
+  description: "Monitor Finance, Risk, and Decision agents throughout a live contract analysis run.",
 };
 
 export default function AgentLayout({ children }: { children: ReactNode }) {

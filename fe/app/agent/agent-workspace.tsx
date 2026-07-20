@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Bar from "@/components/ui/about/Bar";
 import { API_REQUEST_HEADERS, apiUrl } from "@/lib/api";
+import { ACTIVE_RUN_STORAGE_KEY } from "@/lib/run-session";
 import {
   Activity,
   ArrowRight,
@@ -56,7 +57,6 @@ type ActivityItem = {
   events: PipelineEvent[];
 };
 
-const ACTIVE_RUN_STORAGE_KEY = "mis-agent-active-run-id";
 const AGENT_IDS: AgentId[] = ["Finance", "Risk", "Decision"];
 
 const agents = {

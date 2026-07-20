@@ -1,11 +1,11 @@
-"""
-match_bank_product tích hợp với get_bank_products() đọc DB thật (query_db).
-Không mock DB — chỉ mock được phần transform (need_type mapping) vì đây là
-bảng chuyển đổi nghiệp vụ cố định, không phải dữ liệu.
+"""Ghép nhu cầu vốn với catalog sản phẩm ngân hàng đọc trực tiếp từ DB.
+
+``need_type`` là quy tắc chuẩn hóa nghiệp vụ cố định; không có dữ liệu mock hay
+fallback nếu truy vấn DB lỗi.
 """
 
 from dataclasses import asdict
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from agents import function_tool
 from app.database.repository import query_db
@@ -16,7 +16,7 @@ class FundingNeed(TypedDict):
     """Structured input accepted by the bank-product matching tool."""
 
     need_type: str
-    requested_amount: float
+    requested_amount: NotRequired[float | None]
 
 
 def get_bank_products() -> list[BankProduct]:
@@ -64,12 +64,23 @@ def _evaluate_product(funding_need: FundingNeed, product: dict) -> dict | None:
 
     reasons = [f"Need type matches {product['product_name']}."]
 
-    amount_ok = funding_need["requested_amount"] >= product["minimum_amount"]
-    reasons.append(
-        "Requested amount is above minimum amount."
-        if amount_ok else
-        f"Requested amount below minimum ({product['minimum_amount']:,.0f})."
+    requested_amount = funding_need.get("requested_amount")
+    amount_ok = (
+        requested_amount >= product["minimum_amount"]
+        if requested_amount is not None
+        else None
     )
+    if amount_ok is None:
+        reasons.append(
+            "Contract-specific requested amount is missing; amount eligibility "
+            f"cannot be checked against the minimum ({product['minimum_amount']:,.0f})."
+        )
+    else:
+        reasons.append(
+            "Requested amount is above minimum amount."
+            if amount_ok else
+            f"Requested amount below minimum ({product['minimum_amount']:,.0f})."
+        )
 
     collateral_ok = product["collateral_ratio"] <= MAX_ACCEPTABLE_COLLATERAL_RATIO
     reasons.append(
@@ -79,6 +90,7 @@ def _evaluate_product(funding_need: FundingNeed, product: dict) -> dict | None:
     )
 
     match_status = (
+        "NEEDS_AMOUNT" if amount_ok is None else
         "MATCHED" if amount_ok and collateral_ok else
         "PARTIAL" if amount_ok or collateral_ok else
         "NO_MATCH"
@@ -88,28 +100,45 @@ def _evaluate_product(funding_need: FundingNeed, product: dict) -> dict | None:
         "bank_product_id": product["bank_product_id"],
         "bank": product["bank"],
         "product_name": product["product_name"],
+        "minimum_amount": product["minimum_amount"],
         "annual_rate_or_fee": product["annual_rate_or_fee"],
         "automation_level": product["automation_level"],
         "match_status": match_status,
         "match_reasons": reasons,
         "human_approval_required": True,
-        "precheck_status": "PENDING_HUMAN_APPROVAL",
+        "precheck_status": (
+            "MISSING_REQUESTED_AMOUNT"
+            if amount_ok is None
+            else "PENDING_HUMAN_APPROVAL"
+        ),
     }
 
 
 @function_tool
 def match_bank_product(funding_need: FundingNeed) -> dict:
-    """So khớp funding_need (need_type, requested_amount) với toàn bộ
-    bank_product_catalog trong DB. Trả về best_match (ưu tiên MATCHED, rate
-    thấp hơn) và all_candidates để so sánh nhiều lựa chọn ngân hàng."""
+    """Match by need type and evaluate amount only when the contract supplied it.
+
+    Missing requested_amount returns candidates with NEEDS_AMOUNT; this tool never
+    substitutes the portfolio liquidity gap or full contract value.
+    """
     catalog = [p for p in (_normalize_product(bp) for bp in get_bank_products()) if p]
 
     candidates = [c for c in (_evaluate_product(funding_need, p) for p in catalog) if c]
     if not candidates:
         return {"match_status": "NO_MATCH", "match_reasons": ["No product supports this need_type."]}
 
-    candidates.sort(key=lambda c: (c["match_status"] != "MATCHED", c["annual_rate_or_fee"]))
-    return {"best_match": candidates[0], "all_candidates": candidates}
+    status_rank = {"MATCHED": 0, "PARTIAL": 1, "NEEDS_AMOUNT": 2, "NO_MATCH": 3}
+    candidates.sort(
+        key=lambda candidate: (
+            status_rank.get(candidate["match_status"], 99),
+            candidate["annual_rate_or_fee"],
+        )
+    )
+    return {
+        "best_match": candidates[0],
+        "all_candidates": candidates,
+        "requires_requested_amount": funding_need.get("requested_amount") is None,
+    }
 
 if __name__ == "__main__":
     test_cases = [

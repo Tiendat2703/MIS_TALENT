@@ -102,8 +102,7 @@ Toàn bộ nằm trong package `app` (song song Decision Agent), dùng chung `co
 | [app/tools/FinanceAgent/tools.py](app/tools/FinanceAgent/tools.py) | 6 `@function_tool` để LLM gọi + `FinanceRunContext` (store kết quả) |
 | [app/schema/financeAgent.py](app/schema/financeAgent.py) | Dataclass: các phần Feature Pack + `FinanceSynthesis` (output_type của LLM) |
 | [app/skills/financeAgent.md](app/skills/financeAgent.md) | Prompt: hướng dẫn LLM gọi đủ 6 tool rồi tổng hợp |
-| [app/tools/FinanceAgent/finance_data.py](app/tools/FinanceAgent/finance_data.py) | Truy cập dữ liệu: DB thật hoặc mock |
-| [app/tools/FinanceAgent/mock_data.py](app/tools/FinanceAgent/mock_data.py) | Bản sao trung thực dữ liệu Team Pack |
+| [app/tools/FinanceAgent/finance_data.py](app/tools/FinanceAgent/finance_data.py) | Truy cập dữ liệu trực tiếp từ Supabase; lỗi DB sẽ dừng pipeline |
 | [app/tools/FinanceAgent/validate_data.py](app/tools/FinanceAgent/validate_data.py) | Hàm tính bước 1 (validate) |
 | [app/tools/FinanceAgent/reconcile.py](app/tools/FinanceAgent/reconcile.py) | Hàm tính bước 2 (reconcile) |
 | [app/tools/FinanceAgent/liquidity.py](app/tools/FinanceAgent/liquidity.py) | Hàm tính bước 3 (liquidity) |
@@ -111,32 +110,29 @@ Toàn bộ nằm trong package `app` (song song Decision Agent), dùng chung `co
 | [app/tools/FinanceAgent/margin.py](app/tools/FinanceAgent/margin.py) | Hàm tính bước 5 (margin) |
 | [app/tools/FinanceAgent/missing_data.py](app/tools/FinanceAgent/missing_data.py) | Hàm tính bước 6 (missing data) |
 | [app/tools/FinanceAgent/data_request.py](app/tools/FinanceAgent/data_request.py) | Dựng form yêu cầu bổ sung từ dữ liệu thiếu + áp submission người dùng |
-| [app/tools/FinanceAgent/scenarios/missing_data_demo.json](app/tools/FinanceAgent/scenarios/missing_data_demo.json) | Tệp cấu hình tình huống thiếu dữ liệu (demo) |
 | [app/tools/FinanceAgent/util.py](app/tools/FinanceAgent/util.py) | parse ngày, ép số, format tiền |
 | [app/tools/FinanceAgent/dump_schema.py](app/tools/FinanceAgent/dump_schema.py) | In tên bảng/cột Supabase để cập nhật `TABLES` |
 
 ### Cách chạy
 
 ```bash
-# Chạy end-to-end với mock + fallback (không cần DB, không cần API):
-FINANCE_SKIP_LLM=true FINANCE_USE_MOCK=true python -m app.Agent.financeAgent
+# Chạy tính toán tất định trên dữ liệu Supabase thật, không gọi LLM:
+FINANCE_SKIP_LLM=true python -m app.Agent.financeAgent
 
-# Chạy với LLM thật (cần openai-agents + OPENAI_API_KEY trong app/.env):
-FINANCE_USE_MOCK=true python -m app.Agent.financeAgent
+# Chạy với LLM và dữ liệu Supabase thật:
+python -m app.Agent.financeAgent
 ```
 
 Biến môi trường:
-- `FINANCE_USE_MOCK` (mặc định `true`): dùng mock; đặt `false` để đọc Supabase.
-- `FINANCE_SKIP_LLM` (mặc định `false`): `true` để bỏ qua LLM, dùng fallback.
+- `FINANCE_SKIP_LLM` (mặc định `false`): `true` để bỏ qua LLM nhưng vẫn tính từ
+  dữ liệu Supabase thật.
 - `FINANCE_REFERENCE_DATE` (vd `2026-07-17`): ngày tham chiếu tính overdue.
-- `FINANCE_SCENARIO` (đường dẫn JSON): áp một tình huống lên dữ liệu (vd ca thiếu dữ liệu).
 
-```bash
-# Demo luồng thiếu dữ liệu -> form -> điền -> chạy tiếp:
-FINANCE_SKIP_LLM=true FINANCE_USE_MOCK=true python -m app.Agent.financeAgent
-```
+`FINANCE_USE_MOCK` và `FINANCE_SCENARIO` không còn được hỗ trợ. Nếu
+`FINANCE_SCENARIO` được cấu hình, pipeline chủ động báo lỗi thay vì áp dữ liệu mô
+phỏng.
 
-### Kết quả đã kiểm chứng (mock, ngày 2026-07-17)
+### Kết quả tham chiếu lịch sử (không dùng làm dữ liệu runtime)
 
 - Funding need **710,000,000**, **6/6 tháng dưới ngưỡng dự trữ** (06/07/08 âm tiền mặt).
 - `requires_human_approval = true` (710M > ngưỡng 300M).
@@ -162,12 +158,11 @@ event `finance_step` (có `step`, `task`, `status`, `summary`).
 
 ### Xử lý dữ liệu thiếu — form yêu cầu bổ sung
 
-Đáp ứng yêu cầu đề: đọc dữ liệu thực tế từ tệp cấu hình và xử lý ca dữ liệu còn
+Đọc dữ liệu thực tế từ Supabase và xử lý ca dữ liệu còn
 thiếu bằng cách hỏi lại người dùng qua form, **tuyệt đối không bịa số**.
 
 Luồng:
-1. Dữ liệu đầu vào (đọc từ tệp cấu hình, có thể áp một tình huống qua
-   `FINANCE_SCENARIO`) có trường bắt buộc đang thiếu (null).
+1. Dữ liệu đầu vào từ Supabase có trường bắt buộc đang thiếu (`null`).
 2. Bước validate phát hiện đúng trường thiếu. Các bước tính **bỏ qua** phần thiếu
    thay vì coi là 0 (`liquidity.months_missing_data`, `margin.orders_missing_data`).
 3. Code dựng `data_request_form` gồm đúng các trường thật đang thiếu (mỗi field ứng
@@ -177,13 +172,6 @@ Luồng:
    `run_finance_agent(..., submission=...)`: agent áp giá trị người dùng, chạy tiếp.
    Trường nào người dùng không điền vẫn được báo còn thiếu — agent không tự suy ra.
 
-Đã kiểm chứng (tình huống `missing_data_demo.json`, thiếu `ORD-004.estimated_cost`
-và `2026-08.projected_closing_cash`):
-- Pha 1: `status=AWAITING_INPUT`, form 2 field bắt buộc, `readiness=Insufficient`,
-  `data_confidence=Low`; nhánh agentic bắn event `data_request_required`.
-- Pha 2 (người dùng điền): `submission_report` filled 2 / invalid 0 →
-  `status=COMPLETE`, hết trường thiếu.
-
 `field_id` có dạng `table|record|column` (vd `orders|ORD-004|estimated_cost`) để FE
 gửi lại chính xác.
 
@@ -191,10 +179,8 @@ gửi lại chính xác.
 
 ## 4. Tiếp theo cần làm
 
-**Kết nối DB (ưu tiên 1).** Đang dùng mock. Cần chạy script dump schema Supabase
-để lấy đúng tên bảng và cột, rồi cập nhật `TABLES` trong
-[finance_data.py](app/tools/FinanceAgent/finance_data.py) và đặt
-`FINANCE_USE_MOCK=false`. Lưu ý `order` là từ khóa SQL nên đã để trong ngoặc kép.
+**Kết nối DB.** Runtime hiện đọc trực tiếp Supabase qua `finance_data.py`; không có
+fallback sang dataset cục bộ.
 
 **Bật LLM thật.** Cần `openai-agents` và `OPENAI_API_KEY` trong `app/.env`. Luồng
 LLM đã wire theo đúng pattern Decision Agent (Agent + Runner + output_type +

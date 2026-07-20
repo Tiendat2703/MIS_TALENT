@@ -18,6 +18,20 @@ _db_pool = None
 _pool_lock = Lock()
 
 
+def _pool_limits() -> tuple[int, int]:
+    try:
+        minconn = int(os.getenv("DB_POOL_MIN", "1"))
+        maxconn = int(os.getenv("DB_POOL_MAX", "20"))
+    except ValueError as exc:
+        raise RuntimeError("DB_POOL_MIN and DB_POOL_MAX must be integers") from exc
+
+    if minconn <= 0 or maxconn <= 0:
+        raise RuntimeError("DB pool sizes must be greater than zero")
+    if minconn > maxconn:
+        raise RuntimeError("DB_POOL_MIN cannot be greater than DB_POOL_MAX")
+    return minconn, maxconn
+
+
 def init_db_pool():
     global _db_pool
 
@@ -33,9 +47,10 @@ def init_db_pool():
         if not password:
             raise RuntimeError("Missing SUPABASE_PASSWORD")
 
+        minconn, maxconn = _pool_limits()
         _db_pool = pool.ThreadedConnectionPool(
-            minconn=1,
-            maxconn=10,
+            minconn=minconn,
+            maxconn=maxconn,
             user=os.getenv("SUPABASE_DB_USER") or os.getenv("user", "postgres"),
             password=password,
             host=os.getenv("SUPABASE_DB_HOST", "aws-0-ap-southeast-1.pooler.supabase.com"),
@@ -44,7 +59,11 @@ def init_db_pool():
             sslmode="require",
             connect_timeout=int(os.getenv("SUPABASE_CONNECT_TIMEOUT", "15")),
         )
-        logger.info("Database pool initialized")
+        logger.info(
+            "Database pool initialized (minconn=%d, maxconn=%d)",
+            minconn,
+            maxconn,
+        )
     return _db_pool
 
 

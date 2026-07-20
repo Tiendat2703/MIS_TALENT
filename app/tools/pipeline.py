@@ -125,7 +125,7 @@ async def load_decision_context(
     context: RunContextWrapper[AppContext],
     session_id: int,
 ) -> dict:
-    """Load the authoritative Finance and Risk packs for Decision by id only."""
+    """Load Finance/Risk and resolve contract amounts from Credit Profile first."""
     _require_session(context.context, session_id)
     return await asyncio.to_thread(decision_input_payload, session_id)
 

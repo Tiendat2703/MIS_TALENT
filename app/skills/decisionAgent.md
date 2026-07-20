@@ -18,10 +18,11 @@ phải danh sách. Danh sách các kết quả chỉ nằm trong trường batch
   thực hiện hợp đồng.
 - `precheck_trade_finance(contract_id, supplier_docs, amount)` — Kiểm tra sơ bộ hồ sơ
   LC / tài trợ thương mại.
-- `precheck_micro_credit(contract_id, customer_type, amount, receivable_list)` — Kiểm
+- `precheck_micro_credit(contract_id, amount, receivable_list)` — Kiểm
   tra sơ bộ hồ sơ vay vốn lưu động nhỏ.
 - `load_decision_context(session_id)` — đọc Finance Pack và Risk Pack có thẩm
-  quyền từ bảng `context` bằng ID của pipeline.
+  quyền từ bảng `context`, đồng thời tra bảng thật `credit_profile` để resolve
+  loại nhu cầu và số tiền đề nghị của từng hợp đồng.
 
 Chỉ gọi tool khi đã đủ thông tin bắt buộc cho tool đó. Nếu thiếu tham số, không tự
 điền giá trị giả định; phản ánh ảnh hưởng trong lý do rủi ro/hồ sơ và điều kiện bảo
@@ -36,10 +37,29 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    chính (margin, cashflow, funding need) và thông tin rủi ro (risk level, blocking
    flags, missing evidence, alerts) đã được cung cấp trong ngữ cảnh hội thoại.
 
+   `funding_need` do tool trả về là nguồn có thẩm quyền để ra phương án ngân hàng,
+   đã áp dụng đúng thứ tự ưu tiên sau:
+   1. Nếu `credit_profile` có dòng tham chiếu chính xác `contract_id`, dùng
+      `request_type`, `requested_amount` và `tenor` của credit case đó.
+   2. Chỉ khi không tồn tại credit profile gắn với hợp đồng, dùng funding need do
+      chính hợp đồng cung cấp (trường hợp hợp đồng mới).
+   Nếu credit profile tồn tại nhưng thiếu amount thì giữ trạng thái `MISSING`,
+   không được rơi xuống amount của hợp đồng. Không tự đọc
+   `finance.requested_amount` để ghi đè kết quả resolve này.
+
+   Nếu `funding_need=null` hoặc không có `need_type`, hợp đồng được xem là chưa có
+   nhu cầu vay/bảo lãnh rõ ràng: không ghép sản phẩm ngân hàng, không tạo bank
+   pre-check và không đưa hợp đồng vào hàng chờ khoản vay. Lịch thanh toán thông
+   thường như monthly/milestone không tự động đồng nghĩa với nhu cầu vốn lưu động.
+
 2. **So khớp sản phẩm ngân hàng**: với từng case, dùng tool `match_bank_product` để
    tìm sản phẩm phù hợp nhất với `funding_need` (need_type, requested_amount). Nếu
    có nhiều lựa chọn khớp, hãy so sánh và chọn lựa chọn tốt nhất (ưu tiên MATCHED,
-   rate thấp hơn).
+   rate thấp hơn). Khi `funding_need` có `need_type`, PHẢI gọi tool đúng một lần kể
+   cả khi `requested_amount=null`: tool sẽ so khớp sơ bộ theo loại nhu cầu và trả
+   `NEEDS_AMOUNT`. Tuyệt đối KHÔNG lấy
+   `portfolio_finance.liquidity_brief.funding_need` hoặc `contract_value` điền thay
+   amount. Chỉ bỏ qua tool này nếu `funding_need=null` hoặc thiếu cả `need_type`.
 
 3. **Kiểm tra hồ sơ còn thiếu gì không**: nếu dữ liệu rủi ro cho thấy thiếu chứng từ
    quan trọng (missing_evidence) hoặc có blocking risk flag, PHẢI dùng đúng dữ liệu
@@ -47,13 +67,46 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    tự suy diễn, không tạo lại trường `missing_information`, và không dừng toàn bộ
    batch để hỏi giữa chừng. Danh sách evidence gốc thuộc Finance Pack/Risk Pack.
 
-4. **Chạy pre-check khi đã đủ thông tin**: nếu đã có đủ tham số bắt buộc, chọn đúng tool theo loại nhu cầu và gọi ngay (không cần chờ xác nhận bằng lời trong hội thoại — hệ thống sẽ tự động yêu cầu con người duyệt trước khi kết quả pre-check được thực thi thật với ngân hàng):
+   **Policy tạm từ chối bắt buộc, áp dụng riêng từng hợp đồng trước khi pre-check:**
+   - Nếu `risk.triggered_rule_ids` chứa `RR-003` (áp lực biên lợi nhuận), PHẢI tạm
+     từ chối hợp đồng để review lại giá bán/chi phí.
+   - Nếu `risk.triggered_rule_ids` chứa `RR-005` (số tiền lớn theo ngưỡng rule có
+     thẩm quyền trong DB) và đồng thời chứa ít nhất một rule triggered khác, PHẢI
+     tạm từ chối vì hồ sơ vừa có rủi ro vừa có quy mô tiền lớn.
+   - Khi tạm từ chối: đặt `accept_opportunity=false`,
+     `recommended_option=TEMPORARY_REJECT_RISK`, `decision_status=reject`,
+     `is_preliminary=true`, `requires_founder_confirmation=true`; không gọi bất kỳ
+     pre-check tool nào và giữ `approval_status=false`, `eligible_score=null`,
+     `precheck_note=null`.
+   - Lý do rủi ro và `protective_condition` phải nêu rõ ID rule gây tạm từ chối,
+     dữ kiện kinh doanh tương ứng và hành động cần hoàn tất trước khi chạy lại hồ
+     sơ. Đây là tạm từ chối có thể xem xét lại, không phải từ chối vĩnh viễn.
+
+4. **Chạy pre-check khi đã đủ thông tin và không thuộc policy tạm từ chối**: nếu đã
+   có đủ tham số bắt buộc và hợp đồng không bị tạm từ chối ở bước 3, chọn đúng tool
+   theo loại nhu cầu và gọi ngay (không cần chờ xác nhận bằng lời trong hội thoại —
+   hệ thống sẽ tự động yêu cầu con người duyệt trước khi kết quả pre-check được thực
+   thi thật với ngân hàng):
    - Bảo lãnh thực hiện hợp đồng → `precheck_performance_bond`
    - LC hoặc tài trợ thương mại → `precheck_trade_finance`
    - Vay vốn lưu động nhỏ → `precheck_micro_credit`
 
+   Khi đã có `requested_amount`, danh sách chứng từ/khoản phải thu rỗng (`[]`) vẫn
+   là arguments thật và hợp lệ để tạo approval request. PHẢI gọi pre-check với
+   danh sách rỗng đó; ngân hàng sẽ đánh giá tính đầy đủ sau khi con người duyệt.
+   Không được bỏ tạo approval request chỉ vì `supplier_docs=[]` hoặc
+   `receivable_list=[]`. Việc thiếu chứng từ vẫn phải được nêu như một rủi ro và có
+   thể làm pre-check không đạt, nhưng không chặn cổng duyệt quyền gọi API.
+   `customer_type` không thuộc arguments của API vốn lưu động và không được dùng
+   làm điều kiện chặn approval. API này nhận `contract_id`, `amount` và danh sách
+   khoản phải thu; nếu danh sách rỗng thì vẫn gọi với `[]` để nhận kết quả mặc định
+   từ ngân hàng.
+
    Nếu thiếu tham số bắt buộc cho tool, không được tự điền giá trị giả định — phản
    ánh việc chưa đủ điều kiện trong lý do rủi ro/hồ sơ và `protective_condition`.
+   Đặc biệt, khi `requested_amount=null`, chưa có approval request nào được tạo:
+   phải nói rõ "cần bổ sung số tiền đề nghị trước khi tạo yêu cầu duyệt gọi ngân
+   hàng", không được mô tả là "đang chờ người dùng duyệt/xác nhận pre-check".
 
    Pre-check tool tự kiểm tra StateStore:
    - Nếu chưa được duyệt, tool chỉ ghi approval request và trả
@@ -67,7 +120,7 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    - **Trạng thái quyết định** (`decision_status`): `approve`, `review`, hoặc `reject`.
      Nếu pre-check cần thiết nhưng đang chờ duyệt thì dùng `review`.
    - **Phương án đề xuất** (option): APPROVE / APPROVE_WITH_CONDITION /
-     REJECT_MISSING_EVIDENCE / NO_SUITABLE_PRODUCT
+     TEMPORARY_REJECT_RISK / REJECT_MISSING_EVIDENCE / NO_SUITABLE_PRODUCT
    - **Ba lý do**, mỗi lý do phải là một LẬP LUẬN có kết luận, KHÔNG phải liệt kê số.
      Mỗi lý do bắt buộc kết thúc bằng mệnh đề nhân quả "→ do đó [ảnh hưởng tới quyết
      định nhận/không nhận CHÍNH hợp đồng này]". Khi trích số, phải ghi rõ số đó là
@@ -76,24 +129,32 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
      **Cách viết (rất quan trọng)**: viết bằng tiếng Việt kinh doanh tự nhiên cho nhà
      sáng lập đọc, KHÔNG chép tên trường kỹ thuật trong dữ liệu (như `requested_amount`,
      `capital_need`, `cash_impact`, `net_contract_margin`, `additional_funding_need`,
-     `worst_month_after`, `projected_closing_cash`, `confirmed_cash_total`,
+     `worst_month_after`, `projected_closing_cash`, `confirmed_invoice_collections`,
      `funding_need`, `gross_margin`...). Hãy diễn giải Ý NGHĨA kèm con số tiền. Ví dụ
      cách nói thay thế:
-     - `requested_amount`/`capital_need` → "nhu cầu vốn (bảo lãnh) cần cho hợp đồng"
+     - `requested_amount`/`capital_need` → "nhu cầu vốn (bảo lãnh) cần cho hợp đồng",
+       nhưng chỉ khi giá trị này khác null và có `scope=contract`
      - `gross_margin`/`net_contract_margin` → "biên lợi nhuận" / "lợi nhuận hợp đồng đem lại"
      - `additional_funding_need` → "vốn cần thêm nếu nhận hợp đồng"
      - `worst_month_after`/`projected_closing_cash` → "tháng thiếu tiền nhất" / "số dư
        tiền mặt cuối tháng thấp nhất còn khoảng …"
-     - `confirmed_cash_total` → "tiền mặt thực có đã xác nhận của công ty"
+     - `confirmed_invoice_collections` → "tiền thu hóa đơn đã đối chiếu với giao dịch ngân
+       hàng"; đây KHÔNG phải số dư tiền mặt khả dụng của công ty
      - `funding_need` (danh mục) → "tổng nhu cầu vốn của cả công ty"
      - tháng dưới dự trữ / cash âm → "số tháng tiền mặt xuống dưới ngưỡng dự trữ an toàn"
      1. **Lý do tài chính** — nối kinh tế riêng của hợp đồng với NĂNG LỰC tài chính
-        của OPC để gánh hợp đồng này. Bắt buộc: (a) nêu kinh tế hợp đồng
-        (`requested_amount`, `capital_need`, gross margin của case); (b) đối chiếu với
-        năng lực OPC bằng số đang có — `confirmed_cash_total` so với `requested_amount`
-        (khả năng tự phủ bao nhiêu), tình trạng thủng dự trữ (`months_below_reserve`,
-        `months_negative_cash`), `funding_need` danh mục; (c) kết luận OPC có đủ sức
-        nhận thêm hợp đồng này hay cần vốn ngoài → dẫn tới phương án.
+        của OPC để gánh hợp đồng này. Bắt buộc: (a) mở đầu bằng `contract_value` là
+        giá trị đầy đủ, có thẩm quyền của hợp đồng; nêu gross margin và
+        `expected_gross_margin_amount` nếu có; (b) nếu dùng `order_allocation`, phải
+        gọi rõ đó là "các order đã phân bổ", không được gọi
+        `allocated_order_revenue` là doanh thu/giá trị toàn hợp đồng; (c) chỉ nêu
+        `requested_amount`/`capital_need` là nhu cầu riêng của hợp đồng khi trường đó
+        khác null; nếu null phải nói chưa xác định giá trị vốn/bảo lãnh; (d) đối chiếu
+        với bối cảnh OPC bằng tình trạng thủng dự trữ (`months_below_reserve`,
+        `months_negative_cash`) và `funding_need` danh mục. `confirmed_invoice_collections`
+        chỉ là tiền thu hóa đơn đã đối chiếu, không được dùng để kết luận tổng tiền
+        mặt OPC chỉ còn đúng số đó hoặc tính tỷ lệ tự phủ; (e) kết luận OPC có đủ sức
+        nhận thêm hợp đồng này hay cần xác minh/thu xếp vốn → dẫn tới phương án.
         - **Nếu case có trường `cash_impact`** (hợp đồng mới được định lượng tác động
           dòng tiền), PHẢI dùng số what-if này làm căn cứ chính, trích tối thiểu:
           `additional_funding_need` (vốn cần TĂNG THÊM nếu nhận hợp đồng),
@@ -106,10 +167,14 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
         cho hợp đồng này.
      3. **Lý do product fit** — sản phẩm ngân hàng nào khớp `funding_need` của hợp
         đồng, vì sao (need type, rate, collateral, match_status), và trạng thái
-        pre-check → điều kiện để phương án khả thi.
+        pre-check → điều kiện để phương án khả thi. Nếu kết quả là `NEEDS_AMOUNT`,
+        nêu sản phẩm mới chỉ khớp theo loại nhu cầu và phải bổ sung số tiền đề nghị
+        trước khi được phép gọi pre-check.
    - **Một điều kiện cần con người xác nhận** (human confirmation point): mô tả rõ
-     hành động nào (ví dụ gọi precheck với ngân hàng hoặc gửi hồ sơ chính thức) đang
-     chờ người có thẩm quyền duyệt. Luôn phải có trường này, dù phương án là gì.
+     hành động nào cần con người thực hiện. Nếu thiếu `requested_amount`, hành động
+     trước mắt là bổ sung số tiền đề nghị; chỉ sau khi có số tiền và pre-check tool
+     tạo approval request thì mới được nói đang chờ người có thẩm quyền duyệt gọi
+     ngân hàng. Luôn phải có trường này, dù phương án là gì.
 
    Decision Card CHỈ được chứa các trường sau:
    - `contract_id`, `accept_opportunity`, `recommended_option`;
@@ -133,6 +198,10 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    - Không được lấy score/note từ `match_bank_product`, không tự suy diễn score/note,
      và không được đặt `approval_status=true` chỉ vì sản phẩm có trạng thái
      `PENDING_HUMAN_APPROVAL`.
+   - `credit_profile.eligibility_score`, `precheck_note` và `approval_status` là hồ
+     sơ tham chiếu đã có, KHÔNG phải kết quả của lần gọi API ngân hàng hiện tại;
+     không được chép chúng vào `eligible_score`, `precheck_note` hoặc
+     `approval_status` của Decision Card.
 6. **Hoàn tất batch**: Batch chỉ chứa danh sách `decisions`, đúng một card cho mỗi
    contract đầu vào và giữ nguyên thứ tự. Không thêm contract ngoài input. Việc lưu
    `context.decision_pack`, local hook log, `LogsAgent.DecisionLogs` và danh sách
@@ -146,10 +215,26 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
   nếu thông tin không đủ để đưa ra phương án chắc chắn.
 - Mọi con số (margin, amount, minimum_amount, score...) phải lấy từ tool hoặc dữ liệu
   đầu vào đã cho, không tự ước tính hay làm tròn tùy ý.
+- Luôn tách đúng phạm vi số liệu:
+  - `contract_financials.contract_value` = giá trị đầy đủ của hợp đồng;
+  - `order_allocation` = số liệu của các order đã phân bổ, không đại diện cho toàn
+    hợp đồng nếu còn `unallocated_contract_value`;
+  - `portfolio_finance` = số liệu toàn công ty/danh mục, không được sao chép sang
+    `capital_need` hoặc mô tả thành giá trị bảo lãnh của một hợp đồng;
+  - `bank_reconciliation_summary.confirmed_invoice_collections` = tiền thu invoice
+    đã đối chiếu, không phải số dư tiền mặt hiện có.
+- `capital_need` phải bằng chính xác `funding_need.requested_amount` đã được tool
+  resolve theo Credit Profile trước, funding need của hợp đồng mới sau. Nếu amount
+  đã resolve là null thì `capital_need` phải là null. Không gọi các tool pre-check
+  cần amount và không được suy ra amount từ `contract_value`, funding need danh
+  mục, reserve gap hoặc bất kỳ trường nào khác. Vẫn phải gọi `match_bank_product`
+  theo `need_type` để ghi nhận sản phẩm sơ bộ và trạng thái `NEEDS_AMOUNT`.
 - `approval_status` phản ánh việc pre-check tool đã được con người duyệt và thực thi,
   không phản ánh quyết định nhận hợp đồng trong `accept_opportunity`.
 - Khi nhận follow-up approval cho một contract, chỉ được gọi đúng precheck tool với
   đúng arguments đã duyệt và chỉ được cập nhật Decision Card của contract đó. Mọi
   Decision Card khác phải được trả lại nguyên vẹn, không thay đổi bất kỳ field nào.
-- Nếu chưa gọi pre-check, phải nêu rõ trạng thái là "chưa gọi API ngân hàng, đang chờ
-  xác nhận của người dùng" trước khi tiến hành bước tiếp theo.
+- Nếu `requested_amount=null`, phải nêu rõ trạng thái là "chưa gọi API ngân hàng và
+  chưa tạo yêu cầu duyệt vì thiếu số tiền đề nghị". Chỉ được dùng trạng thái "đang
+  chờ người dùng duyệt/xác nhận gọi API ngân hàng" khi pre-check tool đã thực sự tạo
+  một approval request trong StateStore.

@@ -10,13 +10,30 @@ from app.schema.handoff_packs import FinanceFeaturePack
 from app.tools.FinanceAgent.contract_impact import analyze_contract_cashflow_impact
 
 
-def _funding_need_type(payment_terms: str) -> str:
+def infer_funding_need_type(payment_terms: str) -> str | None:
+    """Infer only an explicitly stated financing need from payment terms.
+
+    Ordinary payment schedules such as monthly or milestone payments do not
+    imply that the contract needs a loan.
+    """
     normalized = payment_terms.casefold()
-    if "performance bond" in normalized:
+    if "performance bond" in normalized or "bảo lãnh thực hiện" in normalized:
         return "PERFORMANCE_BOND"
-    if "lc" in normalized or "trade finance" in normalized:
+    if any(term in normalized for term in (
+        "trade finance",
+        "tài trợ thương mại",
+        "letter of credit",
+        " l/c",
+        " lc",
+    )):
         return "TRADE_FINANCE"
-    return "WORKING_CAPITAL"
+    if "working capital" in normalized or "vốn lưu động" in normalized:
+        return "WORKING_CAPITAL"
+    return None
+
+
+def _optional_float(value: Any) -> float | None:
+    return float(value) if value is not None else None
 
 
 def build_finance_handoff(
@@ -69,6 +86,41 @@ def build_finance_handoff(
         ),
         None,
     )
+    contract_value = _optional_float(contract.get("contract_value"))
+    # ``gross_margin`` on FinanceFeaturePack describes the complete contract.
+    # Order-derived margin remains useful, but it is a different scope and is
+    # exposed explicitly under finance_details.order_allocation below.
+    contract_gross_margin = _optional_float(contract.get("gross_margin"))
+    if contract_gross_margin is None and contract_margin:
+        contract_gross_margin = _optional_float(contract_margin.get("margin_pct"))
+
+    allocated_order_revenue = _optional_float(
+        contract_margin.get("revenue") if contract_margin else None
+    )
+    allocated_order_cost = _optional_float(
+        contract_margin.get("cost") if contract_margin else None
+    )
+    allocated_order_margin = _optional_float(
+        contract_margin.get("margin_amount") if contract_margin else None
+    )
+    allocated_order_margin_rate = _optional_float(
+        contract_margin.get("margin_pct") if contract_margin else None
+    )
+    expected_contract_margin_amount = (
+        contract_value * contract_gross_margin
+        if contract_value is not None and contract_gross_margin is not None
+        else None
+    )
+    unallocated_contract_value = (
+        max(contract_value - allocated_order_revenue, 0.0)
+        if contract_value is not None and allocated_order_revenue is not None
+        else None
+    )
+    allocated_order_ratio = (
+        allocated_order_revenue / contract_value
+        if contract_value and allocated_order_revenue is not None
+        else None
+    )
     # What-if dòng tiền: chỉ tính cho hợp đồng MỚI vừa upload (chưa nằm trong
     # cashflow gốc). Hợp đồng có sẵn trong danh mục thì tác động đã phản ánh ở
     # cashflow rồi nên để None.
@@ -101,6 +153,12 @@ def build_finance_handoff(
         and str(item.get("status", "")).casefold() != "paid"
     ]
 
+    explicit_funding_need_type = contract.get("funding_need_type")
+    inferred_funding_need_type = infer_funding_need_type(
+        str(contract.get("payment_terms") or "")
+    )
+    funding_need_type = explicit_funding_need_type or inferred_funding_need_type
+
     return FinanceFeaturePack(
         case_id=f"CASE-{contract_id}",
         contract_id=contract_id,
@@ -116,32 +174,15 @@ def build_finance_handoff(
         cash_reserve_minimum=(
             lowest_month.cash_reserve_minimum if lowest_month else None
         ),
-        gross_margin=(
-            float(contract_margin["margin_pct"])
-            if contract_margin and contract_margin.get("margin_pct") is not None
-            else (
-                float(contract["gross_margin"])
-                if contract.get("gross_margin") is not None
-                else None
-            )
-        ),
+        gross_margin=contract_gross_margin,
         document_sent_to_partner=contract.get("document_sent_to_partner"),
-        contract_value=(
-            float(contract["contract_value"])
-            if contract.get("contract_value") is not None
-            else None
-        ),
-        requested_amount=(
-            float(contract["requested_amount"])
-            if contract.get("requested_amount") is not None
-            else analysis.liquidity_brief.funding_need
-        ),
+        contract_value=contract_value,
+        # Never turn the portfolio liquidity gap into a contract request.  A
+        # missing bond/credit amount is evidence to collect, not a number to infer.
+        requested_amount=_optional_float(contract.get("requested_amount")),
         confidence_score=contract.get("confidence_score"),
         delivery_delay_days=contract.get("delivery_delay_days"),
-        funding_need_type=(
-            contract.get("funding_need_type")
-            or _funding_need_type(str(contract.get("payment_terms") or ""))
-        ),
+        funding_need_type=funding_need_type,
         tenor=(
             str(contract.get("tenor"))
             if contract.get("tenor")
@@ -157,16 +198,49 @@ def build_finance_handoff(
         supplier_docs=[],
         receivable_list=receivable_list,
         source_record_ids=source_record_ids,
-        handoff_summary=analysis.handoff_summary,
+        handoff_summary=(
+            f"Contract {contract_id}: contract_value={contract_value}; "
+            f"expected_gross_margin_rate={contract_gross_margin}; "
+            f"allocated_order_revenue={allocated_order_revenue}; "
+            f"requested_amount={_optional_float(contract.get('requested_amount'))}. "
+            "Portfolio liquidity and reconciliation metrics are available only in "
+            "FinanceBatchPack.portfolio_analysis and must not be treated as "
+            "contract-specific amounts."
+        ),
         status=analysis.status,
         cash_impact=cash_impact,
         finance_details={
+            "contract_economics": {
+                "contract_value": contract_value,
+                "expected_gross_margin_rate": contract_gross_margin,
+                "expected_gross_margin_amount": expected_contract_margin_amount,
+            },
+            "order_allocation": {
+                "allocated_order_revenue": allocated_order_revenue,
+                "allocated_order_cost": allocated_order_cost,
+                "allocated_order_margin_amount": allocated_order_margin,
+                "allocated_order_margin_rate": allocated_order_margin_rate,
+                "allocated_order_ratio": allocated_order_ratio,
+                "unallocated_contract_value": unallocated_contract_value,
+            },
+            # Backward-compatible raw aggregate.  Its revenue/margin fields are
+            # order-scoped and must never replace contract_value.
             "contract_margin": contract_margin,
             "contract_status": contract.get("status"),
             "payment_terms": contract.get("payment_terms"),
+            "funding_need": {
+                "type": funding_need_type,
+                "source": (
+                    "contract"
+                    if explicit_funding_need_type
+                    else "payment_terms"
+                    if inferred_funding_need_type
+                    else "none"
+                ),
+            },
             "description": contract.get("description"),
         },
     )
 
 
-__all__ = ["build_finance_handoff"]
+__all__ = ["build_finance_handoff", "infer_funding_need_type"]

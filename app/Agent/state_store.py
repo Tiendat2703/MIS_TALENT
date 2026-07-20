@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 import fcntl
 import hashlib
 import json
@@ -87,6 +88,51 @@ def _read_state(run_id: int) -> dict[str, Any]:
     return payload
 
 
+def read_approval_state_snapshot(run_id: int) -> dict[str, Any]:
+    """Return a detached local snapshot suitable for durable persistence."""
+    return deepcopy(_read_state(run_id))
+
+
+async def restore_approval_state(
+    run_id: int,
+    snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    """Restore a missing local StateStore file from a durable snapshot.
+
+    Existing local state always wins. This keeps recovery idempotent and avoids
+    overwriting a decision that may already be executing in this process.
+    """
+    if not isinstance(snapshot, dict):
+        raise TypeError("Approval state snapshot must be an object")
+
+    restored = deepcopy(snapshot)
+    restored_run_id = int(restored.get("run_id", run_id))
+    if restored_run_id != run_id:
+        raise ValueError(
+            f"Approval state run_id mismatch: expected {run_id}, got {restored_run_id}"
+        )
+
+    restored["version"] = 2
+    restored["run_id"] = run_id
+    restored.setdefault("revision", 0)
+    restored.setdefault("workflow_status", "review")
+    restored.setdefault("context", {})
+    restored.setdefault("user_input", "")
+    restored.setdefault("metadata", {})
+    restored.setdefault("approval_requests", [])
+    restored.setdefault("decision_result", None)
+    restored.setdefault("conversation_items", [])
+    restored.setdefault("created_at", _timestamp())
+    restored.setdefault("updated_at", _timestamp())
+
+    async with _RUN_LOCKS[run_id]:
+        with _process_lock(run_id):
+            if _state_path(run_id).exists():
+                return _read_state(run_id)
+            _write_state(run_id, restored)
+            return deepcopy(restored)
+
+
 def _approval_fingerprint(
     contract_id: str,
     tool_name: str,
@@ -152,7 +198,9 @@ async def register_approval_request(
             payload = _read_state(run_id)
             for request in payload["approval_requests"]:
                 if request["fingerprint"] == fingerprint:
-                    return dict(request)
+                    result = dict(request)
+                    result["_newly_registered"] = False
+                    return result
 
             request = {
                 "approval_id": str(uuid.uuid4()),
@@ -172,7 +220,9 @@ async def register_approval_request(
             payload["approval_requests"].append(request)
             payload["workflow_status"] = "review"
             _write_state(run_id, payload)
-            return dict(request)
+            result = dict(request)
+            result["_newly_registered"] = True
+            return result
 
 
 async def get_approval_state(run_id: int) -> dict[str, Any]:
@@ -188,7 +238,7 @@ async def set_approval_decision(
     approval_id: str,
     approved: bool,
 ) -> dict[str, Any]:
-    """Move one pending request to approved or rejected."""
+    """Move a pending request to a decision or retry a failed execution."""
     async with _RUN_LOCKS[run_id]:
         with _process_lock(run_id):
             payload = _read_state(run_id)
@@ -202,6 +252,20 @@ async def set_approval_decision(
                 }:
                     return dict(request)
                 if not approved and request["status"] == "rejected":
+                    return dict(request)
+                if approved and request["status"] == "failed":
+                    # The human decision remains valid, but an infrastructure or
+                    # integration error prevented execution. Reset transient
+                    # execution fields so the exact same request can be retried.
+                    request["status"] = "approved"
+                    request["decided_at"] = _timestamp()
+                    request["execution_started_at"] = None
+                    request["executed_at"] = None
+                    request["decision_applied_at"] = None
+                    request["result"] = None
+                    request["error"] = None
+                    payload["workflow_status"] = "review"
+                    _write_state(run_id, payload)
                     return dict(request)
                 if request["status"] != "pending":
                     raise ValueError(

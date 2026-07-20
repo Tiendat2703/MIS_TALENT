@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from pydantic import Field
@@ -10,8 +11,14 @@ from app.database.repository import query_db
 from app.schema.decisionAgent import DecisionBatchOutput
 from app.schema.handoff_packs import (
     FinanceBatchPack,
+    FinanceFeaturePack,
     RiskBatchPack,
     StrictModel,
+)
+from app.service.credit_profile import (
+    credit_profile_payload,
+    load_contract_credit_profiles,
+    resolve_contract_funding_need,
 )
 
 
@@ -223,13 +230,29 @@ def save_risk_pack(session_id: int, risk_pack: RiskBatchPack) -> None:
 
 
 def save_decision_pack(session_id: int, decision_pack: DecisionBatchOutput) -> None:
-    expected_contract_ids = load_finance_pack(session_id).contract_ids
+    record = load_pipeline_context(session_id)
+    finance_pack = record.finance_pack
+    expected_contract_ids = finance_pack.contract_ids
     returned_ids = [item.contract_id for item in decision_pack.decisions]
     if returned_ids != expected_contract_ids:
         raise ValueError(
             "DecisionPack must contain all context contracts in order: "
             f"expected={expected_contract_ids}, returned={returned_ids}"
         )
+    from app.service.decision_guard import (
+        validate_decision_finance_consistency,
+        validate_decision_risk_policy,
+    )
+
+    credit_profiles = load_contract_credit_profiles(finance_pack.contract_ids)
+    validate_decision_finance_consistency(
+        decision_pack,
+        finance_pack,
+        credit_profiles,
+    )
+    if record.risk_pack is None:
+        raise LookupError(f"RiskPack is not ready for session_id={session_id}")
+    validate_decision_risk_policy(decision_pack, record.risk_pack)
     rows = query_db(
         """
         UPDATE public.context
@@ -247,23 +270,70 @@ def save_decision_pack(session_id: int, decision_pack: DecisionBatchOutput) -> N
 def decision_input_payload(session_id: int) -> dict[str, Any]:
     finance_pack, risk_pack = load_decision_inputs(session_id)
     risk_by_contract = {pack.contract_id: pack for pack in risk_pack.packs}
+    credit_profiles = load_contract_credit_profiles(finance_pack.contract_ids)
+    portfolio_finance = deepcopy(finance_pack.portfolio_analysis)
+    reconciliation = portfolio_finance.get("bank_reconciliation_summary")
+    if isinstance(reconciliation, dict) and "confirmed_cash_total" in reconciliation:
+        reconciliation["confirmed_invoice_collections"] = reconciliation.pop(
+            "confirmed_cash_total"
+        )
+
+    def build_case(pack: FinanceFeaturePack) -> dict[str, Any]:
+        details = pack.finance_details or {}
+        finance_payload = pack.model_dump(mode="json")
+        # Decision receives the explicitly scoped replacement below.  Removing
+        # the legacy aggregate prevents its generic ``revenue`` field from being
+        # mistaken for the authoritative full contract value.
+        payload_details = finance_payload.get("finance_details") or {}
+        payload_details.pop("contract_margin", None)
+        profile = credit_profiles.get(pack.contract_id)
+        funding_need = resolve_contract_funding_need(
+            pack,
+            profile,
+        )
+        return {
+            "finance": finance_payload,
+            "risk": risk_by_contract[pack.contract_id].model_dump(mode="json"),
+            "credit_profile": credit_profile_payload(profile),
+            "contract_financials": {
+                "contract_value": pack.contract_value,
+                "expected_gross_margin_rate": pack.gross_margin,
+                "expected_gross_margin_amount": (
+                    details.get("contract_economics") or {}
+                ).get("expected_gross_margin_amount"),
+                "order_allocation": details.get("order_allocation"),
+            },
+            "funding_need": funding_need,
+            "scope_rules": [
+                "contract_value is the authoritative full contract value",
+                "order_allocation contains order-scoped amounts only",
+                "portfolio_finance metrics apply to the whole company, not this contract",
+                "credit_profile requested_amount has priority for an explicitly referenced contract",
+                "contract funding need is used only when no contract-scoped credit_profile exists",
+                "funding_need.amount_status=MISSING means product type may be matched but bank precheck must not run",
+            ],
+        }
+
     return {
         "session_id": session_id,
         "contract_ids": finance_pack.contract_ids,
-        "portfolio_finance": finance_pack.portfolio_analysis,
-        "cases": [
-            {
-                "finance": pack.model_dump(mode="json"),
-                "risk": risk_by_contract[pack.contract_id].model_dump(mode="json"),
-                "funding_need": {
-                    "need_type": pack.funding_need_type,
-                    "requested_amount": pack.requested_amount,
-                    "tenor": pack.tenor,
-                    "basis": f"Contract {pack.contract_id}",
-                },
-            }
-            for pack in finance_pack.packs
-        ],
+        "portfolio_finance": portfolio_finance,
+        "portfolio_scope_note": (
+            "portfolio_finance contains whole-company metrics. In particular, "
+            "liquidity_brief.funding_need is not a contract bond/credit amount, and "
+            "bank_reconciliation_summary.confirmed_invoice_collections is confirmed "
+            "invoice collections rather than the company's available cash balance."
+        ),
+        "credit_profile_lookup": {
+            "source_table": "credit_profile",
+            "contract_link": "exact contract id in collateral_or_basis",
+            "matched_contract_ids": sorted(credit_profiles),
+            "fallback": (
+                "Use the contract's own funding need only when no contract-scoped "
+                "credit_profile row exists."
+            ),
+        },
+        "cases": [build_case(pack) for pack in finance_pack.packs],
     }
 
 

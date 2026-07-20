@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from app.schema.handoff_packs import StrictModel
 
@@ -17,7 +17,7 @@ class ContractUploadPackage(StrictModel):
     customer_id: str = Field(min_length=1)
     start_date: date
     end_date: date
-    status: str = Field(min_length=1)
+    status: Literal["Pending approval"] = "Pending approval"
     description: str = Field(min_length=1)
     contract_value: float = Field(gt=0)
     gross_margin: float = Field(ge=-1, le=1)
@@ -30,6 +30,12 @@ class ContractUploadPackage(StrictModel):
         "RECEIVABLE_FINANCING",
     ]
     tenor: str = Field(min_length=1)
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def enforce_new_contract_status(cls, _value: object) -> str:
+        """A newly uploaded contract always starts in the approval queue."""
+        return "Pending approval"
 
     @model_validator(mode="after")
     def validate_dates(self) -> "ContractUploadPackage":

@@ -16,7 +16,6 @@ Chạy thử:  python -m app.Agent.financeAgent
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import time
 from datetime import date, datetime, timezone
@@ -162,7 +161,7 @@ def _fallback_synthesis(facts: dict) -> FinanceSynthesis:
 async def _run_steps_deterministic(run_id: str | int, store: dict, today: date) -> None:
     """Fallback: tự chạy 6 bước có bắn event (khi không dùng LLM)."""
     await _step(run_id, 1, "Bước 1/6: Load & validate dữ liệu", "start")
-    data = store.get("data") or load_all()  # dùng data đã preload (đã áp scenario/submission)
+    data = store.get("data") or load_all()  # dùng dữ liệu DB đã preload/submission
     store["data"] = data
     store["validation"] = validate_finance_data(data)
     await _step(run_id, 1, "Bước 1/6: Load & validate", "done",
@@ -269,13 +268,11 @@ async def run_finance_agent(
     run_id: int | None = None,
     contract_id: str = "CON-004",
     reference_date: date | None = None,
-    scenario: str | None = None,
     submission: dict | None = None,
     persist_context: bool = True,
 ) -> FinanceAnalysisPack:
     """Chạy Finance Agent.
 
-    scenario: đường dẫn tệp cấu hình tình huống (vd ca thiếu dữ liệu).
     submission: {field_id: value} người dùng vừa điền vào form yêu cầu bổ sung —
     agent áp các giá trị này rồi chạy tiếp; trường không điền vẫn để thiếu.
     """
@@ -298,9 +295,8 @@ async def run_finance_agent(
     await _emit(run_id, {"type": "run_started", "agent": "Finance_Agent",
                          "task": "Finance Agent bắt đầu", "status": "running"})
 
-    # Nạp dữ liệu MỘT lần (đọc từ tệp cấu hình + tình huống), áp dữ liệu người dùng
-    # vừa điền (nếu có). Chỉ dùng giá trị người dùng cung cấp — không bịa.
-    data = load_all(scenario=scenario)
+    # Nạp dữ liệu DB một lần, rồi áp đúng dữ liệu người dùng vừa bổ sung (nếu có).
+    data = load_all()
     submission_report = None
     if submission:
         submission_report = apply_form_submission(data, submission)
@@ -328,7 +324,6 @@ async def run_finance_agent(
                 contract_id=contract_id,
                 contract_ids=[contract_id],
                 reference_date=str(today),
-                scenario=scenario,
                 finance_store=store,
             )
             result = await Runner.run(_get_agent(), input=_ANALYSIS_REQUEST, context=ctx, max_turns=15)
@@ -402,13 +397,8 @@ async def run_finance_agent(
 if __name__ == "__main__":
     import sys
 
-    # Cờ:
-    #   --full     : in nguyên FinanceAnalysisPack (JSON) thay vì bản tóm tắt.
-    #   --missing  : chạy demo tình huống THIẾU dữ liệu + điền form (mặc định KHÔNG chạy).
+    # --full: in nguyên FinanceAnalysisPack (JSON) thay vì bản tóm tắt.
     FULL = "--full" in sys.argv
-    MISSING = "--missing" in sys.argv
-    SCENARIO = str(Path(__file__).resolve().parents[1]
-                   / "tools" / "FinanceAgent" / "scenarios" / "missing_data_demo.json")
 
     def _dump_pack(pack) -> None:
         print(pack.model_dump_json(indent=2))
@@ -424,51 +414,10 @@ if __name__ == "__main__":
         print("handoff_summary:", pack.handoff_summary)
 
     async def run_normal() -> None:
-        pack = await run_finance_agent(reference_date=date(2026, 7, 17))
+        pack = await run_finance_agent()
         (_dump_pack if FULL else _print_summary)(pack)
 
-    async def run_missing_demo() -> None:
-        print("=" * 70)
-        print("PHA 1 — Tình huống THIẾU dữ liệu (đọc từ tệp cấu hình)")
-        print("=" * 70)
-        pack1 = await run_finance_agent(
-            reference_date=date(2026, 7, 17),
-            scenario=SCENARIO,
-            persist_context=False,
-        )
-        if FULL:
-            _dump_pack(pack1)
-        else:
-            print("status:", pack1.status)
-            print("tháng thiếu projected_closing_cash:", pack1.liquidity_brief.months_missing_data)
-            print("order thiếu revenue/cost:", pack1.margin_analysis.orders_missing_data)
-            if pack1.data_request_form:
-                print(f"\nFORM YÊU CẦU BỔ SUNG ({pack1.data_request_form.form_id}):")
-                for f in pack1.data_request_form.fields:
-                    req = "bắt buộc" if f.required else "tùy chọn"
-                    print(f"  • [{f.field_id}] {f.label} — {f.data_type}, {req}")
-
-        submission = {
-            "orders|ORD-004|estimated_cost": 198000000,
-            "cashflow|2026-08|projected_closing_cash": -155000000,
-        }
-        print("\n" + "=" * 70)
-        print("PHA 2 — Người dùng điền form, agent nạp và chạy tiếp")
-        print("=" * 70)
-        print("Người dùng điền:", submission)
-        pack2 = await run_finance_agent(
-            reference_date=date(2026, 7, 17),
-            scenario=SCENARIO,
-            submission=submission,
-            persist_context=False,
-        )
-        if FULL:
-            _dump_pack(pack2)
-        else:
-            print("submission_report:", pack2.submission_report)
-            _print_summary(pack2)
-
-    asyncio.run(run_missing_demo() if MISSING else run_normal())
+    asyncio.run(run_normal())
 
 
 __all__ = [

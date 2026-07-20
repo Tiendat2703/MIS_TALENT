@@ -2,7 +2,7 @@
 
     python -m app.main
     # hoặc trực tiếp:
-    uvicorn app.api:app --reload --host 0.0.0.0 --port 8000
+    uvicorn app.api:app --reload --host 0.0.0.0 --port 8080
 
 Cấu hình qua env (tùy chọn): API_HOST, API_PORT, API_RELOAD.
 """

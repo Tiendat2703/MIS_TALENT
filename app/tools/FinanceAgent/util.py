@@ -10,7 +10,7 @@ _EXCEL_EPOCH = date(1899, 12, 30)
 def parse_date(value) -> date | None:
     """Chuẩn hóa ngày về datetime.date từ nhiều định dạng nguồn:
     - date/datetime (DB trả về)
-    - chuỗi ISO 'YYYY-MM-DD' (mock)
+    - chuỗi ISO 'YYYY-MM-DD' (API/DB có thể trả về)
     - số serial Excel (phòng khi đọc thẳng file)
     """
     if value is None:

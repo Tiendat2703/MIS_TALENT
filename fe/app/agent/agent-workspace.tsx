@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Bar from "@/components/ui/about/Bar";
+import { API_REQUEST_HEADERS, apiUrl } from "@/lib/api";
+import { ACTIVE_RUN_STORAGE_KEY } from "@/lib/run-session";
 import {
   Activity,
   ArrowRight,
@@ -55,10 +57,6 @@ type ActivityItem = {
   events: PipelineEvent[];
 };
 
-const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_API_URL ?? "https://cc10-113-23-125-3.ngrok-free.app"
-).replace(/\/+$/, "");
-const ACTIVE_RUN_STORAGE_KEY = "mis-agent-active-run-id";
 const AGENT_IDS: AgentId[] = ["Finance", "Risk", "Decision"];
 
 const agents = {
@@ -103,6 +101,7 @@ const TASK_LABELS: Record<string, string> = {
   "Build and persist Risk Batch Pack": "Xây dựng và lưu Risk Pack",
   "Risk Pack persisted": "Lưu Risk Pack",
   "Load Finance and Risk Batch Packs": "Nạp kết quả từ Finance và Risk",
+  "Load Finance, Risk, and Credit Profiles": "Nạp Finance, Risk và Credit Profile",
   "Pipeline complete; precheck approval is pending": "Hoàn tất phân tích, đang chờ phê duyệt",
 };
 
@@ -475,7 +474,7 @@ export function AgentWorkspace() {
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("idle");
   const [errorMessage, setErrorMessage] = useState("");
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const eventStreamRef = useRef<AbortController | null>(null);
   const startRequestRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -559,18 +558,16 @@ export function AgentWorkspace() {
     if (event.type === "run_finished") {
       setConnectionStatus("completed");
       setActiveAgent(null);
-      const source = eventSourceRef.current;
-      eventSourceRef.current = null;
-      source?.close();
+      eventStreamRef.current?.abort();
+      eventStreamRef.current = null;
     }
 
     if (event.type === "run_error" || event.type === "run_cancelled") {
       setConnectionStatus("error");
       setErrorMessage(event.task || "Pipeline dừng trước khi hoàn tất.");
       setActiveAgent(null);
-      const source = eventSourceRef.current;
-      eventSourceRef.current = null;
-      source?.close();
+      eventStreamRef.current?.abort();
+      eventStreamRef.current = null;
     }
   }, []);
 
@@ -579,9 +576,8 @@ export function AgentWorkspace() {
     const controller = new AbortController();
     startRequestRef.current = controller;
 
-    const source = eventSourceRef.current;
-    eventSourceRef.current = null;
-    source?.close();
+    eventStreamRef.current?.abort();
+    eventStreamRef.current = null;
 
     setConnectionStatus("starting");
     setErrorMessage("");
@@ -594,11 +590,11 @@ export function AgentWorkspace() {
     window.localStorage.removeItem(ACTIVE_RUN_STORAGE_KEY);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/runs`, {
+      const response = await fetch(apiUrl("/runs"), {
         method: "POST",
         headers: {
           Accept: "application/json",
-          "ngrok-skip-browser-warning": "true",
+          ...API_REQUEST_HEADERS,
         },
         signal: controller.signal,
       });
@@ -621,36 +617,93 @@ export function AgentWorkspace() {
   useEffect(() => {
     if (sessionId === null) return;
 
-    // Route SSE through Next.js so the server can add the ngrok bypass header.
-    // Native EventSource cannot attach custom request headers and otherwise gets
-    // the ERR_NGROK_6024 browser-warning response instead of an event stream.
-    const source = new EventSource(`/api/runs/${sessionId}/events`);
-    eventSourceRef.current = source;
+    const controller = new AbortController();
+    eventStreamRef.current = controller;
 
-    source.onopen = () => {
-      if (eventSourceRef.current !== source) return;
-      setConnectionStatus("connected");
-      setErrorMessage("");
-    };
+    async function waitBeforeReconnect() {
+      await new Promise<void>((resolve) => {
+        const onAbort = () => {
+          window.clearTimeout(timeout);
+          resolve();
+        };
+        const timeout = window.setTimeout(() => {
+          controller.signal.removeEventListener("abort", onAbort);
+          resolve();
+        }, 1_500);
+        controller.signal.addEventListener("abort", onAbort, { once: true });
+      });
+    }
 
-    source.onmessage = (message) => {
-      if (eventSourceRef.current !== source) return;
-      try {
-        handlePipelineEvent(JSON.parse(message.data) as PipelineEvent);
-      } catch {
-        setErrorMessage("API trả về event không đúng định dạng.");
+    async function connectToEventStream() {
+      while (!controller.signal.aborted) {
+        try {
+          const response = await fetch(apiUrl(`/runs/${sessionId}/events`), {
+            cache: "no-store",
+            headers: {
+              Accept: "text/event-stream",
+              "Cache-Control": "no-cache",
+              ...API_REQUEST_HEADERS,
+            },
+            signal: controller.signal,
+          });
+          if (!response.ok || !response.body) {
+            throw new Error(`Event API returned ${response.status} ${response.statusText}`);
+          }
+
+          setConnectionStatus("connected");
+          setErrorMessage("");
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          while (!controller.signal.aborted) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+            let boundary = buffer.indexOf("\n\n");
+
+            while (boundary >= 0) {
+              const block = buffer.slice(0, boundary);
+              buffer = buffer.slice(boundary + 2);
+              boundary = buffer.indexOf("\n\n");
+
+              const data = block
+                .split("\n")
+                .filter((line) => line.startsWith("data:"))
+                .map((line) => line.slice(5).trimStart())
+                .join("\n");
+              if (!data) continue;
+
+              try {
+                handlePipelineEvent(JSON.parse(data) as PipelineEvent);
+              } catch {
+                setErrorMessage("API trả về event không đúng định dạng.");
+              }
+            }
+          }
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          setErrorMessage(
+            error instanceof Error
+              ? `Kết nối event bị gián đoạn: ${error.message}`
+              : "Kết nối event bị gián đoạn. Hệ thống đang kết nối lại.",
+          );
+        }
+
+        if (!controller.signal.aborted) {
+          setConnectionStatus("reconnecting");
+          await waitBeforeReconnect();
+        }
       }
-    };
+    }
 
-    source.onerror = () => {
-      if (eventSourceRef.current !== source) return;
-      setConnectionStatus("reconnecting");
-      setErrorMessage("Kết nối event bị gián đoạn. Hệ thống đang kết nối lại.");
-    };
+    void connectToEventStream();
 
     return () => {
-      if (eventSourceRef.current === source) eventSourceRef.current = null;
-      source.close();
+      controller.abort();
+      if (eventStreamRef.current === controller) eventStreamRef.current = null;
     };
   }, [handlePipelineEvent, sessionId]);
 
@@ -658,9 +711,8 @@ export function AgentWorkspace() {
     return () => {
       startRequestRef.current?.abort();
       startRequestRef.current = null;
-      const source = eventSourceRef.current;
-      eventSourceRef.current = null;
-      source?.close();
+      eventStreamRef.current?.abort();
+      eventStreamRef.current = null;
     };
   }, []);
 

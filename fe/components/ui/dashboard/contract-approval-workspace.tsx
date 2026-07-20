@@ -15,8 +15,8 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { CashFlowChart } from "./cash-flow-chart";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { API_BASE_URL, API_REQUEST_HEADERS, apiUrl } from "@/lib/api";
 
 type ApprovalStatus = "pending" | "approved" | "review" | "rejected";
 type RiskLevel = "low" | "medium" | "high" | "critical";
@@ -78,7 +78,7 @@ type ContractRecord = {
   runId?: number;
   title: string;
   counterparty: string;
-  amount: number;
+  amount: number | null;
   startDate: string;
   endDate: string;
   submittedAt: string;
@@ -87,13 +87,12 @@ type ContractRecord = {
   owner: string;
   summary: string;
   aiOption: string;
-  aiConfidence: number;
+  aiConfidence: number | null;
   reasons: string[];
   risks: ContractRisk[];
   safeguards: string[];
   riskLevel: RiskLevel;
   status: ApprovalStatus;
-  source: "api" | "demo";
   agentRisk: AgentRiskSnapshot;
   bankPrecheck: BankPrecheck;
 };
@@ -110,6 +109,7 @@ type ApiContract = {
     requested_amount?: number | null;
     contract_value?: number | null;
     gross_margin?: number | null;
+    confidence_score?: number | null;
     status?: string | null;
     additional_funding_need?: number | null;
     worst_month_after?: number | null;
@@ -159,325 +159,10 @@ type ApiContract = {
   } | null;
 };
 
-const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_API_URL ?? "https://cc10-113-23-125-3.ngrok-free.app"
-).replace(/\/+$/, "");
-const API_REQUEST_HEADERS = {
-  "ngrok-skip-browser-warning": "true",
-};
-
-const demoContracts: ContractRecord[] = [
-  {
-    id: "CON-004",
-    title: "Triển khai mạng lưới hợp tác xã 20 tỉnh",
-    counterparty: "Liên minh HTX Bình Minh",
-    amount: 4_200_000_000,
-    startDate: "2026-06-01",
-    endDate: "2027-03-31",
-    submittedAt: "2026-07-18T09:42:00+07:00",
-    paymentTerms: "Bảo lãnh thực hiện · thanh toán theo nghiệm thu",
-    contractType: "Mở rộng vận hành",
-    owner: "Nguyễn Thanh Hà",
-    summary: "Mở rộng nền tảng điều phối và báo cáo cho 20 đơn vị cấp tỉnh, triển khai theo ba giai đoạn.",
-    aiOption: "APPROVE_WITH_CONDITION",
-    aiConfidence: 78,
-    reasons: [
-      "Biên lợi nhuận 24% vẫn cao hơn ngưỡng tối thiểu của danh mục.",
-      "Dòng tiền âm sâu nhất rơi vào giai đoạn triển khai thứ hai trước khi nghiệm thu.",
-      "Giá trị hợp đồng vượt hạn mức tự phê duyệt và cần xác nhận của nhà sáng lập.",
-    ],
-    risks: [
-      {
-        title: "Áp lực vốn lưu động",
-        description: "Khoảng trống tiền mặt có thể kéo dài 6–8 tuần nếu biên bản nghiệm thu giai đoạn hai chậm.",
-        severity: "high",
-      },
-      {
-        title: "Rủi ro bảo lãnh thực hiện",
-        description: "Ngân hàng có thể yêu cầu ký quỹ bổ sung khi tiến độ giải ngân lệch kế hoạch.",
-        severity: "medium",
-      },
-    ],
-    safeguards: [
-      "Chỉ khởi động giai đoạn hai sau khi nhận đủ 30% giá trị nghiệm thu đầu tiên.",
-      "Duy trì quỹ dự phòng tối thiểu 620 triệu đồng trong suốt thời gian triển khai.",
-    ],
-    riskLevel: "high",
-    status: "review",
-    source: "demo",
-    agentRisk: {
-      available: false,
-      contractId: "CON-004",
-      overallRiskLevel: null,
-      totalRulesTriggered: 0,
-      triggeredRuleIds: [],
-      totalAlertsDetected: 0,
-      totalProposedAlerts: 0,
-      insufficientEvidenceCount: 0,
-      humanReviewRequired: false,
-      totalRulesEvaluated: 0,
-      notTriggeredCount: 0,
-      insufficientEvidenceRuleCount: 0,
-      triggeredRules: [],
-      alerts: [],
-      evidenceGaps: [],
-      requiredActions: [],
-    },
-    bankPrecheck: {
-      available: false,
-      requestType: null,
-      requestedAmount: null,
-      eligibleScore: null,
-      precheckNote: null,
-      approvalStatus: false,
-      requiresFounderConfirmation: false,
-    },
-  },
-  {
-    id: "CON-005",
-    title: "Quy trình chứng từ và báo cáo thương mại",
-    counterparty: "An Phú Export Services",
-    amount: 1_850_000_000,
-    startDate: "2026-06-08",
-    endDate: "2026-12-31",
-    submittedAt: "2026-07-17T15:18:00+07:00",
-    paymentTerms: "L/C trả chậm · 30/70",
-    contractType: "Tài trợ thương mại",
-    owner: "Trần Minh Khoa",
-    summary: "Số hoá luồng chứng từ xuất khẩu, đối soát vận chuyển và lập báo cáo theo từng lô hàng.",
-    aiOption: "REJECT_MISSING_EVIDENCE",
-    aiConfidence: 84,
-    reasons: [
-      "Chưa có xác nhận có hiệu lực từ nhà cung cấp nước ngoài.",
-      "Hồ sơ bảo hiểm vận chuyển thiếu phạm vi bồi thường do chậm giao hàng.",
-      "Thời gian thu tiền dự kiến dài hơn chu kỳ thanh toán nhà cung cấp 47 ngày.",
-    ],
-    risks: [
-      {
-        title: "Thiếu chứng từ trọng yếu",
-        description: "Chữ ký nhà cung cấp và giấy phép vận chuyển chưa được xác minh độc lập.",
-        severity: "critical",
-      },
-      {
-        title: "Lệch chu kỳ thanh toán",
-        description: "Doanh nghiệp phải ứng vốn trước khi ngân hàng giải phóng khoản L/C.",
-        severity: "high",
-      },
-    ],
-    safeguards: [
-      "Tạm dừng phát hành L/C cho đến khi hồ sơ được công chứng và đối chiếu.",
-      "Bổ sung bảo hiểm trì hoãn vận chuyển vào điều kiện giải ngân.",
-    ],
-    riskLevel: "critical",
-    status: "pending",
-    source: "demo",
-    agentRisk: {
-      available: false,
-      contractId: "CON-005",
-      overallRiskLevel: null,
-      totalRulesTriggered: 0,
-      triggeredRuleIds: [],
-      totalAlertsDetected: 0,
-      totalProposedAlerts: 0,
-      insufficientEvidenceCount: 0,
-      humanReviewRequired: false,
-      totalRulesEvaluated: 0,
-      notTriggeredCount: 0,
-      insufficientEvidenceRuleCount: 0,
-      triggeredRules: [],
-      alerts: [],
-      evidenceGaps: [],
-      requiredActions: [],
-    },
-    bankPrecheck: {
-      available: false,
-      requestType: null,
-      requestedAmount: null,
-      eligibleScore: null,
-      precheckNote: null,
-      approvalStatus: false,
-      requiresFounderConfirmation: false,
-    },
-  },
-  {
-    id: "CON-003",
-    title: "Tự động hoá trung tâm chăm sóc khách hàng",
-    counterparty: "Tân Cảng Digital",
-    amount: 1_250_000_000,
-    startDate: "2026-05-16",
-    endDate: "2026-11-30",
-    submittedAt: "2026-07-17T10:05:00+07:00",
-    paymentTerms: "Theo mốc · 30/40/30",
-    contractType: "Triển khai phần mềm",
-    owner: "Lê Gia Hân",
-    summary: "Tích hợp tổng đài, phân loại yêu cầu và dashboard SLA trên hạ tầng hiện hữu của khách hàng.",
-    aiOption: "APPROVE_WITH_CONDITION",
-    aiConfidence: 72,
-    reasons: [
-      "Biên lợi nhuận dự kiến 31% tạo đủ vùng đệm cho chi phí triển khai.",
-      "Kế hoạch nhân sự phụ thuộc vào một nhóm kỹ thuật đang vận hành dự án khác.",
-      "Mốc thanh toán cuối chỉ được kích hoạt sau nghiệm thu toàn bộ SLA.",
-    ],
-    risks: [
-      {
-        title: "Nút thắt nhân sự",
-        description: "Hai kỹ sư tích hợp chủ chốt đang được phân bổ đồng thời cho dự án CON-002.",
-        severity: "medium",
-      },
-    ],
-    safeguards: ["Khoá lịch đội tích hợp trước ngày khởi động và bổ sung nguồn lực dự phòng theo tuần."],
-    riskLevel: "medium",
-    status: "pending",
-    source: "demo",
-    agentRisk: {
-      available: false,
-      contractId: "CON-003",
-      overallRiskLevel: null,
-      totalRulesTriggered: 0,
-      triggeredRuleIds: [],
-      totalAlertsDetected: 0,
-      totalProposedAlerts: 0,
-      insufficientEvidenceCount: 0,
-      humanReviewRequired: false,
-      totalRulesEvaluated: 0,
-      notTriggeredCount: 0,
-      insufficientEvidenceRuleCount: 0,
-      triggeredRules: [],
-      alerts: [],
-      evidenceGaps: [],
-      requiredActions: [],
-    },
-    bankPrecheck: {
-      available: false,
-      requestType: null,
-      requestedAmount: null,
-      eligibleScore: null,
-      precheckNote: null,
-      approvalStatus: false,
-      requiresFounderConfirmation: false,
-    },
-  },
-  {
-    id: "CON-002",
-    title: "Thiết lập luồng xử lý đơn hàng ERP-light",
-    counterparty: "Thịnh Vượng Retail",
-    amount: 980_000_000,
-    startDate: "2026-05-05",
-    endDate: "2026-09-30",
-    submittedAt: "2026-07-15T14:26:00+07:00",
-    paymentTerms: "Theo tiến độ · 40/30/30",
-    contractType: "Tích hợp hệ thống",
-    owner: "Phạm Quốc Bảo",
-    summary: "Chuẩn hoá quy trình đơn hàng, tồn kho và phê duyệt chiết khấu cho 12 điểm bán.",
-    aiOption: "APPROVE",
-    aiConfidence: 86,
-    reasons: [
-      "Đối tác có lịch sử thanh toán đúng hạn trong 18 tháng gần nhất.",
-      "Khoản tạm ứng 40% đủ bù chi phí triển khai ban đầu.",
-      "Phạm vi và tiêu chí nghiệm thu đã được định lượng trong phụ lục.",
-    ],
-    risks: [
-      {
-        title: "Áp lực biên lợi nhuận",
-        description: "Chi phí tích hợp tăng trên 9% sẽ đưa biên dự án xuống gần ngưỡng cảnh báo.",
-        severity: "low",
-      },
-    ],
-    safeguards: ["Mọi yêu cầu ngoài phạm vi phải được định giá và ký phụ lục trước khi thực hiện."],
-    riskLevel: "low",
-    status: "approved",
-    source: "demo",
-    agentRisk: {
-      available: false,
-      contractId: "CON-002",
-      overallRiskLevel: null,
-      totalRulesTriggered: 0,
-      triggeredRuleIds: [],
-      totalAlertsDetected: 0,
-      totalProposedAlerts: 0,
-      insufficientEvidenceCount: 0,
-      humanReviewRequired: false,
-      totalRulesEvaluated: 0,
-      notTriggeredCount: 0,
-      insufficientEvidenceRuleCount: 0,
-      triggeredRules: [],
-      alerts: [],
-      evidenceGaps: [],
-      requiredActions: [],
-    },
-    bankPrecheck: {
-      available: false,
-      requestType: null,
-      requestedAmount: null,
-      eligibleScore: null,
-      precheckNote: null,
-      approvalStatus: false,
-      requiresFounderConfirmation: false,
-    },
-  },
-  {
-    id: "CON-001",
-    title: "Dịch vụ hỗ trợ vận hành định kỳ",
-    counterparty: "Nam Việt Logistics",
-    amount: 720_000_000,
-    startDate: "2026-04-20",
-    endDate: "2026-10-20",
-    submittedAt: "2026-07-14T08:54:00+07:00",
-    paymentTerms: "Thanh toán hàng tháng · Net 15",
-    contractType: "Dịch vụ định kỳ",
-    owner: "Vũ Khánh Linh",
-    summary: "Vận hành báo cáo quản trị, kiểm soát SLA và hỗ trợ xử lý sự cố theo tháng.",
-    aiOption: "APPROVE",
-    aiConfidence: 91,
-    reasons: [
-      "Doanh thu định kỳ và lịch thanh toán Net 15 giúp dòng tiền ổn định.",
-      "Biên lợi nhuận 30% cao hơn mức trung vị của nhóm dịch vụ.",
-      "Không có cảnh báo tuân thủ hoặc giao dịch bất thường liên quan đến đối tác.",
-    ],
-    risks: [
-      {
-        title: "Rủi ro tập trung thấp",
-        description: "Giá trị hợp đồng chiếm 7,4% doanh thu dự kiến của danh mục hiện tại.",
-        severity: "low",
-      },
-    ],
-    safeguards: ["Đối soát SLA và công nợ vào ngày làm việc cuối cùng mỗi tháng."],
-    riskLevel: "low",
-    status: "approved",
-    source: "demo",
-    agentRisk: {
-      available: false,
-      contractId: "CON-001",
-      overallRiskLevel: null,
-      totalRulesTriggered: 0,
-      triggeredRuleIds: [],
-      totalAlertsDetected: 0,
-      totalProposedAlerts: 0,
-      insufficientEvidenceCount: 0,
-      humanReviewRequired: false,
-      totalRulesEvaluated: 0,
-      notTriggeredCount: 0,
-      insufficientEvidenceRuleCount: 0,
-      triggeredRules: [],
-      alerts: [],
-      evidenceGaps: [],
-      requiredActions: [],
-    },
-    bankPrecheck: {
-      available: false,
-      requestType: null,
-      requestedAmount: null,
-      eligibleScore: null,
-      precheckNote: null,
-      approvalStatus: false,
-      requiresFounderConfirmation: false,
-    },
-  },
-];
-
 const optionLabels: Record<string, string> = {
   APPROVE: "Nên duyệt",
   APPROVE_WITH_CONDITION: "Duyệt có điều kiện",
+  TEMPORARY_REJECT_RISK: "Tạm từ chối · rủi ro",
   REJECT_MISSING_EVIDENCE: "Từ chối · thiếu hồ sơ",
   NO_SUITABLE_PRODUCT: "Chưa có phương án phù hợp",
   PENDING_ANALYSIS: "Đang chờ phân tích",
@@ -530,52 +215,36 @@ function mapApiContract(item: ApiContract): ContractRecord {
   const decision = item.decision ?? {};
   const riskLevel = normalizeRiskLevel(decision.risk_level ?? item.risk?.overall_risk_level);
   const triggeredRules = item.risk?.triggered_rule_ids ?? [];
-  const contractValue = finance.contract_value ?? finance.requested_amount ?? 0;
+  const contractValue = finance.contract_value ?? null;
 
   return {
     id: item.contract_id,
     runId: item.session_id,
     title: finance.contract_name || `Hợp đồng ${item.contract_id}`,
-    counterparty: "Đối tác đã nhập từ hồ sơ",
+    counterparty: "Chưa có dữ liệu đối tác",
     amount: contractValue,
     startDate: finance.start_date || "",
     endDate: finance.end_date || "",
-    submittedAt: item.generated_at || new Date().toISOString(),
+    submittedAt: item.generated_at || "",
     paymentTerms: paymentLabel(finance.funding_need_type),
     contractType: finance.funding_need_type?.replaceAll("_", " ") || "Hợp đồng thương mại",
-    owner: "Finance team",
+    owner: "Chưa có dữ liệu",
     summary: finance.status
       ? `Hồ sơ đã hoàn tất bước ${finance.status.toLowerCase()} và đang chờ quyết định cuối.`
       : "Hồ sơ hợp đồng được nhập vào pipeline phân tích tài chính và rủi ro.",
     aiOption: decision.recommended_option || "PENDING_ANALYSIS",
-    aiConfidence: riskLevel === "low" ? 88 : riskLevel === "medium" ? 76 : 68,
-    reasons: [
-      `Giá trị hợp đồng ${formatCompactCurrency(contractValue)} đã được đối chiếu với năng lực vốn hiện tại.`,
-      finance.gross_margin != null
-        ? `Biên lợi nhuận dự kiến ${(finance.gross_margin * 100).toFixed(1)}% theo phân tích tài chính.`
-        : "AI đang hoàn thiện đối chiếu biên lợi nhuận và dòng tiền.",
-      decision.requires_founder_confirmation
-        ? "Quyết định cần người có thẩm quyền xác nhận trước khi thực thi."
-        : "Hồ sơ nằm trong hạn mức phê duyệt hiện tại.",
-    ],
-    risks: triggeredRules.length
-      ? triggeredRules.slice(0, 3).map((ruleId) => ({
-          title: `Quy tắc ${ruleId}`,
-          description: "Quy tắc kiểm soát đã được kích hoạt; mở Decision Card để xem bằng chứng chi tiết.",
-          severity: riskLevel,
-        }))
-      : [{
-          title: "Chưa ghi nhận cảnh báo trọng yếu",
-          description: "AI không tìm thấy quy tắc rủi ro nào bị kích hoạt trong dữ liệu hiện có.",
-          severity: "low",
-        }],
-    safeguards: [
-      "Xác minh lại điều kiện thanh toán và bộ chứng từ trước khi ký quyết định.",
-      "Theo dõi chênh lệch dòng tiền trong suốt thời gian thực hiện hợp đồng.",
-    ],
+    aiConfidence: finance.confidence_score != null
+      ? Math.round(finance.confidence_score * 100)
+      : null,
+    reasons: [],
+    risks: (item.risk?.triggered_rules ?? []).map((rule) => ({
+      title: rule.rule_id || "Quy tắc rủi ro",
+      description: [rule.message, rule.required_action].filter(Boolean).join(" · "),
+      severity: normalizeRiskLevel(rule.severity),
+    })),
+    safeguards: [],
     riskLevel,
     status: normalizeStatus(decision.decision_status, decision.approval_status),
-    source: "api",
     agentRisk: {
       available: Boolean(item.risk),
       contractId: item.contract_id,
@@ -623,7 +292,7 @@ function mapApiContract(item: ApiContract): ContractRecord {
 }
 
 async function fetchApiContracts(signal?: AbortSignal): Promise<ContractRecord[]> {
-  const response = await fetch(`${API_BASE_URL}/contracts?latest_only=true`, {
+  const response = await fetch(apiUrl("/contracts?latest_only=true"), {
     cache: "no-store",
     headers: API_REQUEST_HEADERS,
     signal,
@@ -641,7 +310,8 @@ function formatCurrency(value: number): string {
   }).format(value);
 }
 
-function formatCompactCurrency(value: number): string {
+function formatCompactCurrency(value: number | null | undefined): string {
+  if (value == null) return "Chưa có dữ liệu";
   if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toLocaleString("vi-VN", { maximumFractionDigits: 2 })} tỷ ₫`;
   if (value >= 1_000_000) return `${(value / 1_000_000).toLocaleString("vi-VN", { maximumFractionDigits: 0 })} triệu ₫`;
   return formatCurrency(value);
@@ -655,6 +325,7 @@ function formatDate(value: string): string {
 }
 
 function formatSubmittedAt(value: string): string {
+  if (!value) return "Chưa xác định";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("vi-VN", {
@@ -720,48 +391,6 @@ function Metric({
   );
 }
 
-const sampleRiskSnapshots: AgentRiskSnapshot[] = [
-  {
-    available: true,
-    contractId: "CON-UPLOAD-002",
-    overallRiskLevel: "high",
-    totalRulesTriggered: 1,
-    triggeredRuleIds: ["RR-002"],
-    totalAlertsDetected: 1,
-    totalProposedAlerts: 0,
-    insufficientEvidenceCount: 4,
-    humanReviewRequired: true,
-    totalRulesEvaluated: 7,
-    notTriggeredCount: 2,
-    insufficientEvidenceRuleCount: 4,
-    triggeredRules: [
-      {
-        ruleId: "RR-002",
-        severity: "high",
-        requiredAction: "Recommend working capital option or phase delivery",
-        message: "The Finance Feature Pack satisfies the rule condition.",
-      },
-    ],
-    alerts: [
-      {
-        alertId: "AL-002",
-        alertType: "Cashflow shortage",
-        severity: "high",
-        riskScore: 76,
-        description: "Projected closing cash below reserve minimum",
-        recommendedAction: "Evaluate working capital line",
-      },
-    ],
-    evidenceGaps: [
-      "RR-001:transaction_risk_score",
-      "RR-004:document_sent_to_partner",
-      "RR-006:confidence_score",
-      "RR-007:delivery_delay_days",
-    ],
-    requiredActions: ["Recommend working capital option or phase delivery"],
-  },
-];
-
 const severityOrder: Array<RiskLevel | "none"> = ["critical", "high", "medium", "low", "none"];
 const severityLabels: Record<RiskLevel | "none", string> = {
   critical: "Critical",
@@ -770,18 +399,10 @@ const severityLabels: Record<RiskLevel | "none", string> = {
   low: "Low",
   none: "Không kích hoạt",
 };
-function EnterpriseRiskChart({
-  contracts,
-  dataMode,
-}: {
-  contracts: ContractRecord[];
-  dataMode: "api" | "demo";
-}) {
+function EnterpriseRiskChart({ contracts }: { contracts: ContractRecord[] }) {
   const snapshots = useMemo(
-    () => dataMode === "api"
-      ? contracts.map((contract) => contract.agentRisk).filter((risk) => risk.available)
-      : sampleRiskSnapshots,
-    [contracts, dataMode],
+    () => contracts.map((contract) => contract.agentRisk).filter((risk) => risk.available),
+    [contracts],
   );
 
   const totalRulesEvaluated = snapshots.reduce((total, risk) => total + risk.totalRulesEvaluated, 0);
@@ -920,7 +541,7 @@ function EnterpriseRiskChart({
 
             <footer className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--fin-soft-border)] pt-4 text-[9px] text-[var(--fin-muted)]">
               <span>{evidenceGapCount} evidence fields · {totalProposedAlerts} proposed alerts</span>
-              <span>{dataMode === "api" ? "Nguồn: RiskPack" : "Mẫu thật: api.json"}</span>
+              <span>Nguồn: RiskPack</span>
             </footer>
           </>
         )}
@@ -947,24 +568,6 @@ type PrecheckRow = {
   approvalStatus: boolean;
   requiresFounderConfirmation: boolean;
   request?: PendingApprovalRequest;
-  source: "api" | "sample";
-};
-
-const samplePrecheckRow: PrecheckRow = {
-  contractId: "CON-UPLOAD-002",
-  requestType: "PERFORMANCE_BOND",
-  requestedAmount: 300_000_000,
-  eligibleScore: null,
-  precheckNote: null,
-  approvalStatus: false,
-  requiresFounderConfirmation: true,
-  request: {
-    approvalId: "96c15aad-caa8-47b4-8dbf-f230fd969ee8",
-    contractId: "CON-UPLOAD-002",
-    tool: "precheck_performance_bond",
-    arguments: { contract_id: "CON-UPLOAD-002", amount: 300_000_000 },
-  },
-  source: "sample",
 };
 
 const requestTypeLabels: Record<string, string> = {
@@ -976,21 +579,15 @@ const requestTypeLabels: Record<string, string> = {
 
 function BankPrecheckApprovals({
   contracts,
-  dataMode,
   onResult,
-  onReconnect,
-  isReconnecting,
   connectionIssue,
 }: {
   contracts: ContractRecord[];
-  dataMode: "api" | "demo";
   onResult: (contractId: string, result: {
     eligibleScore: number | null;
     precheckNote: string | null;
     approvalStatus: boolean;
   }) => void;
-  onReconnect: () => Promise<void>;
-  isReconnecting: boolean;
   connectionIssue: string;
 }) {
   const [pendingRequests, setPendingRequests] = useState<Record<string, PendingApprovalRequest>>({});
@@ -1000,20 +597,24 @@ function BankPrecheckApprovals({
   const [isLoadingRequests, setIsLoadingRequests] = useState(true);
 
   useEffect(() => {
-    if (dataMode !== "api") return;
     const controller = new AbortController();
     const runIds = Array.from(new Set(contracts.flatMap((contract) => contract.runId ? [contract.runId] : [])));
 
     async function loadPendingRequests() {
-      if (runIds.length === 0) return;
+      if (runIds.length === 0) {
+        setPendingRequests({});
+        setIsLoadingRequests(false);
+        return;
+      }
+      setIsLoadingRequests(true);
       try {
         const responses = await Promise.all(runIds.map(async (runId) => {
-          const response = await fetch(`${API_BASE_URL}/runs/${runId}/approvals`, {
+          const response = await fetch(apiUrl(`/runs/${runId}/approvals`), {
             signal: controller.signal,
             cache: "no-store",
             headers: API_REQUEST_HEADERS,
           });
-          if (!response.ok) return [];
+          if (!response.ok) throw new Error(`Approval API returned ${response.status} for run ${runId}`);
           const requests = await response.json();
           return (Array.isArray(requests) ? requests : []).map((request: {
             approval_id?: string;
@@ -1043,15 +644,19 @@ function BankPrecheckApprovals({
 
     void loadPendingRequests();
     return () => controller.abort();
-  }, [contracts, dataMode]);
+  }, [contracts]);
 
   const rows = useMemo<PrecheckRow[]>(() => {
-    if (dataMode === "demo") return [samplePrecheckRow];
     return contracts
       .filter((contract) => (
-        contract.bankPrecheck.requiresFounderConfirmation
-        || contract.bankPrecheck.approvalStatus
+        contract.bankPrecheck.approvalStatus
+        || contract.bankPrecheck.eligibleScore != null
+        || Boolean(contract.bankPrecheck.precheckNote)
         || Boolean(pendingRequests[contract.id])
+        || (
+          contract.bankPrecheck.requiresFounderConfirmation
+          && Boolean(contract.bankPrecheck.requestType)
+        )
       ))
       .map((contract) => ({
         contractId: contract.id,
@@ -1063,25 +668,36 @@ function BankPrecheckApprovals({
         approvalStatus: contract.bankPrecheck.approvalStatus,
         requiresFounderConfirmation: contract.bankPrecheck.requiresFounderConfirmation,
         request: pendingRequests[contract.id],
-        source: "api" as const,
       }));
-  }, [contracts, dataMode, pendingRequests]);
+  }, [contracts, pendingRequests]);
 
   const pendingCount = rows.filter((row) => row.request && !row.approvalStatus && !resolutions[row.contractId]).length;
   const completedCount = rows.filter((row) => row.approvalStatus || resolutions[row.contractId] === "approved").length;
   const eligibleCount = rows.filter((row) => row.eligibleScore != null && row.eligibleScore >= 70).length;
+  const missingAmountCount = rows.filter((row) => (
+    row.requestedAmount == null
+    && !row.request
+    && !row.approvalStatus
+  )).length;
 
   const submitApproval = async (row: PrecheckRow, approved: boolean) => {
-    if (row.source !== "api" || !row.runId || !row.request?.approvalId) return;
+    if (!row.runId || !row.request?.approvalId) return;
     setProcessing({ contractId: row.contractId, approved });
     setNotice("");
 
     try {
       const response = await fetch(
-        `${API_BASE_URL}/runs/${row.runId}/approvals/${row.request.approvalId}?approved=${approved}`,
+        apiUrl(`/runs/${row.runId}/approvals/${row.request.approvalId}?approved=${approved}`),
         { method: "POST", headers: API_REQUEST_HEADERS },
       );
-      if (!response.ok) throw new Error(`Approval API returned ${response.status}`);
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => null) as {
+          detail?: { message?: string } | string;
+        } | null;
+        const detail = errorPayload?.detail;
+        const message = typeof detail === "string" ? detail : detail?.message;
+        throw new Error(message || `Approval API returned ${response.status}`);
+      }
       const payload = await response.json();
       const decision = (payload.decision_result?.decisions ?? []).find(
         (item: { contract_id?: string }) => item.contract_id === row.contractId,
@@ -1119,14 +735,15 @@ function BankPrecheckApprovals({
       <header className="flex flex-col justify-between gap-4 border-b border-[var(--fin-soft-border)] px-5 py-5 lg:flex-row lg:items-start">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-300">Human-gated bank API</p>
-          <h3 className="mt-2 text-base font-semibold tracking-[-0.025em] text-[var(--fin-text)]">Khoản vay cần chấp thuận kiểm tra ngân hàng</h3>
+          <h3 className="mt-2 text-base font-semibold tracking-[-0.025em] text-[var(--fin-text)]">Nhu cầu tài chính và chấp thuận kiểm tra ngân hàng</h3>
           <p className="mt-1 max-w-2xl text-xs leading-5 text-[var(--fin-muted)]">
-            Eligibility score và pre-check note chỉ xuất hiện sau khi người dùng cho phép Decision Agent gọi API ngân hàng.
+            Chỉ hồ sơ đã có số tiền đề nghị mới tạo được approval request. Giá trị hợp đồng không được dùng thay cho số tiền vay hoặc bảo lãnh.
           </p>
         </div>
-        <div className="grid grid-cols-3 gap-px overflow-hidden rounded-lg border border-[var(--fin-soft-border)] bg-[var(--fin-soft-border)]">
+        <div className="grid grid-cols-4 gap-px overflow-hidden rounded-lg border border-[var(--fin-soft-border)] bg-[var(--fin-soft-border)]">
           {[
             { label: "Chờ duyệt", value: pendingCount },
+            { label: "Thiếu số tiền", value: missingAmountCount },
             { label: "Đã kiểm tra", value: completedCount },
             { label: "Đủ điều kiện", value: eligibleCount },
           ].map((metric) => (
@@ -1157,6 +774,9 @@ function BankPrecheckApprovals({
                 const resolution = resolutions[row.contractId];
                 const isCompleted = row.approvalStatus || resolution === "approved";
                 const isRejected = resolution === "rejected";
+                const isMissingRequestedAmount = row.requestedAmount == null
+                  && !row.request
+                  && !isCompleted;
                 const scoreTone = row.eligibleScore == null
                   ? "bg-white/[0.06]"
                   : row.eligibleScore >= 70 ? "bg-emerald-300" : "bg-red-400";
@@ -1172,7 +792,12 @@ function BankPrecheckApprovals({
                       <p className="mt-1 font-mono text-[10px] text-[var(--fin-muted)]">{row.requestType}</p>
                     </td>
                     <td className="px-4 py-4 text-right font-mono text-xs font-semibold text-[var(--fin-text)]">
-                      {row.requestedAmount != null ? formatCompactCurrency(row.requestedAmount) : "—"}
+                      {row.requestedAmount != null ? formatCompactCurrency(row.requestedAmount) : (
+                        <div>
+                          <span>—</span>
+                          <p className="mt-1 font-sans text-[9px] font-normal text-amber-200/80">Chưa cung cấp</p>
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-4">
                       {row.eligibleScore != null ? (
@@ -1188,13 +813,19 @@ function BankPrecheckApprovals({
                       ) : (
                         <div>
                           <span className="font-mono text-sm text-[var(--fin-muted)]">—</span>
-                          <p className="mt-1 text-[9px] text-[var(--fin-muted)]">Có sau approval</p>
+                          <p className="mt-1 text-[9px] text-[var(--fin-muted)]">
+                            {isMissingRequestedAmount ? "Sau khi bổ sung số tiền và duyệt" : "Có sau approval"}
+                          </p>
                         </div>
                       )}
                     </td>
                     <td className="px-4 py-4">
                       <p className={`text-[11px] leading-5 ${row.precheckNote ? "text-[var(--fin-text)]" : "text-[var(--fin-muted)]"}`}>
-                        {row.precheckNote || "Chưa gọi API ngân hàng nên chưa có pre-check note."}
+                        {row.precheckNote || (
+                          isMissingRequestedAmount
+                            ? "Chưa thể tạo yêu cầu duyệt: cần bổ sung số tiền vay hoặc bảo lãnh đề nghị."
+                            : "Chưa gọi API ngân hàng nên chưa có pre-check note."
+                        )}
                       </p>
                     </td>
                     <td className="px-4 py-4">
@@ -1206,16 +837,10 @@ function BankPrecheckApprovals({
                         <span className="inline-flex items-center gap-1.5 rounded-md border border-red-400/25 bg-red-400/[0.08] px-2.5 py-1.5 text-[10px] font-semibold text-red-300">
                           <X className="size-3" aria-hidden="true" /> Đã từ chối
                         </span>
-                      ) : row.source === "sample" ? (
-                        <button
-                          type="button"
-                          onClick={() => void onReconnect()}
-                          disabled={isReconnecting}
-                          className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-amber-300/25 bg-amber-300/[0.08] px-3 text-[10px] font-semibold text-amber-100 transition hover:bg-amber-300/[0.14] active:translate-y-px disabled:cursor-wait disabled:opacity-55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200/70"
-                        >
-                          <RefreshCw className={`size-3 ${isReconnecting ? "animate-spin motion-reduce:animate-none" : ""}`} aria-hidden="true" />
-                          {isReconnecting ? "Đang kết nối…" : "Kết nối API để duyệt"}
-                        </button>
+                      ) : isMissingRequestedAmount ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-300/25 bg-amber-300/[0.08] px-2.5 py-1.5 text-[10px] font-semibold text-amber-100">
+                          <AlertTriangle className="size-3" aria-hidden="true" /> Cần nhập số tiền
+                        </span>
                       ) : row.request ? (
                         <div className="flex items-center gap-2">
                           <button
@@ -1238,7 +863,7 @@ function BankPrecheckApprovals({
                         </div>
                       ) : (
                         <span className="inline-flex items-center gap-1.5 text-[10px] text-[var(--fin-muted)]">
-                          <Clock3 className="size-3" aria-hidden="true" /> {isLoadingRequests ? "Đang tải…" : "Chưa có request"}
+                          <Clock3 className="size-3" aria-hidden="true" /> {isLoadingRequests ? "Đang tải…" : "Chưa tạo request"}
                         </span>
                       )}
                     </td>
@@ -1258,92 +883,160 @@ function BankPrecheckApprovals({
 
       <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--fin-soft-border)] px-5 py-3 text-[9px] text-[var(--fin-muted)]" aria-live="polite">
         <span>{notice || connectionIssue || "Approval chỉ cấp quyền cho đúng tool và arguments đã lưu trong StateStore."}</span>
-        <span>{dataMode === "api" ? "Nguồn: /runs/{id}/approvals" : `Dữ liệu mẫu chỉ xem · API: ${API_BASE_URL}`}</span>
+        <span>Nguồn: /runs/:id/approvals</span>
       </footer>
     </section>
   );
 }
 
 export function ContractApprovalWorkspace() {
-  const [contracts, setContracts] = useState<ContractRecord[]>(demoContracts);
-  const [selectedId, setSelectedId] = useState(demoContracts[0].id);
+  const [contracts, setContracts] = useState<ContractRecord[]>([]);
+  const [selectedId, setSelectedId] = useState("");
   const [filter, setFilter] = useState<FilterStatus>("all");
   const [query, setQuery] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(true);
-  const [dataMode, setDataMode] = useState<"api" | "demo">("demo");
   const [apiConnectionIssue, setApiConnectionIssue] = useState("");
   const [actionState, setActionState] = useState<"idle" | "saving">("idle");
   const [notice, setNotice] = useState("");
 
   const selectedForDetail = contracts.find((item) => item.id === selectedId);
   const selectedRunId = selectedForDetail?.runId;
-  const selectedSource = selectedForDetail?.source;
 
-  const loadContracts = async () => {
-    setIsRefreshing(true);
+  const loadContracts = useCallback(async ({
+    signal,
+    silent = false,
+  }: {
+    signal?: AbortSignal;
+    silent?: boolean;
+  } = {}) => {
+    if (!silent) setIsRefreshing(true);
     setApiConnectionIssue("");
     try {
-      const apiContracts = await fetchApiContracts();
+      const apiContracts = await fetchApiContracts(signal);
       setContracts(apiContracts);
-      setDataMode("api");
-      if (apiContracts.length > 0) {
-        setSelectedId((current) => apiContracts.some((item) => item.id === current) ? current : apiContracts[0].id);
-      }
+      setSelectedId((current) => (
+        apiContracts.some((item) => item.id === current)
+          ? current
+          : (apiContracts[0]?.id ?? "")
+      ));
     } catch (error) {
-      setDataMode("demo");
+      if ((error as Error).name === "AbortError") return;
+      if (!silent) {
+        setContracts([]);
+        setSelectedId("");
+      }
       setApiConnectionIssue(
         error instanceof Error
           ? `Không kết nối được ${API_BASE_URL}: ${error.message}`
           : `Không kết nối được ${API_BASE_URL}.`,
       );
     } finally {
-      setIsRefreshing(false);
+      if (!silent && !signal?.aborted) setIsRefreshing(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
 
     async function hydrateContracts() {
-      try {
-        const apiContracts = await fetchApiContracts(controller.signal);
-        setContracts(apiContracts);
-        setDataMode("api");
-        setApiConnectionIssue("");
-        if (apiContracts.length > 0) {
-          setSelectedId((current) => apiContracts.some((item) => item.id === current) ? current : apiContracts[0].id);
-        }
-      } catch (error) {
-        if ((error as Error).name !== "AbortError") {
-          setDataMode("demo");
-          setApiConnectionIssue(
-            error instanceof Error
-              ? `Không kết nối được ${API_BASE_URL}: ${error.message}`
-              : `Không kết nối được ${API_BASE_URL}.`,
-          );
-        }
-      } finally {
-        if (!controller.signal.aborted) setIsRefreshing(false);
-      }
+      await loadContracts({ signal: controller.signal });
     }
 
     void hydrateContracts();
     return () => controller.abort();
-  }, []);
+  }, [loadContracts]);
 
   useEffect(() => {
-    if (!selectedRunId || selectedSource !== "api") return;
+    const controller = new AbortController();
+
+    async function waitBeforeReconnect() {
+      await new Promise<void>((resolve) => {
+        const timeout = window.setTimeout(resolve, 1_500);
+        controller.signal.addEventListener(
+          "abort",
+          () => {
+            window.clearTimeout(timeout);
+            resolve();
+          },
+          { once: true },
+        );
+      });
+    }
+
+    async function connectToDashboardEvents() {
+      while (!controller.signal.aborted) {
+        try {
+          const response = await fetch(apiUrl("/dashboard/events"), {
+            cache: "no-store",
+            headers: {
+              Accept: "text/event-stream",
+              "Cache-Control": "no-cache",
+              ...API_REQUEST_HEADERS,
+            },
+            signal: controller.signal,
+          });
+          if (!response.ok || !response.body) {
+            throw new Error(`Dashboard event API returned ${response.status}`);
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          while (!controller.signal.aborted) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+            let boundary = buffer.indexOf("\n\n");
+
+            while (boundary >= 0) {
+              const block = buffer.slice(0, boundary);
+              buffer = buffer.slice(boundary + 2);
+              boundary = buffer.indexOf("\n\n");
+              const data = block
+                .split("\n")
+                .filter((line) => line.startsWith("data:"))
+                .map((line) => line.slice(5).trimStart())
+                .join("\n");
+              if (!data) continue;
+
+              const event = JSON.parse(data) as { type?: string };
+              if (
+                event.type === "dashboard_ready"
+                || event.type === "run_review"
+                || event.type === "run_finished"
+                || event.type === "decision_updated"
+              ) {
+                void loadContracts({ silent: true });
+              }
+            }
+          }
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          console.warn("Dashboard realtime connection interrupted", error);
+        }
+
+        if (!controller.signal.aborted) await waitBeforeReconnect();
+      }
+    }
+
+    void connectToDashboardEvents();
+    return () => controller.abort();
+  }, [loadContracts]);
+
+  useEffect(() => {
+    if (!selectedRunId) return;
     const controller = new AbortController();
 
     async function loadDecisionDetail() {
       try {
         const [decisionResponse, runResponse] = await Promise.all([
-          fetch(`${API_BASE_URL}/runs/${selectedRunId}/decision`, {
+          fetch(apiUrl(`/runs/${selectedRunId}/decision`), {
             signal: controller.signal,
             cache: "no-store",
             headers: API_REQUEST_HEADERS,
           }),
-          fetch(`${API_BASE_URL}/runs/${selectedRunId}`, {
+          fetch(apiUrl(`/runs/${selectedRunId}`), {
             signal: controller.signal,
             cache: "no-store",
             headers: API_REQUEST_HEADERS,
@@ -1361,7 +1054,6 @@ export function ContractApprovalWorkspace() {
           return {
             ...item,
             aiOption: decision?.recommended_option ?? item.aiOption,
-            aiConfidence: decision?.eligible_score ?? item.aiConfidence,
             reasons: decision?.reasons?.length ? decision.reasons : item.reasons,
             safeguards: decision?.protective_condition ? [decision.protective_condition] : item.safeguards,
             bankPrecheck: decision
@@ -1452,7 +1144,7 @@ export function ContractApprovalWorkspace() {
 
     void loadDecisionDetail();
     return () => controller.abort();
-  }, [selectedId, selectedRunId, selectedSource]);
+  }, [selectedId, selectedRunId]);
 
   const selected = contracts.find((item) => item.id === selectedId) ?? contracts[0];
   const filteredContracts = useMemo(() => {
@@ -1469,7 +1161,7 @@ export function ContractApprovalWorkspace() {
     total: contracts.length,
     awaiting: contracts.filter((item) => item.status === "pending" || item.status === "review").length,
     highRisk: contracts.filter((item) => item.agentRisk.available && (item.riskLevel === "high" || item.riskLevel === "critical")).length,
-    value: contracts.reduce((sum, item) => sum + item.amount, 0),
+    value: contracts.reduce((sum, item) => sum + (item.amount ?? 0), 0),
   }), [contracts]);
 
   const updateBankPrecheckResult = (
@@ -1499,7 +1191,34 @@ export function ContractApprovalWorkspace() {
     setActionState("idle");
   };
 
-  if (!selected) return null;
+  if (!selected) {
+    return (
+      <div className="mx-auto flex min-h-[34rem] w-full max-w-[1600px] items-center justify-center">
+        <section className="w-full max-w-xl rounded-xl border border-[var(--fin-soft-border)] bg-[var(--fin-surface)] p-8 text-center">
+          {isRefreshing ? (
+            <RefreshCw className="mx-auto size-6 animate-spin text-emerald-300 motion-reduce:animate-none" aria-hidden="true" />
+          ) : (
+            <AlertTriangle className="mx-auto size-6 text-amber-200" aria-hidden="true" />
+          )}
+          <h1 className="mt-5 text-xl font-semibold text-[var(--fin-text)]">
+            {isRefreshing ? "Đang tải dữ liệu thật" : "Không có dữ liệu hợp đồng từ API"}
+          </h1>
+          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--fin-muted)]">
+            {apiConnectionIssue || "Pipeline hiện chưa trả về hợp đồng nào. Hệ thống không hiển thị dữ liệu thay thế."}
+          </p>
+          {!isRefreshing && (
+            <button
+              type="button"
+              onClick={() => void loadContracts()}
+              className="mt-6 inline-flex min-h-10 items-center gap-2 rounded-lg border border-emerald-400/25 bg-emerald-400/[0.08] px-4 text-xs font-semibold text-emerald-200"
+            >
+              <RefreshCw className="size-3.5" aria-hidden="true" /> Thử kết nối lại
+            </button>
+          )}
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-[1600px]">
@@ -1510,9 +1229,7 @@ export function ContractApprovalWorkspace() {
               <span className="size-1.5 rounded-full bg-emerald-300 shadow-[0_0_12px_rgba(110,231,183,.7)]" />
               Approval workspace
             </span>
-            <span className="text-xs text-[var(--fin-muted)]">
-              {dataMode === "api" ? "Dữ liệu trực tiếp từ pipeline" : "Dữ liệu minh hoạ · API chưa kết nối"}
-            </span>
+            <span className="text-xs text-[var(--fin-muted)]">Dữ liệu trực tiếp từ pipeline</span>
           </div>
           <h1 className="mt-4 max-w-3xl text-balance text-3xl font-semibold leading-[1.05] tracking-[-0.055em] text-[var(--fin-text)] sm:text-4xl lg:text-[2.8rem]">
             Hàng chờ phê duyệt hợp đồng
@@ -1650,7 +1367,7 @@ export function ContractApprovalWorkspace() {
                         <span className="block max-w-[10rem] text-[11px] font-semibold leading-5 text-[var(--fin-text)]">{optionLabels[item.aiOption] ?? item.aiOption}</span>
                         <span className="mt-1 flex items-center gap-1.5 text-[10px] text-[var(--fin-muted)]">
                           <Sparkles className="size-3 text-emerald-300" aria-hidden="true" />
-                          Tin cậy {item.aiConfidence}%
+                          {item.aiConfidence == null ? "Chưa có độ tin cậy dữ liệu" : `Tin cậy dữ liệu ${item.aiConfidence}%`}
                         </span>
                       </td>
                       <td className="px-4 py-4 align-top"><StatusBadge status={item.status} /></td>
@@ -1709,13 +1426,31 @@ export function ContractApprovalWorkspace() {
             <section>
               <div className="flex items-center justify-between gap-3">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--fin-muted)]">AI đề xuất</p>
-                <span className="font-mono text-[10px] text-emerald-300">{selected.aiConfidence}% confidence</span>
+                <span className="font-mono text-[10px] text-emerald-300">
+                  {selected.aiConfidence == null ? "NO DATA CONFIDENCE" : `${selected.aiConfidence}% DATA CONFIDENCE`}
+                </span>
               </div>
               <p className="mt-2 text-sm font-semibold tracking-[-0.02em] text-[var(--fin-text)]">{optionLabels[selected.aiOption] ?? selected.aiOption}</p>
-              <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/[0.06]">
-                <div className="h-full rounded-full bg-emerald-300 transition-[width] duration-500" style={{ width: `${selected.aiConfidence}%` }} />
-              </div>
+              {selected.aiConfidence != null && (
+                <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/[0.06]">
+                  <div className="h-full rounded-full bg-emerald-300 transition-[width] duration-500" style={{ width: `${selected.aiConfidence}%` }} />
+                </div>
+              )}
             </section>
+
+            {selected.bankPrecheck.requestType && selected.bankPrecheck.requestedAmount == null && (
+              <section className="mt-5 rounded-lg border border-amber-300/25 bg-amber-300/[0.07] p-3.5">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-200" strokeWidth={1.8} aria-hidden="true" />
+                  <div>
+                    <p className="text-[10px] font-semibold text-amber-100">Chưa có yêu cầu duyệt ngân hàng</p>
+                    <p className="mt-1 text-[10px] leading-4 text-[var(--fin-muted)]">
+                      {formatCompactCurrency(selected.amount)} là giá trị hợp đồng, không phải số tiền vay hoặc bảo lãnh đề nghị. Cần bổ sung số tiền đề nghị trước khi Decision Agent có thể tạo approval request.
+                    </p>
+                  </div>
+                </div>
+              </section>
+            )}
 
             <section className="mt-6">
               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--fin-muted)]">Vì sao AI đưa ra phương án này</p>
@@ -1726,6 +1461,9 @@ export function ContractApprovalWorkspace() {
                     <span>{reason}</span>
                   </li>
                 ))}
+                {selected.reasons.length === 0 && (
+                  <li className="text-xs leading-5 text-[var(--fin-muted)]">Decision Agent chưa trả lý do cho hợp đồng này.</li>
+                )}
               </ol>
             </section>
 
@@ -1765,6 +1503,9 @@ export function ContractApprovalWorkspace() {
                     <span>{safeguard}</span>
                   </li>
                 ))}
+                {selected.safeguards.length === 0 && (
+                  <li className="text-[11px] leading-5 text-[var(--fin-muted)]">Decision Agent chưa trả điều kiện bảo vệ.</li>
+                )}
               </ul>
             </section>
 
@@ -1827,37 +1568,13 @@ export function ContractApprovalWorkspace() {
           <p className="font-mono text-[10px] text-[var(--fin-muted)]">CẬP NHẬT TỪ DANH MỤC HIỆN TẠI</p>
         </header>
 
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,.75fr)]">
-          <section className="overflow-hidden rounded-xl border border-[var(--fin-soft-border)] bg-[var(--fin-surface)]">
-            <header className="flex flex-col justify-between gap-4 border-b border-[var(--fin-soft-border)] px-5 py-5 sm:flex-row sm:items-start">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-300">7-month view</p>
-                <h3 className="mt-2 text-base font-semibold tracking-[-0.025em] text-[var(--fin-text)]">Dòng tiền doanh nghiệp</h3>
-                <p className="mt-1 text-xs leading-5 text-[var(--fin-muted)]">Tiền vào, tiền ra và dòng tiền thuần theo tháng.</p>
-              </div>
-              <div className="grid grid-cols-2 gap-5 text-left sm:text-right">
-                <div>
-                  <p className="text-[10px] text-[var(--fin-muted)]">Dòng tiền thuần T7</p>
-                  <p className="mt-1 font-mono text-sm font-semibold text-emerald-300">+510 triệu ₫</p>
-                </div>
-                <div>
-                  <p className="text-[10px] text-[var(--fin-muted)]">So với T6</p>
-                  <p className="mt-1 font-mono text-sm font-semibold text-[var(--fin-text)]">+64,5%</p>
-                </div>
-              </div>
-            </header>
-            <div className="px-3 pb-4 pt-5 sm:px-5"><CashFlowChart /></div>
-          </section>
-
-          <EnterpriseRiskChart contracts={contracts} dataMode={dataMode} />
+        <div>
+          <EnterpriseRiskChart contracts={contracts} />
         </div>
 
         <BankPrecheckApprovals
           contracts={contracts}
-          dataMode={dataMode}
           onResult={updateBankPrecheckResult}
-          onReconnect={loadContracts}
-          isReconnecting={isRefreshing}
           connectionIssue={apiConnectionIssue}
         />
       </section>

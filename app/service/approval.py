@@ -1,28 +1,53 @@
 import asyncio
+import hashlib
 import json
 import sys
 import traceback
+from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Any
 
 from agents import Runner
 
 from app.Agent.bus import event_bus
-from app.Agent.decisionAgent import get_decision_agent, run_decision_agent
+from app.Agent.decisionAgent import get_decision_agent
 from app.Agent.state_store import (
     commit_continuation_result,
     get_approval_state,
     list_approval_requests,
     load_context,
     load_conversation_items,
+    restore_approval_state,
     set_approval_decision,
 )
+from app.Agent.hooks import AppContext
+from app.database.context_store import fetch_context_row, load_pipeline_context
+from app.service.credit_profile import load_contract_credit_profiles
+from app.service.precheck_approval import ensure_precheck_approval_requests
 from app.tools.DecisionAgent.PrecheckAPI import PRECHECK_TOOL_BY_NAME
+from app.tools.writeLogs import fetch_decision_log
 
 
 IMMUTABLE_TARGET_FIELDS = {
     "contract_id",
     "capital_need",
 }
+
+
+class ApprovalExecutionError(RuntimeError):
+    """The exact approved precheck failed before producing a bank result."""
+
+    def __init__(
+        self,
+        *,
+        approval_id: str,
+        contract_id: str,
+        error: str,
+    ) -> None:
+        self.approval_id = approval_id
+        self.contract_id = contract_id
+        self.execution_error = error
+        super().__init__(f"Bank precheck failed for {contract_id}: {error}")
 
 
 def _index_decisions(batch: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -121,14 +146,215 @@ def _guard_continuation_result(
 
 
 async def get_pending_approvals(run_id: int) -> list[dict[str, Any]]:
+    try:
+        requests = await list_approval_requests(run_id)
+    except FileNotFoundError:
+        decision_log = await asyncio.to_thread(fetch_decision_log, run_id)
+        return [
+            request
+            for request in _approval_requests_from_log(decision_log)
+            if request["status"] == "pending"
+        ]
+
+    # Reconcile historical/current completed runs as well as new pipelines. This
+    # repairs a missing LLM tool call without calling any bank API and is idempotent
+    # because StateStore fingerprints the exact tool + arguments.
+    try:
+        record = await asyncio.to_thread(load_pipeline_context, run_id)
+        if record.decision_pack is not None:
+            credit_profiles = await asyncio.to_thread(
+                load_contract_credit_profiles,
+                record.finance_pack.contract_ids,
+            )
+            await ensure_precheck_approval_requests(
+                run_id,
+                record.decision_pack,
+                record.finance_pack,
+                credit_profiles,
+            )
+    except LookupError:
+        # Standalone/legacy Decision runs may not have a context row. Their stored
+        # approval requests remain authoritative and are returned unchanged.
+        pass
+
     requests = await list_approval_requests(run_id)
     return [request for request in requests if request["status"] == "pending"]
+
+
+def _approval_requests_from_log(
+    decision_log: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Recover exact approval requests from durable DecisionLogs."""
+    if not decision_log:
+        return []
+
+    durable_state = decision_log.get("approval_state")
+    if isinstance(durable_state, dict):
+        requests = durable_state.get("approval_requests")
+        if isinstance(requests, list):
+            return [
+                request
+                for item in requests
+                if isinstance(item, dict)
+                and (request := _normalize_recovered_request(item)) is not None
+            ]
+
+    events = (decision_log.get("agent_log") or {}).get("events") or []
+    for event in reversed(events):
+        if not isinstance(event, dict) or event.get("type") != "run_review":
+            continue
+        pending = (event.get("data") or {}).get("pending_approvals")
+        if isinstance(pending, list):
+            return [
+                request
+                for item in pending
+                if isinstance(item, dict)
+                and (request := _normalize_recovered_request(item)) is not None
+            ]
+
+    recovered: dict[str, dict[str, Any]] = {}
+    for event in events:
+        if not isinstance(event, dict) or event.get("type") != "approval_requested":
+            continue
+        data = event.get("data") or {}
+        approval_id = data.get("approval_id")
+        contract_id = data.get("contract_id")
+        tool = data.get("tool")
+        arguments = data.get("arguments")
+        if not all(isinstance(value, str) and value for value in (
+            approval_id,
+            contract_id,
+            tool,
+        )) or not isinstance(arguments, dict):
+            continue
+        request = _normalize_recovered_request({
+            "approval_id": approval_id,
+            "contract_id": contract_id,
+            "tool": tool,
+            "arguments": arguments,
+            "status": data.get("approval_state", "pending"),
+            "requested_at": event.get("ts"),
+            "decided_at": None,
+            "execution_started_at": None,
+            "executed_at": None,
+            "decision_applied_at": None,
+            "result": None,
+            "error": None,
+        })
+        if request is not None:
+            recovered[approval_id] = request
+    return list(recovered.values())
+
+
+def _normalize_recovered_request(
+    request: dict[str, Any],
+) -> dict[str, Any] | None:
+    approval_id = request.get("approval_id")
+    contract_id = request.get("contract_id")
+    tool = request.get("tool")
+    arguments = request.get("arguments")
+    if not all(isinstance(value, str) and value for value in (
+        approval_id,
+        contract_id,
+        tool,
+    )) or not isinstance(arguments, dict):
+        return None
+
+    normalized = dict(request)
+    normalized.setdefault(
+        "fingerprint",
+        hashlib.sha256(
+            json.dumps(
+                {
+                    "contract_id": contract_id,
+                    "tool": tool,
+                    "arguments": arguments,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest(),
+    )
+    normalized.setdefault("status", "pending")
+    normalized.setdefault("requested_at", None)
+    normalized.setdefault("decided_at", None)
+    normalized.setdefault("execution_started_at", None)
+    normalized.setdefault("executed_at", None)
+    normalized.setdefault("decision_applied_at", None)
+    normalized.setdefault("result", None)
+    normalized.setdefault("error", None)
+    return normalized
+
+
+async def _ensure_approval_state(run_id: int) -> dict[str, Any]:
+    try:
+        return await get_approval_state(run_id)
+    except FileNotFoundError:
+        pass
+
+    decision_log = await asyncio.to_thread(fetch_decision_log, run_id)
+    if not decision_log:
+        raise FileNotFoundError(f"No durable approval state found for run_id={run_id}")
+
+    durable_state = decision_log.get("approval_state")
+    if isinstance(durable_state, dict):
+        return await restore_approval_state(run_id, durable_state)
+
+    requests = _approval_requests_from_log(decision_log)
+    row = await asyncio.to_thread(fetch_context_row, run_id)
+    if row is None:
+        raise LookupError(f"Pipeline context not found: session_id={run_id}")
+
+    finance_pack = row.get("finance_pack") or {}
+    contract_ids = list(finance_pack.get("contract_ids") or [])
+    if not contract_ids:
+        contract_ids = [
+            item.get("contract_id")
+            for item in finance_pack.get("packs", [])
+            if isinstance(item, dict) and item.get("contract_id")
+        ]
+    decision_result = decision_log.get("response") or row.get("decision_pack")
+    if not isinstance(decision_result, dict):
+        raise ValueError(f"Run {run_id} has no durable Decision Batch")
+
+    original_input = json.dumps(
+        {
+            "session_id": run_id,
+            "contract_ids": contract_ids,
+            "instruction": "Recover persisted Decision approval state.",
+        },
+        ensure_ascii=False,
+    )
+    context = AppContext(
+        document_id=f"BATCH-{run_id}",
+        original_input=original_input,
+        run_id=run_id,
+        contract_id=contract_ids[0] if len(contract_ids) == 1 else None,
+        contract_ids=contract_ids,
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    snapshot = {
+        "version": 2,
+        "revision": 0,
+        "run_id": run_id,
+        "created_at": now,
+        "updated_at": now,
+        "workflow_status": "review",
+        "context": asdict(context),
+        "user_input": original_input,
+        "metadata": {"mode": "recovered", "contract_ids": contract_ids},
+        "approval_requests": requests,
+        "decision_result": decision_result,
+        "conversation_items": [],
+    }
+    return await restore_approval_state(run_id, snapshot)
 
 
 def _followup_message(
     request: dict[str, Any],
     approved: bool,
     run_id: int,
+    decision_batch_before: dict[str, Any],
 ) -> dict[str, Any]:
     contract_id = request["contract_id"]
     if approved:
@@ -155,6 +381,7 @@ def _followup_message(
         "contract_id": contract_id,
         "tool": request["tool"],
         "arguments": request["arguments"],
+        "decision_batch_before": decision_batch_before,
         "instruction": instruction,
     }
     return {
@@ -169,7 +396,7 @@ async def decide_approval(
     approved: bool,
 ) -> dict[str, Any]:
     """Continue the saved conversation and update exactly one Decision Card."""
-    state_before = await get_approval_state(run_id)
+    state_before = await _ensure_approval_state(run_id)
     request_before = _find_request(state_before, approval_id)
     batch_before = state_before.get("decision_result")
     if not isinstance(batch_before, dict):
@@ -201,7 +428,7 @@ async def decide_approval(
     continuation_agent = decision_agent.clone(
         tools=[tool] if approved else [],
     )
-    followup = _followup_message(request, approved, run_id)
+    followup = _followup_message(request, approved, run_id, batch_before)
 
     try:
         await event_bus.emit(run_id, {
@@ -228,6 +455,14 @@ async def decide_approval(
         new_batch = result.final_output.model_dump(mode="json")
         state_after_tool = await get_approval_state(run_id)
         request_after = _find_request(state_after_tool, approval_id)
+        if approved and request_after.get("status") == "failed":
+            raise ApprovalExecutionError(
+                approval_id=approval_id,
+                contract_id=request["contract_id"],
+                error=str(
+                    request_after.get("error") or "Unknown bank precheck error"
+                ),
+            )
         request_ids_after = {
             item["approval_id"]
             for item in state_after_tool["approval_requests"]
@@ -248,7 +483,7 @@ async def decide_approval(
 
             await asyncio.to_thread(save_decision_pack, run_id, result.final_output)
         except LookupError:
-            # Legacy standalone Decision demos have no Finance/Risk context row.
+            # Older standalone runs may not have a persisted Finance/Risk row.
             pass
         committed = await commit_continuation_result(
             run_id,
@@ -318,59 +553,9 @@ def _parse_bool(value: str) -> bool:
     raise ValueError("Decision must be accept/approve/true or reject/false")
 
 
-async def _start_demo_run() -> str:
-    contract_id = "HITL-TEST-001"
-    user_input = f"""
-Đây là integration test cho application-level human approval.
-Hãy gọi trực tiếp tool precheck_performance_bond với đúng các tham số sau:
-- contract_id: {contract_id}
-- amount: 420000000
-
-Nếu tool trả pending, vẫn phải hoàn tất một Decision Card đầy đủ với
-decision_status=review, approval_status=false, eligible_score=null và
-precheck_note=null. Không hỏi thêm thông tin trong test này.
-""".strip()
-
-    result = await run_decision_agent(
-        user_input,
-        expected_contract_ids=[contract_id],
-        run_metadata={"mode": "approval_demo", "contract_ids": [contract_id]},
-    )
-    run_id = result.context_wrapper.context.run_id
-    print("\nINITIAL DECISION BATCH:")
-    print(
-        json.dumps(
-            result.final_output.model_dump(mode="json"),
-            ensure_ascii=False,
-            indent=2,
-            default=str,
-        )
-    )
-    print(f"\nDemo run completed in review state. run_id={run_id}")
-    return run_id
-
-
 async def main() -> None:
-    if len(sys.argv) == 2 and sys.argv[1].lower() == "demo":
-        run_id = await _start_demo_run()
-        pending = await get_pending_approvals(run_id)
-        print("\nPENDING TOOLS:")
-        print(json.dumps(pending, ensure_ascii=False, indent=2, default=str))
-        print("\nContinue with one exact approval_id:")
-        for request in pending:
-            print(
-                "  python3 -m app.service.approval "
-                f"{run_id} {request['approval_id']} accept"
-            )
-            print(
-                "  python3 -m app.service.approval "
-                f"{run_id} {request['approval_id']} reject"
-            )
-        return
-
     if len(sys.argv) != 4:
         print("Usage:")
-        print("  python3 -m app.service.approval demo")
         print(
             "  python3 -m app.service.approval "
             "<run_id> <approval_id> <accept|reject>"

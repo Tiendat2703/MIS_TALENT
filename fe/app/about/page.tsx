@@ -1,23 +1,26 @@
 import { PageTransition } from "@/components/ui/page-transition";
+import { ContractFormCheck } from "./contract-form-check";
 
 export default function AboutPage() {
   return (
     <PageTransition>
-      <div className="flex flex-1 items-center justify-center w-full">
-        <section className="w-full max-w-3xl text-center text-[var(--fin-text)]">
-          <article className="rounded-3xl border border-emerald-400/20 bg-[var(--fin-surface)] px-6 py-8 shadow-[0_24px_80px_rgba(0,0,0,.18)] ring-1 ring-white/[0.05] sm:px-10 sm:py-12">
-            <h1 className="text-balance text-4xl font-bold tracking-[-0.04em] sm:text-6xl">
-              <span className="text-emerald-400">No.1 Solution: </span>
-              <span className="text-[var(--fin-text)]">
-                 AI assistant for your Finance Department
-              </span>
+      <div className="flex w-full flex-1 flex-col gap-8 text-[var(--fin-text)]">
+        <section className="mx-auto w-full max-w-5xl">
+          <article className="rounded-2xl border border-emerald-400/20 bg-[var(--fin-surface)]/95 px-6 py-7 shadow-[0_24px_80px_rgba(0,0,0,.18)] ring-1 ring-white/[0.05] backdrop-blur sm:px-8 sm:py-9">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">
+              FinWise Finance AI
+            </p>
+            <h1 className="mt-3 max-w-3xl text-balance text-3xl font-bold tracking-[-0.035em] sm:text-5xl">
+              Khởi tạo hồ sơ phân tích hợp đồng
             </h1>
-            <p className="mx-auto mt-6 max-w-xl text-pretty text-lg leading-8 text-[var(--fin-muted)]">
-              Our platform turns complex signals into clear, actionable insights so
-              teams can understand risk and move forward with confidence.
+            <p className="mt-4 max-w-2xl text-pretty text-base leading-7 text-[var(--fin-muted)] sm:text-lg">
+              Nhập thông tin hợp đồng và nhu cầu vốn để các Finance, Risk và Decision
+              Agent cùng đánh giá hồ sơ.
             </p>
           </article>
         </section>
+
+        <ContractFormCheck />
       </div>
     </PageTransition>
   );

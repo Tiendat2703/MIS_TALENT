@@ -32,7 +32,13 @@ from app.database.context_store import (
 from app.schema.decisionAgent import DecisionBatchOutput, DecisionCardOutput
 from app.schema.handoff_packs import PipelineHandoff, StrictModel
 from app.schema.pipeline_input import ContractUploadPackage
-from app.service.decision_guard import validate_decision_prechecks
+from app.service.decision_guard import (
+    validate_decision_finance_consistency,
+    validate_decision_prechecks,
+    validate_decision_risk_policy,
+)
+from app.service.credit_profile import load_contract_credit_profiles
+from app.service.precheck_approval import ensure_precheck_approval_requests
 from app.service.pipeline_input import load_contract_package, select_pipeline_scope
 from app.tools.FinanceAgent.data_request import apply_form_submission
 from app.tools.FinanceAgent.finance_data import load_all
@@ -157,7 +163,6 @@ async def run_pipeline(
     *,
     session_id: int | None = None,
     reference_date: date | None = None,
-    scenario: str | None = None,
     submission: dict[str, Any] | None = None,
     max_turns: int = 35,
 ) -> PipelineRunResult:
@@ -181,7 +186,7 @@ async def run_pipeline(
     if session_id is None:
         session_id = await asyncio.to_thread(allocate_session_id)
 
-    data = await asyncio.to_thread(load_all, scenario)
+    data = await asyncio.to_thread(load_all)
     data, contract_ids, mode = await asyncio.to_thread(
         select_pipeline_scope,
         data,
@@ -206,7 +211,6 @@ async def run_pipeline(
         contract_id=contract_ids[0] if len(contract_ids) == 1 else None,
         contract_ids=contract_ids,
         reference_date=reference_date.isoformat() if reference_date else None,
-        scenario=scenario,
     )
 
     await initialize_approval_state(
@@ -262,6 +266,34 @@ async def run_pipeline(
                 f"expected={contract_ids}, returned={returned_ids}"
             )
 
+        authoritative_context = await asyncio.to_thread(
+            load_pipeline_context, session_id
+        )
+        credit_profiles = await asyncio.to_thread(
+            load_contract_credit_profiles,
+            authoritative_context.finance_pack.contract_ids,
+        )
+        validate_decision_finance_consistency(
+            result.final_output,
+            authoritative_context.finance_pack,
+            credit_profiles,
+        )
+        if authoritative_context.risk_pack is None:
+            raise ValueError(
+                f"RiskBatchPack is missing for session_id={session_id}"
+            )
+        validate_decision_risk_policy(
+            result.final_output,
+            authoritative_context.risk_pack,
+        )
+        # Register every actionable precheck deterministically. The external bank
+        # call is still blocked until a human approves the exact stored arguments.
+        await ensure_precheck_approval_requests(
+            session_id,
+            result.final_output,
+            authoritative_context.finance_pack,
+            credit_profiles,
+        )
         state_before_commit = await get_approval_state(session_id)
         validate_decision_prechecks(result.final_output, state_before_commit)
         await asyncio.to_thread(save_decision_pack, session_id, result.final_output)
@@ -352,13 +384,11 @@ async def _main() -> None:
             "from the configured normal source."
         ),
     )
-    parser.add_argument("--scenario", help="Optional normal-source test override JSON")
     parser.add_argument("--reference-date", help="ISO date used for overdue checks")
     parser.add_argument("--max-turns", type=int, default=35)
     args = parser.parse_args()
     output = await run_pipeline(
         contract=args.input_package,
-        scenario=args.scenario,
         reference_date=(
             date.fromisoformat(args.reference_date) if args.reference_date else None
         ),

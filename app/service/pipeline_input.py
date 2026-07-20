@@ -39,7 +39,7 @@ def merge_contract_package(
     base_data: dict[str, Any],
     package: ContractUploadPackage,
 ) -> dict[str, Any]:
-    """Return a copy; never mutate or persist the normal DB/mock source rows."""
+    """Return a copy; never mutate or persist the normal database source rows."""
     data = deepcopy(base_data)
     _upsert_run_local(
         data["contracts"],

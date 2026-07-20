@@ -75,6 +75,14 @@ async def run_events(session_id: int):
             yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
     return StreamingResponse(gen(), media_type="text/event-stream")
 
+@app.get("/dashboard/events")
+async def dashboard_events():
+    """Notify the dashboard after a pipeline result is persisted."""
+    async def gen():
+        async for ev in _pipeline_service().stream_dashboard_events():
+            yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
 @app.get("/runs/{session_id}")
 async def run_result(session_id: int):
     return await _pipeline_service().get_run_result(session_id)

@@ -35,6 +35,7 @@ from app.schema.pipeline_input import ContractUploadPackage
 from app.service.decision_guard import (
     validate_decision_finance_consistency,
     validate_decision_prechecks,
+    validate_decision_risk_policy,
 )
 from app.service.credit_profile import load_contract_credit_profiles
 from app.service.precheck_approval import ensure_precheck_approval_requests
@@ -276,6 +277,14 @@ async def run_pipeline(
             result.final_output,
             authoritative_context.finance_pack,
             credit_profiles,
+        )
+        if authoritative_context.risk_pack is None:
+            raise ValueError(
+                f"RiskBatchPack is missing for session_id={session_id}"
+            )
+        validate_decision_risk_policy(
+            result.final_output,
+            authoritative_context.risk_pack,
         )
         # Register every actionable precheck deterministically. The external bank
         # call is still blocked until a human approves the exact stored arguments.

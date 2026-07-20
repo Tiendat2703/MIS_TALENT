@@ -15,7 +15,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_BASE_URL, API_REQUEST_HEADERS, apiUrl } from "@/lib/api";
 
 type ApprovalStatus = "pending" | "approved" | "review" | "rejected";
@@ -162,6 +162,7 @@ type ApiContract = {
 const optionLabels: Record<string, string> = {
   APPROVE: "Nên duyệt",
   APPROVE_WITH_CONDITION: "Duyệt có điều kiện",
+  TEMPORARY_REJECT_RISK: "Tạm từ chối · rủi ro",
   REJECT_MISSING_EVIDENCE: "Từ chối · thiếu hồ sơ",
   NO_SUITABLE_PRODUCT: "Chưa có phương án phù hợp",
   PENDING_ANALYSIS: "Đang chờ phân tích",
@@ -901,11 +902,17 @@ export function ContractApprovalWorkspace() {
   const selectedForDetail = contracts.find((item) => item.id === selectedId);
   const selectedRunId = selectedForDetail?.runId;
 
-  const loadContracts = async () => {
-    setIsRefreshing(true);
+  const loadContracts = useCallback(async ({
+    signal,
+    silent = false,
+  }: {
+    signal?: AbortSignal;
+    silent?: boolean;
+  } = {}) => {
+    if (!silent) setIsRefreshing(true);
     setApiConnectionIssue("");
     try {
-      const apiContracts = await fetchApiContracts();
+      const apiContracts = await fetchApiContracts(signal);
       setContracts(apiContracts);
       setSelectedId((current) => (
         apiContracts.some((item) => item.id === current)
@@ -913,49 +920,109 @@ export function ContractApprovalWorkspace() {
           : (apiContracts[0]?.id ?? "")
       ));
     } catch (error) {
-      setContracts([]);
-      setSelectedId("");
+      if ((error as Error).name === "AbortError") return;
+      if (!silent) {
+        setContracts([]);
+        setSelectedId("");
+      }
       setApiConnectionIssue(
         error instanceof Error
           ? `Không kết nối được ${API_BASE_URL}: ${error.message}`
           : `Không kết nối được ${API_BASE_URL}.`,
       );
     } finally {
-      setIsRefreshing(false);
+      if (!silent && !signal?.aborted) setIsRefreshing(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
 
     async function hydrateContracts() {
-      try {
-        const apiContracts = await fetchApiContracts(controller.signal);
-        setContracts(apiContracts);
-        setApiConnectionIssue("");
-        setSelectedId((current) => (
-          apiContracts.some((item) => item.id === current)
-            ? current
-            : (apiContracts[0]?.id ?? "")
-        ));
-      } catch (error) {
-        if ((error as Error).name !== "AbortError") {
-          setContracts([]);
-          setSelectedId("");
-          setApiConnectionIssue(
-            error instanceof Error
-              ? `Không kết nối được ${API_BASE_URL}: ${error.message}`
-              : `Không kết nối được ${API_BASE_URL}.`,
-          );
-        }
-      } finally {
-        if (!controller.signal.aborted) setIsRefreshing(false);
-      }
+      await loadContracts({ signal: controller.signal });
     }
 
     void hydrateContracts();
     return () => controller.abort();
-  }, []);
+  }, [loadContracts]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function waitBeforeReconnect() {
+      await new Promise<void>((resolve) => {
+        const timeout = window.setTimeout(resolve, 1_500);
+        controller.signal.addEventListener(
+          "abort",
+          () => {
+            window.clearTimeout(timeout);
+            resolve();
+          },
+          { once: true },
+        );
+      });
+    }
+
+    async function connectToDashboardEvents() {
+      while (!controller.signal.aborted) {
+        try {
+          const response = await fetch(apiUrl("/dashboard/events"), {
+            cache: "no-store",
+            headers: {
+              Accept: "text/event-stream",
+              "Cache-Control": "no-cache",
+              ...API_REQUEST_HEADERS,
+            },
+            signal: controller.signal,
+          });
+          if (!response.ok || !response.body) {
+            throw new Error(`Dashboard event API returned ${response.status}`);
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          while (!controller.signal.aborted) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+            let boundary = buffer.indexOf("\n\n");
+
+            while (boundary >= 0) {
+              const block = buffer.slice(0, boundary);
+              buffer = buffer.slice(boundary + 2);
+              boundary = buffer.indexOf("\n\n");
+              const data = block
+                .split("\n")
+                .filter((line) => line.startsWith("data:"))
+                .map((line) => line.slice(5).trimStart())
+                .join("\n");
+              if (!data) continue;
+
+              const event = JSON.parse(data) as { type?: string };
+              if (
+                event.type === "dashboard_ready"
+                || event.type === "run_review"
+                || event.type === "run_finished"
+                || event.type === "decision_updated"
+              ) {
+                void loadContracts({ silent: true });
+              }
+            }
+          }
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          console.warn("Dashboard realtime connection interrupted", error);
+        }
+
+        if (!controller.signal.aborted) await waitBeforeReconnect();
+      }
+    }
+
+    void connectToDashboardEvents();
+    return () => controller.abort();
+  }, [loadContracts]);
 
   useEffect(() => {
     if (!selectedRunId) return;

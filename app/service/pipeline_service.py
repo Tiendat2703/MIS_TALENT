@@ -42,6 +42,12 @@ from app.service.finance_handoff import infer_funding_need_type
 # Trạng thái snapshot được coi là ĐÃ KẾT THÚC (đóng SSE, task xong).
 _TERMINAL_STATUSES = {"done", "completed", "error", "cancelled"}
 
+_DASHBOARD_REFRESH_EVENT_TYPES = {
+    "run_review",
+    "run_finished",
+    "decision_updated",
+}
+
 # Task nền đang chạy pipeline, theo session_id — để tra cứu trạng thái/đợi kết quả.
 _RUNS: dict[int, asyncio.Task] = {}
 
@@ -171,6 +177,28 @@ async def stream_run_events(
                 return
     finally:
         event_bus.unsubscribe(session_id, queue)
+
+
+async def stream_dashboard_events(
+    *,
+    poll_interval: float = 15.0,
+) -> AsyncIterator[dict[str, Any]]:
+    """Stream lightweight signals that tell dashboards to reload DB-backed data."""
+    queue = event_bus.subscribe_all()
+    try:
+        # An immediate ready event also repairs data missed while disconnected.
+        yield {"type": "dashboard_ready", "status": "connected"}
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=poll_interval)
+            except asyncio.TimeoutError:
+                yield {"type": "heartbeat", "status": "connected"}
+                continue
+
+            if event.get("type") in _DASHBOARD_REFRESH_EVENT_TYPES:
+                yield event
+    finally:
+        event_bus.unsubscribe_all(queue)
 
 
 def get_run_snapshot(session_id: int) -> dict[str, Any] | None:
@@ -561,6 +589,7 @@ __all__ = [
     "list_processed_contracts",
     "run_pipeline_and_wait",
     "start_pipeline_run",
+    "stream_dashboard_events",
     "stream_run_events",
     "submit_approval",
 ]

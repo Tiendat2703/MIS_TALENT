@@ -238,7 +238,7 @@ async def set_approval_decision(
     approval_id: str,
     approved: bool,
 ) -> dict[str, Any]:
-    """Move one pending request to approved or rejected."""
+    """Move a pending request to a decision or retry a failed execution."""
     async with _RUN_LOCKS[run_id]:
         with _process_lock(run_id):
             payload = _read_state(run_id)
@@ -252,6 +252,20 @@ async def set_approval_decision(
                 }:
                     return dict(request)
                 if not approved and request["status"] == "rejected":
+                    return dict(request)
+                if approved and request["status"] == "failed":
+                    # The human decision remains valid, but an infrastructure or
+                    # integration error prevented execution. Reset transient
+                    # execution fields so the exact same request can be retried.
+                    request["status"] = "approved"
+                    request["decided_at"] = _timestamp()
+                    request["execution_started_at"] = None
+                    request["executed_at"] = None
+                    request["decision_applied_at"] = None
+                    request["result"] = None
+                    request["error"] = None
+                    payload["workflow_status"] = "review"
+                    _write_state(run_id, payload)
                     return dict(request)
                 if request["status"] != "pending":
                     raise ValueError(

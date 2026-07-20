@@ -30,6 +30,7 @@ def _json_default(value: Any) -> Any:
 class AgentEventBus:
     def __init__(self, log_dir: str | Path = DEFAULT_LOG_DIR):
         self.subscribers: dict[str, list[asyncio.Queue]] = defaultdict(list)
+        self.global_subscribers: list[asyncio.Queue] = []
         self.seq_map: dict[str, int] = defaultdict(int)
         self.snapshots: dict[str, dict[str, Any]] = {}
         self.log_dir = Path(log_dir)
@@ -103,7 +104,9 @@ class AgentEventBus:
         # Persist every event so an abrupt stop still leaves the latest snapshot.
         self.persist_snapshot(run_id)
 
-        for queue in self.subscribers[run_id]:
+        for queue in list(self.subscribers[run_id]):
+            await queue.put(event)
+        for queue in list(self.global_subscribers):
             await queue.put(event)
 
     def restore_snapshot(self, run_id: str | int) -> None:
@@ -152,6 +155,16 @@ class AgentEventBus:
         run_id = str(run_id)
         if queue in self.subscribers[run_id]:
             self.subscribers[run_id].remove(queue)
+
+    def subscribe_all(self) -> asyncio.Queue:
+        """Subscribe to new events from every run for live dashboard refreshes."""
+        queue = asyncio.Queue()
+        self.global_subscribers.append(queue)
+        return queue
+
+    def unsubscribe_all(self, queue: asyncio.Queue) -> None:
+        if queue in self.global_subscribers:
+            self.global_subscribers.remove(queue)
 
     def get_snapshot(self, run_id: str | int) -> dict[str, Any] | None:
         return self.snapshots.get(str(run_id))

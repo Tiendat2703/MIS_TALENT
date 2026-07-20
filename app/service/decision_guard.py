@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.schema.decisionAgent import DecisionBatchOutput, DecisionStatus
-from app.schema.handoff_packs import FinanceBatchPack
+from app.schema.decisionAgent import (
+    DecisionBatchOutput,
+    DecisionStatus,
+    RecommendedOption,
+)
+from app.schema.handoff_packs import FinanceBatchPack, RiskBatchPack, RiskPack
 from app.schema.risk_db_models import CreditProfile
 from app.service.credit_profile import resolve_contract_funding_need
 
@@ -50,6 +54,82 @@ def validate_decision_finance_consistency(
                 f"authoritative requested_amount {requested_amount} from "
                 f"{funding_source}, got "
                 f"{decision.capital_need}"
+            )
+
+
+def _temporary_rejection_policy(
+    risk: RiskPack,
+) -> tuple[set[str], set[str]]:
+    """Return mandatory rule ids and large-amount companion risk ids."""
+    triggered = set(risk.triggered_rule_ids)
+    required_rule_ids: set[str] = set()
+    large_amount_companions: set[str] = set()
+
+    if "RR-003" in triggered:
+        required_rule_ids.add("RR-003")
+
+    if "RR-005" in triggered:
+        large_amount_companions = triggered - {"RR-005"}
+        if large_amount_companions:
+            required_rule_ids.add("RR-005")
+
+    return required_rule_ids, large_amount_companions
+
+
+def validate_decision_risk_policy(
+    batch: DecisionBatchOutput,
+    risk_batch: RiskBatchPack,
+) -> None:
+    """Enforce temporary rejection for margin or large-risk combinations."""
+    decisions = {item.contract_id: item for item in batch.decisions}
+    if list(decisions) != risk_batch.contract_ids:
+        raise ValueError(
+            "Decision contracts do not match RiskBatchPack order: "
+            f"expected={risk_batch.contract_ids}, returned={list(decisions)}"
+        )
+
+    for risk in risk_batch.packs:
+        required_rule_ids, large_amount_companions = _temporary_rejection_policy(
+            risk
+        )
+        if not required_rule_ids:
+            continue
+
+        decision = decisions[risk.contract_id]
+        if (
+            decision.recommended_option
+            is not RecommendedOption.TEMPORARY_REJECT_RISK
+            or decision.accept_opportunity
+            or decision.decision_status is not DecisionStatus.REJECT
+        ):
+            raise ValueError(
+                f"Decision for {risk.contract_id} must be temporarily rejected "
+                f"because risk rules {sorted(required_rule_ids)} require it"
+            )
+
+        rationale = " ".join(
+            [decision.protective_condition, *decision.reasons]
+        ).casefold()
+        missing_rule_ids = [
+            rule_id
+            for rule_id in sorted(required_rule_ids)
+            if rule_id.casefold() not in rationale
+        ]
+        if missing_rule_ids:
+            raise ValueError(
+                f"Temporary rejection for {risk.contract_id} must explain "
+                f"risk rules {missing_rule_ids}"
+            )
+        if (
+            "RR-005" in required_rule_ids
+            and not any(
+                rule_id.casefold() in rationale
+                for rule_id in large_amount_companions
+            )
+        ):
+            raise ValueError(
+                f"Large-amount temporary rejection for {risk.contract_id} must "
+                "identify at least one companion triggered risk rule"
             )
 
 
@@ -100,4 +180,5 @@ def validate_decision_prechecks(
 __all__ = [
     "validate_decision_finance_consistency",
     "validate_decision_prechecks",
+    "validate_decision_risk_policy",
 ]

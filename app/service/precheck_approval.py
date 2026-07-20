@@ -20,6 +20,7 @@ from app.service.credit_profile import resolve_contract_funding_need
 
 
 _NON_ACTIONABLE_OPTIONS = {
+    RecommendedOption.TEMPORARY_REJECT_RISK,
     RecommendedOption.REJECT_MISSING_EVIDENCE,
     RecommendedOption.NO_SUITABLE_PRODUCT,
 }

@@ -230,7 +230,8 @@ def save_risk_pack(session_id: int, risk_pack: RiskBatchPack) -> None:
 
 
 def save_decision_pack(session_id: int, decision_pack: DecisionBatchOutput) -> None:
-    finance_pack = load_finance_pack(session_id)
+    record = load_pipeline_context(session_id)
+    finance_pack = record.finance_pack
     expected_contract_ids = finance_pack.contract_ids
     returned_ids = [item.contract_id for item in decision_pack.decisions]
     if returned_ids != expected_contract_ids:
@@ -238,7 +239,10 @@ def save_decision_pack(session_id: int, decision_pack: DecisionBatchOutput) -> N
             "DecisionPack must contain all context contracts in order: "
             f"expected={expected_contract_ids}, returned={returned_ids}"
         )
-    from app.service.decision_guard import validate_decision_finance_consistency
+    from app.service.decision_guard import (
+        validate_decision_finance_consistency,
+        validate_decision_risk_policy,
+    )
 
     credit_profiles = load_contract_credit_profiles(finance_pack.contract_ids)
     validate_decision_finance_consistency(
@@ -246,6 +250,9 @@ def save_decision_pack(session_id: int, decision_pack: DecisionBatchOutput) -> N
         finance_pack,
         credit_profiles,
     )
+    if record.risk_pack is None:
+        raise LookupError(f"RiskPack is not ready for session_id={session_id}")
+    validate_decision_risk_policy(decision_pack, record.risk_pack)
     rows = query_db(
         """
         UPDATE public.context

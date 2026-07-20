@@ -1,5 +1,4 @@
 import asyncio
-import os
 from collections.abc import Callable
 from typing import Any
 
@@ -176,14 +175,20 @@ def _performance_bond_call(
 ) -> dict[str, Any]:
     _validate_performance_bond_arguments(contract_id, amount)
 
-    return _call_api(
-        os.getenv("VIETINBANK_API_BASE_URL"),
-        "/openapi/v1/guarantee/precheck",
-        {
-            "contract_id": contract_id,
-            "amount": amount,
-        },
-    )
+    # This integration is a local demo only. Return a deterministic result
+    # without requiring a separately hosted VietinBank sandbox.
+    if amount > 1_000_000_000:
+        score = 60
+        note = "Hồ sơ cần thẩm định thêm vì số tiền bảo lãnh cao."
+    else:
+        score = 85
+        note = "Hồ sơ đầy đủ và đủ điều kiện sơ bộ."
+
+    return {
+        "eli": score >= 70,
+        "score": score,
+        "note": note,
+    }
 
 
 def _validate_performance_bond_arguments(
@@ -233,15 +238,20 @@ def _trade_finance_call(
 ) -> dict[str, Any]:
     _validate_trade_finance_arguments(contract_id, supplier_docs, amount)
 
-    return _call_api(
-        os.getenv("VIETINBANK_API_BASE_URL"),
-        "/openapi/v1/trade-finance/precheck",
-        {
-            "contract_id": contract_id,
-            "supplier_docs": supplier_docs,
-            "amount": amount,
-        },
-    )
+    # This integration is a local demo only. Return a deterministic result
+    # without requiring a separately hosted VietinBank sandbox.
+    if len(supplier_docs) < 2:
+        score = 55
+        note = "Hồ sơ chưa đủ chứng từ nhà cung cấp."
+    else:
+        score = 88
+        note = "Hồ sơ đầy đủ và có thể chuyển sang bước thẩm định."
+
+    return {
+        "eli": score >= 70,
+        "score": score,
+        "note": note,
+    }
 
 
 def _micro_credit_call(
@@ -280,7 +290,7 @@ async def precheck_performance_bond(
     contract_id: str,
     amount: float,
 ) -> dict:
-    """Gate and run the performance-bond precheck for one contract."""
+    """Gate and run the deterministic mock performance-bond precheck."""
     _validate_performance_bond_arguments(contract_id, amount)
     arguments = {
         "contract_id": contract_id,
@@ -302,7 +312,7 @@ async def precheck_trade_finance(
     supplier_docs: list[str],
     amount: float,
 ) -> dict:
-    """Gate and run the trade-finance precheck for one contract."""
+    """Gate and run the deterministic mock trade-finance precheck."""
     _validate_trade_finance_arguments(contract_id, supplier_docs, amount)
     arguments = {
         "contract_id": contract_id,

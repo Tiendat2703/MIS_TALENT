@@ -9,8 +9,10 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.api import app
-from app.Agent.bus import event_bus
-from app.database import context_store
+from app.Agent import state_store
+from app.Agent.bus import AgentEventBus, event_bus
+from app.Agent.hooks import AppContext
+from app.database import context_store, repository
 from app.schema.decisionAgent import DecisionBatchOutput, DecisionCardOutput
 from app.schema.financeAgent import (
     BankReconciliationSummary,
@@ -37,6 +39,7 @@ from app.service.credit_profile import (
 from app.service.decision_guard import (
     validate_decision_finance_consistency,
     validate_decision_prechecks,
+    validate_decision_risk_policy,
 )
 from app.service.pipeline_input import (
     load_contract_package,
@@ -50,6 +53,8 @@ from app.tools.DecisionAgent.GetBankProduct import _evaluate_product
 from app.tools.DecisionAgent.PrecheckAPI import (
     _call_api,
     _micro_credit_call,
+    _performance_bond_call,
+    _trade_finance_call,
     _validate_micro_credit_arguments,
     _validate_trade_finance_arguments,
 )
@@ -57,6 +62,42 @@ from app.tools.FinanceAgent.finance_data import load_all
 
 
 client = TestClient(app)
+
+
+def test_database_pool_defaults_to_twenty_connections(monkeypatch) -> None:
+    monkeypatch.delenv("DB_POOL_MIN", raising=False)
+    monkeypatch.delenv("DB_POOL_MAX", raising=False)
+
+    assert repository._pool_limits() == (1, 20)
+
+
+def test_database_pool_rejects_invalid_limits(monkeypatch) -> None:
+    monkeypatch.setenv("DB_POOL_MIN", "21")
+    monkeypatch.setenv("DB_POOL_MAX", "20")
+
+    with pytest.raises(RuntimeError, match="cannot be greater"):
+        repository._pool_limits()
+
+
+@pytest.mark.asyncio
+async def test_global_event_subscriber_receives_pipeline_completion(tmp_path) -> None:
+    bus = AgentEventBus(log_dir=tmp_path)
+    queue = bus.subscribe_all()
+
+    await bus.emit(
+        42,
+        {
+            "type": "run_finished",
+            "agent": "Decision_Agent",
+            "status": "done",
+        },
+    )
+
+    event = queue.get_nowait()
+    assert event["run_id"] == "42"
+    assert event["type"] == "run_finished"
+    bus.unsubscribe_all(queue)
+    assert bus.global_subscribers == []
 
 
 def _finance_pack() -> FinanceFeaturePack:
@@ -70,6 +111,46 @@ def _finance_pack() -> FinanceFeaturePack:
         source_record_ids=["CON-004"],
         handoff_summary="Finance handoff for CON-004.",
     )
+
+
+@pytest.mark.asyncio
+async def test_failed_approval_can_be_retried(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(state_store, "PENDING_STATE_DIR", tmp_path)
+    run_id = 9_001
+    context = AppContext(
+        document_id="BATCH-9001",
+        original_input="{}",
+        run_id=run_id,
+        contract_id="CON-004",
+        contract_ids=["CON-004"],
+    )
+    await state_store.initialize_approval_state(run_id, context, "{}")
+    request = await state_store.register_approval_request(
+        run_id,
+        "CON-004",
+        "precheck_performance_bond",
+        {"contract_id": "CON-004", "amount": 800_000_000},
+    )
+    approval_id = request["approval_id"]
+
+    await state_store.set_approval_decision(run_id, approval_id, True)
+    claimed = await state_store.claim_approval_execution(run_id, approval_id)
+    assert claimed["claimed"] is True
+    await state_store.fail_approval_execution(
+        run_id,
+        approval_id,
+        "RuntimeError: sandbox unavailable",
+    )
+
+    retried = await state_store.set_approval_decision(run_id, approval_id, True)
+
+    assert retried["status"] == "approved"
+    assert retried["execution_started_at"] is None
+    assert retried["executed_at"] is None
+    assert retried["result"] is None
+    assert retried["error"] is None
+    retry_claim = await state_store.claim_approval_execution(run_id, approval_id)
+    assert retry_claim["claimed"] is True
 
 
 def _decision_batch() -> DecisionBatchOutput:
@@ -87,6 +168,95 @@ def _decision_batch() -> DecisionBatchOutput:
             )
         ],
     )
+
+
+def _risk_batch(*triggered_rule_ids: str) -> RiskBatchPack:
+    return RiskBatchPack.model_validate(
+        {
+            "contract_ids": ["CON-004"],
+            "packs": [
+                {
+                    "case_id": "CASE-CON-004",
+                    "contract_id": "CON-004",
+                    "generated_at": datetime.now(UTC),
+                    "overall_risk_level": "HIGH",
+                    "rule_evaluations": [
+                        {
+                            "rule_id": rule_id,
+                            "status": "TRIGGERED",
+                            "owner_agent": "Risk & Compliance Agent",
+                            "severity": (
+                                "MEDIUM" if rule_id == "RR-003" else "HIGH"
+                            ),
+                            "required_action": "Review before acceptance",
+                            "message": "Rule triggered for this contract.",
+                        }
+                        for rule_id in triggered_rule_ids
+                    ],
+                    "triggered_rule_ids": list(triggered_rule_ids),
+                    "required_actions": ["Review before acceptance"],
+                    "human_approval_required": True,
+                    "handoff_summary": "Risk policy test pack.",
+                    "decision_made_by_risk_agent": False,
+                }
+            ],
+        }
+    )
+
+
+def _temporary_risk_rejection(*rule_ids: str) -> DecisionBatchOutput:
+    payload = _decision_batch().model_dump(mode="json")
+    payload["decisions"][0].update(
+        {
+            "accept_opportunity": False,
+            "recommended_option": "TEMPORARY_REJECT_RISK",
+            "decision_status": "reject",
+            "protective_condition": (
+                f"Khắc phục các rule {', '.join(rule_ids)} trước khi chạy lại hồ sơ."
+            ),
+            "reasons": [
+                "Finance reason",
+                f"Tạm từ chối do các rule {', '.join(rule_ids)}.",
+                "Product reason",
+            ],
+        }
+    )
+    return DecisionBatchOutput.model_validate(payload)
+
+
+def test_rr003_requires_temporary_risk_rejection() -> None:
+    with pytest.raises(ValueError, match="must be temporarily rejected"):
+        validate_decision_risk_policy(_decision_batch(), _risk_batch("RR-003"))
+
+    validate_decision_risk_policy(
+        _temporary_risk_rejection("RR-003"),
+        _risk_batch("RR-003"),
+    )
+
+
+def test_large_amount_alone_does_not_force_temporary_rejection() -> None:
+    validate_decision_risk_policy(_decision_batch(), _risk_batch("RR-005"))
+
+
+def test_large_amount_with_another_risk_requires_temporary_rejection() -> None:
+    risk_batch = _risk_batch("RR-002", "RR-005")
+    with pytest.raises(ValueError, match="must be temporarily rejected"):
+        validate_decision_risk_policy(_decision_batch(), risk_batch)
+
+    validate_decision_risk_policy(
+        _temporary_risk_rejection("RR-002", "RR-005"),
+        risk_batch,
+    )
+
+
+def test_temporary_risk_rejection_does_not_create_precheck_request() -> None:
+    decision = _temporary_risk_rejection("RR-003")
+    finance_batch = FinanceBatchPack(
+        contract_ids=["CON-004"],
+        packs=[_finance_pack()],
+    )
+
+    assert build_precheck_approval_specs(decision, finance_batch, {}) == []
 
 
 def _finance_analysis() -> FinanceAnalysisPack:
@@ -204,9 +374,46 @@ def test_finance_scenario_override_is_disabled_before_database_access(monkeypatc
         load_all()
 
 
-def test_bank_precheck_never_falls_back_without_real_api_url() -> None:
+def test_real_bank_api_helper_requires_base_url() -> None:
     with pytest.raises(RuntimeError, match="Bank API base URL is not configured"):
         _call_api(None, "/precheck", {"contract_id": "CON-004"})
+
+
+@pytest.mark.parametrize(
+    ("amount", "expected"),
+    [
+        (
+            1_200_000_000,
+            {
+                "eli": False,
+                "score": 60,
+                "note": "Hồ sơ cần thẩm định thêm vì số tiền bảo lãnh cao.",
+            },
+        ),
+        (
+            800_000_000,
+            {
+                "eli": True,
+                "score": 85,
+                "note": "Hồ sơ đầy đủ và đủ điều kiện sơ bộ.",
+            },
+        ),
+    ],
+)
+def test_performance_bond_returns_deterministic_mock(
+    monkeypatch,
+    amount,
+    expected,
+) -> None:
+    def unexpected_api_call(*_args, **_kwargs):
+        raise AssertionError("performance-bond mock must not call an external API")
+
+    monkeypatch.setattr(
+        "app.tools.DecisionAgent.PrecheckAPI._call_api",
+        unexpected_api_call,
+    )
+
+    assert _performance_bond_call("CON-004", amount) == expected
 
 
 def test_micro_credit_does_not_require_customer_type_before_approval() -> None:
@@ -271,6 +478,46 @@ def test_trade_finance_allows_empty_document_list_for_bank_evaluation() -> None:
         "CON-005",
         [],
         650_000_000,
+    )
+
+
+@pytest.mark.parametrize(
+    ("supplier_docs", "expected"),
+    [
+        (
+            [],
+            {
+                "eli": False,
+                "score": 55,
+                "note": "Hồ sơ chưa đủ chứng từ nhà cung cấp.",
+            },
+        ),
+        (
+            ["INVOICE-001", "PURCHASE-ORDER-001"],
+            {
+                "eli": True,
+                "score": 88,
+                "note": "Hồ sơ đầy đủ và có thể chuyển sang bước thẩm định.",
+            },
+        ),
+    ],
+)
+def test_trade_finance_returns_deterministic_mock(
+    monkeypatch,
+    supplier_docs,
+    expected,
+) -> None:
+    def unexpected_api_call(*_args, **_kwargs):
+        raise AssertionError("trade-finance mock must not call an external API")
+
+    monkeypatch.setattr(
+        "app.tools.DecisionAgent.PrecheckAPI._call_api",
+        unexpected_api_call,
+    )
+
+    assert (
+        _trade_finance_call("CON-005", supplier_docs, 650_000_000)
+        == expected
     )
 
 

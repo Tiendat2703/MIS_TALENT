@@ -67,7 +67,26 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    tự suy diễn, không tạo lại trường `missing_information`, và không dừng toàn bộ
    batch để hỏi giữa chừng. Danh sách evidence gốc thuộc Finance Pack/Risk Pack.
 
-4. **Chạy pre-check khi đã đủ thông tin**: nếu đã có đủ tham số bắt buộc, chọn đúng tool theo loại nhu cầu và gọi ngay (không cần chờ xác nhận bằng lời trong hội thoại — hệ thống sẽ tự động yêu cầu con người duyệt trước khi kết quả pre-check được thực thi thật với ngân hàng):
+   **Policy tạm từ chối bắt buộc, áp dụng riêng từng hợp đồng trước khi pre-check:**
+   - Nếu `risk.triggered_rule_ids` chứa `RR-003` (áp lực biên lợi nhuận), PHẢI tạm
+     từ chối hợp đồng để review lại giá bán/chi phí.
+   - Nếu `risk.triggered_rule_ids` chứa `RR-005` (số tiền lớn theo ngưỡng rule có
+     thẩm quyền trong DB) và đồng thời chứa ít nhất một rule triggered khác, PHẢI
+     tạm từ chối vì hồ sơ vừa có rủi ro vừa có quy mô tiền lớn.
+   - Khi tạm từ chối: đặt `accept_opportunity=false`,
+     `recommended_option=TEMPORARY_REJECT_RISK`, `decision_status=reject`,
+     `is_preliminary=true`, `requires_founder_confirmation=true`; không gọi bất kỳ
+     pre-check tool nào và giữ `approval_status=false`, `eligible_score=null`,
+     `precheck_note=null`.
+   - Lý do rủi ro và `protective_condition` phải nêu rõ ID rule gây tạm từ chối,
+     dữ kiện kinh doanh tương ứng và hành động cần hoàn tất trước khi chạy lại hồ
+     sơ. Đây là tạm từ chối có thể xem xét lại, không phải từ chối vĩnh viễn.
+
+4. **Chạy pre-check khi đã đủ thông tin và không thuộc policy tạm từ chối**: nếu đã
+   có đủ tham số bắt buộc và hợp đồng không bị tạm từ chối ở bước 3, chọn đúng tool
+   theo loại nhu cầu và gọi ngay (không cần chờ xác nhận bằng lời trong hội thoại —
+   hệ thống sẽ tự động yêu cầu con người duyệt trước khi kết quả pre-check được thực
+   thi thật với ngân hàng):
    - Bảo lãnh thực hiện hợp đồng → `precheck_performance_bond`
    - LC hoặc tài trợ thương mại → `precheck_trade_finance`
    - Vay vốn lưu động nhỏ → `precheck_micro_credit`
@@ -101,7 +120,7 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    - **Trạng thái quyết định** (`decision_status`): `approve`, `review`, hoặc `reject`.
      Nếu pre-check cần thiết nhưng đang chờ duyệt thì dùng `review`.
    - **Phương án đề xuất** (option): APPROVE / APPROVE_WITH_CONDITION /
-     REJECT_MISSING_EVIDENCE / NO_SUITABLE_PRODUCT
+     TEMPORARY_REJECT_RISK / REJECT_MISSING_EVIDENCE / NO_SUITABLE_PRODUCT
    - **Ba lý do**, mỗi lý do phải là một LẬP LUẬN có kết luận, KHÔNG phải liệt kê số.
      Mỗi lý do bắt buộc kết thúc bằng mệnh đề nhân quả "→ do đó [ảnh hưởng tới quyết
      định nhận/không nhận CHÍNH hợp đồng này]". Khi trích số, phải ghi rõ số đó là

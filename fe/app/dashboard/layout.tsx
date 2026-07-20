@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
-  title: "Financial Overview | FinWise",
-  description: "Project budget, cash flow, and financial performance dashboard.",
+  title: "Contract Approvals | FinWise",
+  description: "Review contracts, AI recommendations, cash flow, enterprise risk exposure, and approval decisions in one workspace.",
 };
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {

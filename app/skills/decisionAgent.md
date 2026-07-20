@@ -18,10 +18,11 @@ phải danh sách. Danh sách các kết quả chỉ nằm trong trường batch
   thực hiện hợp đồng.
 - `precheck_trade_finance(contract_id, supplier_docs, amount)` — Kiểm tra sơ bộ hồ sơ
   LC / tài trợ thương mại.
-- `precheck_micro_credit(contract_id, customer_type, amount, receivable_list)` — Kiểm
+- `precheck_micro_credit(contract_id, amount, receivable_list)` — Kiểm
   tra sơ bộ hồ sơ vay vốn lưu động nhỏ.
 - `load_decision_context(session_id)` — đọc Finance Pack và Risk Pack có thẩm
-  quyền từ bảng `context` bằng ID của pipeline.
+  quyền từ bảng `context`, đồng thời tra bảng thật `credit_profile` để resolve
+  loại nhu cầu và số tiền đề nghị của từng hợp đồng.
 
 Chỉ gọi tool khi đã đủ thông tin bắt buộc cho tool đó. Nếu thiếu tham số, không tự
 điền giá trị giả định; phản ánh ảnh hưởng trong lý do rủi ro/hồ sơ và điều kiện bảo
@@ -35,6 +36,16 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    Với từng case, đọc thông tin tài
    chính (margin, cashflow, funding need) và thông tin rủi ro (risk level, blocking
    flags, missing evidence, alerts) đã được cung cấp trong ngữ cảnh hội thoại.
+
+   `funding_need` do tool trả về là nguồn có thẩm quyền để ra phương án ngân hàng,
+   đã áp dụng đúng thứ tự ưu tiên sau:
+   1. Nếu `credit_profile` có dòng tham chiếu chính xác `contract_id`, dùng
+      `request_type`, `requested_amount` và `tenor` của credit case đó.
+   2. Chỉ khi không tồn tại credit profile gắn với hợp đồng, dùng funding need do
+      chính hợp đồng cung cấp (trường hợp hợp đồng mới).
+   Nếu credit profile tồn tại nhưng thiếu amount thì giữ trạng thái `MISSING`,
+   không được rơi xuống amount của hợp đồng. Không tự đọc
+   `finance.requested_amount` để ghi đè kết quả resolve này.
 
    Nếu `funding_need=null` hoặc không có `need_type`, hợp đồng được xem là chưa có
    nhu cầu vay/bảo lãnh rõ ràng: không ghép sản phẩm ngân hàng, không tạo bank
@@ -60,6 +71,17 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    - Bảo lãnh thực hiện hợp đồng → `precheck_performance_bond`
    - LC hoặc tài trợ thương mại → `precheck_trade_finance`
    - Vay vốn lưu động nhỏ → `precheck_micro_credit`
+
+   Khi đã có `requested_amount`, danh sách chứng từ/khoản phải thu rỗng (`[]`) vẫn
+   là arguments thật và hợp lệ để tạo approval request. PHẢI gọi pre-check với
+   danh sách rỗng đó; ngân hàng sẽ đánh giá tính đầy đủ sau khi con người duyệt.
+   Không được bỏ tạo approval request chỉ vì `supplier_docs=[]` hoặc
+   `receivable_list=[]`. Việc thiếu chứng từ vẫn phải được nêu như một rủi ro và có
+   thể làm pre-check không đạt, nhưng không chặn cổng duyệt quyền gọi API.
+   `customer_type` không thuộc arguments của API vốn lưu động và không được dùng
+   làm điều kiện chặn approval. API này nhận `contract_id`, `amount` và danh sách
+   khoản phải thu; nếu danh sách rỗng thì vẫn gọi với `[]` để nhận kết quả mặc định
+   từ ngân hàng.
 
    Nếu thiếu tham số bắt buộc cho tool, không được tự điền giá trị giả định — phản
    ánh việc chưa đủ điều kiện trong lý do rủi ro/hồ sơ và `protective_condition`.
@@ -157,6 +179,10 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    - Không được lấy score/note từ `match_bank_product`, không tự suy diễn score/note,
      và không được đặt `approval_status=true` chỉ vì sản phẩm có trạng thái
      `PENDING_HUMAN_APPROVAL`.
+   - `credit_profile.eligibility_score`, `precheck_note` và `approval_status` là hồ
+     sơ tham chiếu đã có, KHÔNG phải kết quả của lần gọi API ngân hàng hiện tại;
+     không được chép chúng vào `eligible_score`, `precheck_note` hoặc
+     `approval_status` của Decision Card.
 6. **Hoàn tất batch**: Batch chỉ chứa danh sách `decisions`, đúng một card cho mỗi
    contract đầu vào và giữ nguyên thứ tự. Không thêm contract ngoài input. Việc lưu
    `context.decision_pack`, local hook log, `LogsAgent.DecisionLogs` và danh sách
@@ -178,11 +204,12 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
     `capital_need` hoặc mô tả thành giá trị bảo lãnh của một hợp đồng;
   - `bank_reconciliation_summary.confirmed_invoice_collections` = tiền thu invoice
     đã đối chiếu, không phải số dư tiền mặt hiện có.
-- Nếu Finance không cung cấp `requested_amount`, `capital_need` phải là null. Không
-  gọi các tool pre-check cần amount và không được suy ra amount từ `contract_value`,
-  `funding_need` danh mục, reserve gap hoặc bất kỳ trường nào khác. Vẫn phải gọi
-  `match_bank_product` theo `need_type` để ghi nhận sản phẩm sơ bộ và trạng thái
-  `NEEDS_AMOUNT`.
+- `capital_need` phải bằng chính xác `funding_need.requested_amount` đã được tool
+  resolve theo Credit Profile trước, funding need của hợp đồng mới sau. Nếu amount
+  đã resolve là null thì `capital_need` phải là null. Không gọi các tool pre-check
+  cần amount và không được suy ra amount từ `contract_value`, funding need danh
+  mục, reserve gap hoặc bất kỳ trường nào khác. Vẫn phải gọi `match_bank_product`
+  theo `need_type` để ghi nhận sản phẩm sơ bộ và trạng thái `NEEDS_AMOUNT`.
 - `approval_status` phản ánh việc pre-check tool đã được con người duyệt và thực thi,
   không phản ánh quyết định nhận hợp đồng trong `accept_opportunity`.
 - Khi nhận follow-up approval cho một contract, chỉ được gọi đúng precheck tool với

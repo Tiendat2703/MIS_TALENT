@@ -21,7 +21,9 @@ from app.Agent.state_store import (
     set_approval_decision,
 )
 from app.Agent.hooks import AppContext
-from app.database.context_store import fetch_context_row
+from app.database.context_store import fetch_context_row, load_pipeline_context
+from app.service.credit_profile import load_contract_credit_profiles
+from app.service.precheck_approval import ensure_precheck_approval_requests
 from app.tools.DecisionAgent.PrecheckAPI import PRECHECK_TOOL_BY_NAME
 from app.tools.writeLogs import fetch_decision_log
 
@@ -30,6 +32,22 @@ IMMUTABLE_TARGET_FIELDS = {
     "contract_id",
     "capital_need",
 }
+
+
+class ApprovalExecutionError(RuntimeError):
+    """The exact approved precheck failed before producing a bank result."""
+
+    def __init__(
+        self,
+        *,
+        approval_id: str,
+        contract_id: str,
+        error: str,
+    ) -> None:
+        self.approval_id = approval_id
+        self.contract_id = contract_id
+        self.execution_error = error
+        super().__init__(f"Bank precheck failed for {contract_id}: {error}")
 
 
 def _index_decisions(batch: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -132,7 +150,34 @@ async def get_pending_approvals(run_id: int) -> list[dict[str, Any]]:
         requests = await list_approval_requests(run_id)
     except FileNotFoundError:
         decision_log = await asyncio.to_thread(fetch_decision_log, run_id)
-        requests = _approval_requests_from_log(decision_log)
+        return [
+            request
+            for request in _approval_requests_from_log(decision_log)
+            if request["status"] == "pending"
+        ]
+
+    # Reconcile historical/current completed runs as well as new pipelines. This
+    # repairs a missing LLM tool call without calling any bank API and is idempotent
+    # because StateStore fingerprints the exact tool + arguments.
+    try:
+        record = await asyncio.to_thread(load_pipeline_context, run_id)
+        if record.decision_pack is not None:
+            credit_profiles = await asyncio.to_thread(
+                load_contract_credit_profiles,
+                record.finance_pack.contract_ids,
+            )
+            await ensure_precheck_approval_requests(
+                run_id,
+                record.decision_pack,
+                record.finance_pack,
+                credit_profiles,
+            )
+    except LookupError:
+        # Standalone/legacy Decision runs may not have a context row. Their stored
+        # approval requests remain authoritative and are returned unchanged.
+        pass
+
+    requests = await list_approval_requests(run_id)
     return [request for request in requests if request["status"] == "pending"]
 
 
@@ -410,6 +455,14 @@ async def decide_approval(
         new_batch = result.final_output.model_dump(mode="json")
         state_after_tool = await get_approval_state(run_id)
         request_after = _find_request(state_after_tool, approval_id)
+        if approved and request_after.get("status") == "failed":
+            raise ApprovalExecutionError(
+                approval_id=approval_id,
+                contract_id=request["contract_id"],
+                error=str(
+                    request_after.get("error") or "Unknown bank precheck error"
+                ),
+            )
         request_ids_after = {
             item["approval_id"]
             for item in state_after_tool["approval_requests"]

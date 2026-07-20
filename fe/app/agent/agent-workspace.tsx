@@ -101,6 +101,7 @@ const TASK_LABELS: Record<string, string> = {
   "Build and persist Risk Batch Pack": "Xây dựng và lưu Risk Pack",
   "Risk Pack persisted": "Lưu Risk Pack",
   "Load Finance and Risk Batch Packs": "Nạp kết quả từ Finance và Risk",
+  "Load Finance, Risk, and Credit Profiles": "Nạp Finance, Risk và Credit Profile",
   "Pipeline complete; precheck approval is pending": "Hoàn tất phân tích, đang chờ phê duyệt",
 };
 

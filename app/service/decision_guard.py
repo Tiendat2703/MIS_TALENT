@@ -6,13 +6,16 @@ from typing import Any
 
 from app.schema.decisionAgent import DecisionBatchOutput, DecisionStatus
 from app.schema.handoff_packs import FinanceBatchPack
+from app.schema.risk_db_models import CreditProfile
+from app.service.credit_profile import resolve_contract_funding_need
 
 
 def validate_decision_finance_consistency(
     batch: DecisionBatchOutput,
     finance_batch: FinanceBatchPack,
+    credit_profiles: dict[str, CreditProfile],
 ) -> None:
-    """Keep contract capital need separate from portfolio liquidity metrics."""
+    """Validate capital need against Credit Profile -> contract fallback rules."""
     decisions = {item.contract_id: item for item in batch.decisions}
     expected_ids = finance_batch.contract_ids
     if list(decisions) != expected_ids:
@@ -23,17 +26,29 @@ def validate_decision_finance_consistency(
 
     for finance in finance_batch.packs:
         decision = decisions[finance.contract_id]
-        if finance.requested_amount is None:
+        funding_need = resolve_contract_funding_need(
+            finance,
+            credit_profiles.get(finance.contract_id),
+        )
+        requested_amount = (
+            funding_need.get("requested_amount") if funding_need is not None else None
+        )
+        funding_source = (
+            funding_need.get("basis") if funding_need is not None else "no funding need"
+        )
+        if requested_amount is None:
             if decision.capital_need is not None:
                 raise ValueError(
                     f"Decision for {finance.contract_id} invented contract capital_need="
-                    f"{decision.capital_need}; Finance requested_amount is missing"
+                    f"{decision.capital_need}; authoritative requested_amount is "
+                    f"missing ({funding_source})"
                 )
             continue
-        if decision.capital_need != finance.requested_amount:
+        if decision.capital_need != requested_amount:
             raise ValueError(
                 f"Decision capital_need for {finance.contract_id} must equal the "
-                f"contract requested_amount {finance.requested_amount}, got "
+                f"authoritative requested_amount {requested_amount} from "
+                f"{funding_source}, got "
                 f"{decision.capital_need}"
             )
 

@@ -689,7 +689,14 @@ function BankPrecheckApprovals({
         apiUrl(`/runs/${row.runId}/approvals/${row.request.approvalId}?approved=${approved}`),
         { method: "POST", headers: API_REQUEST_HEADERS },
       );
-      if (!response.ok) throw new Error(`Approval API returned ${response.status}`);
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => null) as {
+          detail?: { message?: string } | string;
+        } | null;
+        const detail = errorPayload?.detail;
+        const message = typeof detail === "string" ? detail : detail?.message;
+        throw new Error(message || `Approval API returned ${response.status}`);
+      }
       const payload = await response.json();
       const decision = (payload.decision_result?.decisions ?? []).find(
         (item: { contract_id?: string }) => item.contract_id === row.contractId,

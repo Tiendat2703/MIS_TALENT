@@ -36,6 +36,8 @@ from app.service.decision_guard import (
     validate_decision_finance_consistency,
     validate_decision_prechecks,
 )
+from app.service.credit_profile import load_contract_credit_profiles
+from app.service.precheck_approval import ensure_precheck_approval_requests
 from app.service.pipeline_input import load_contract_package, select_pipeline_scope
 from app.tools.FinanceAgent.data_request import apply_form_submission
 from app.tools.FinanceAgent.finance_data import load_all
@@ -266,9 +268,22 @@ async def run_pipeline(
         authoritative_context = await asyncio.to_thread(
             load_pipeline_context, session_id
         )
+        credit_profiles = await asyncio.to_thread(
+            load_contract_credit_profiles,
+            authoritative_context.finance_pack.contract_ids,
+        )
         validate_decision_finance_consistency(
             result.final_output,
             authoritative_context.finance_pack,
+            credit_profiles,
+        )
+        # Register every actionable precheck deterministically. The external bank
+        # call is still blocked until a human approves the exact stored arguments.
+        await ensure_precheck_approval_requests(
+            session_id,
+            result.final_output,
+            authoritative_context.finance_pack,
+            credit_profiles,
         )
         state_before_commit = await get_approval_state(session_id)
         validate_decision_prechecks(result.final_output, state_before_commit)

@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import json
@@ -6,6 +6,12 @@ import logging
 import os
 
 from app.schema.pipeline_input import ContractUploadPackage
+from app.service.approval import ApprovalExecutionError
+from app.service.pipeline_service import (
+    start_pipeline_run, stream_run_events, get_run_result,
+    list_pending_approvals, submit_approval, list_processed_contracts,
+    list_contract_overviews, get_decision_cards,
+)
 
 app = FastAPI(title="MIS Talent — Agent Pipeline API")
 logger = logging.getLogger("uvicorn.error")
@@ -83,4 +89,18 @@ async def approvals(session_id: int):
 
 @app.post("/runs/{session_id}/approvals/{approval_id}")    # founder duyệt
 async def approve(session_id: int, approval_id: str, approved: bool):
-    return await _pipeline_service().submit_approval(session_id, approval_id, approved)
+    try:
+        return await submit_approval(session_id, approval_id, approved)
+    except ApprovalExecutionError as exc:
+        status_code = (
+            422 if exc.execution_error.startswith("ValueError:") else 502
+        )
+        raise HTTPException(
+            status_code=status_code,
+            detail={
+                "code": "BANK_PRECHECK_EXECUTION_FAILED",
+                "contract_id": exc.contract_id,
+                "approval_id": exc.approval_id,
+                "message": exc.execution_error,
+            },
+        ) from exc

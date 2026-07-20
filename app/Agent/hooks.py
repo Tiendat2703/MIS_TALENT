@@ -39,7 +39,7 @@ TOOL_LABELS = {
     "save_risk_pack": "Save Risk Pack to workflow context",
     "prepare_finance_handoff": "Persist Finance Batch Pack",
     "process_risk_context": "Build and persist Risk Batch Pack",
-    "load_decision_context": "Load Finance and Risk Batch Packs",
+    "load_decision_context": "Load Finance, Risk, and Credit Profiles",
     "match_bank_product": "Match bank product candidates",
     "precheck_performance_bond": "Prepare performance-bond precheck",
     "precheck_trade_finance": "Prepare trade-finance precheck",

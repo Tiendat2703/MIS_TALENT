@@ -198,7 +198,9 @@ async def register_approval_request(
             payload = _read_state(run_id)
             for request in payload["approval_requests"]:
                 if request["fingerprint"] == fingerprint:
-                    return dict(request)
+                    result = dict(request)
+                    result["_newly_registered"] = False
+                    return result
 
             request = {
                 "approval_id": str(uuid.uuid4()),
@@ -218,7 +220,9 @@ async def register_approval_request(
             payload["approval_requests"].append(request)
             payload["workflow_status"] = "review"
             _write_state(run_id, payload)
-            return dict(request)
+            result = dict(request)
+            result["_newly_registered"] = True
+            return result
 
 
 async def get_approval_state(run_id: int) -> dict[str, Any]:

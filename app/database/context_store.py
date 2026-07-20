@@ -15,6 +15,11 @@ from app.schema.handoff_packs import (
     RiskBatchPack,
     StrictModel,
 )
+from app.service.credit_profile import (
+    credit_profile_payload,
+    load_contract_credit_profiles,
+    resolve_contract_funding_need,
+)
 
 
 class PipelineContextRecord(StrictModel):
@@ -235,7 +240,12 @@ def save_decision_pack(session_id: int, decision_pack: DecisionBatchOutput) -> N
         )
     from app.service.decision_guard import validate_decision_finance_consistency
 
-    validate_decision_finance_consistency(decision_pack, finance_pack)
+    credit_profiles = load_contract_credit_profiles(finance_pack.contract_ids)
+    validate_decision_finance_consistency(
+        decision_pack,
+        finance_pack,
+        credit_profiles,
+    )
     rows = query_db(
         """
         UPDATE public.context
@@ -253,6 +263,7 @@ def save_decision_pack(session_id: int, decision_pack: DecisionBatchOutput) -> N
 def decision_input_payload(session_id: int) -> dict[str, Any]:
     finance_pack, risk_pack = load_decision_inputs(session_id)
     risk_by_contract = {pack.contract_id: pack for pack in risk_pack.packs}
+    credit_profiles = load_contract_credit_profiles(finance_pack.contract_ids)
     portfolio_finance = deepcopy(finance_pack.portfolio_analysis)
     reconciliation = portfolio_finance.get("bank_reconciliation_summary")
     if isinstance(reconciliation, dict) and "confirmed_cash_total" in reconciliation:
@@ -268,25 +279,15 @@ def decision_input_payload(session_id: int) -> dict[str, Any]:
         # mistaken for the authoritative full contract value.
         payload_details = finance_payload.get("finance_details") or {}
         payload_details.pop("contract_margin", None)
-        funding_need = (
-            {
-                "need_type": pack.funding_need_type,
-                "requested_amount": pack.requested_amount,
-                "tenor": pack.tenor,
-                "basis": "contract.requested_amount",
-                "scope": "contract",
-                "amount_status": (
-                    "PROVIDED"
-                    if pack.requested_amount is not None
-                    else "MISSING"
-                ),
-            }
-            if pack.funding_need_type is not None
-            else None
+        profile = credit_profiles.get(pack.contract_id)
+        funding_need = resolve_contract_funding_need(
+            pack,
+            profile,
         )
         return {
             "finance": finance_payload,
             "risk": risk_by_contract[pack.contract_id].model_dump(mode="json"),
+            "credit_profile": credit_profile_payload(profile),
             "contract_financials": {
                 "contract_value": pack.contract_value,
                 "expected_gross_margin_rate": pack.gross_margin,
@@ -300,6 +301,8 @@ def decision_input_payload(session_id: int) -> dict[str, Any]:
                 "contract_value is the authoritative full contract value",
                 "order_allocation contains order-scoped amounts only",
                 "portfolio_finance metrics apply to the whole company, not this contract",
+                "credit_profile requested_amount has priority for an explicitly referenced contract",
+                "contract funding need is used only when no contract-scoped credit_profile exists",
                 "funding_need.amount_status=MISSING means product type may be matched but bank precheck must not run",
             ],
         }
@@ -314,6 +317,15 @@ def decision_input_payload(session_id: int) -> dict[str, Any]:
             "bank_reconciliation_summary.confirmed_invoice_collections is confirmed "
             "invoice collections rather than the company's available cash balance."
         ),
+        "credit_profile_lookup": {
+            "source_table": "credit_profile",
+            "contract_link": "exact contract id in collateral_or_basis",
+            "matched_contract_ids": sorted(credit_profiles),
+            "fallback": (
+                "Use the contract's own funding need only when no contract-scoped "
+                "credit_profile row exists."
+            ),
+        },
         "cases": [build_case(pack) for pack in finance_pack.packs],
     }
 

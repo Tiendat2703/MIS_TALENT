@@ -97,11 +97,16 @@ async def _run_gated_precheck(
         tool_name,
         arguments,
     )
+    newly_registered = request.pop("_newly_registered", False)
 
     if request["status"] == "executed":
         return dict(request["result"])
 
     if request["status"] != "approved":
+        # A deterministic reconciliation may already have registered and logged
+        # this exact request. Do not emit a duplicate approval event.
+        if not newly_registered:
+            return _pending_response(request)
         await event_bus.emit(run_id, {
             "type": "approval_requested",
             "agent": "Decision_Agent",
@@ -169,10 +174,7 @@ def _performance_bond_call(
     contract_id: str,
     amount: float,
 ) -> dict[str, Any]:
-    if not contract_id or amount <= 0:
-        raise ValueError(
-            "Hồ sơ thiếu thông tin hợp đồng hoặc số tiền bảo lãnh hợp lệ."
-        )
+    _validate_performance_bond_arguments(contract_id, amount)
 
     return _call_api(
         os.getenv("VIETINBANK_API_BASE_URL"),
@@ -184,17 +186,52 @@ def _performance_bond_call(
     )
 
 
-def _trade_finance_call(
+def _validate_performance_bond_arguments(
+    contract_id: str,
+    amount: float,
+) -> None:
+    if not isinstance(contract_id, str) or not contract_id.strip() or amount <= 0:
+        raise ValueError(
+            "Hồ sơ thiếu thông tin hợp đồng hoặc số tiền bảo lãnh hợp lệ."
+        )
+
+
+def _validate_trade_finance_arguments(
     contract_id: str,
     supplier_docs: list[str],
     amount: float,
-) -> dict[str, Any]:
-    if not contract_id or amount <= 0:
+) -> None:
+    if not isinstance(contract_id, str) or not contract_id.strip() or amount <= 0:
         raise ValueError(
             "Hồ sơ thiếu thông tin hợp đồng hoặc số tiền đề nghị hợp lệ."
         )
     if not isinstance(supplier_docs, list):
         raise ValueError("supplier_docs phải là danh sách chứng từ")
+
+
+def _validate_micro_credit_arguments(
+    contract_id: str,
+    amount: float,
+    receivable_list: list[str],
+) -> None:
+    if (
+        not isinstance(contract_id, str)
+        or not contract_id.strip()
+        or amount <= 0
+    ):
+        raise ValueError(
+            "Hồ sơ thiếu hợp đồng hoặc số tiền vay hợp lệ."
+        )
+    if not isinstance(receivable_list, list):
+        raise ValueError("receivable_list phải là danh sách khoản phải thu")
+
+
+def _trade_finance_call(
+    contract_id: str,
+    supplier_docs: list[str],
+    amount: float,
+) -> dict[str, Any]:
+    _validate_trade_finance_arguments(contract_id, supplier_docs, amount)
 
     return _call_api(
         os.getenv("VIETINBANK_API_BASE_URL"),
@@ -209,27 +246,32 @@ def _trade_finance_call(
 
 def _micro_credit_call(
     contract_id: str,
-    customer_type: str,
     amount: float,
     receivable_list: list[str],
 ) -> dict[str, Any]:
-    if not contract_id or not customer_type or amount <= 0:
-        raise ValueError(
-            "Hồ sơ thiếu hợp đồng, loại khách hàng hoặc số tiền vay hợp lệ."
-        )
-    if not isinstance(receivable_list, list):
-        raise ValueError("receivable_list phải là danh sách khoản phải thu")
-
-    return _call_api(
-        os.getenv("COOPBANK_API_BASE_URL"),
-        "/sandbox/v1/micro-credit/precheck",
-        {
-            "contract_id": contract_id,
-            "customer_type": customer_type,
-            "amount": amount,
-            "receivable_list": receivable_list,
-        },
+    _validate_micro_credit_arguments(
+        contract_id,
+        amount,
+        receivable_list,
     )
+
+    # This integration is a local demo only. Keep the response deterministic so
+    # approving a request does not require a separately hosted COOPBANK sandbox.
+    if not receivable_list:
+        score = 50
+        note = "Hồ sơ chưa có danh sách khoản phải thu."
+    elif amount > 300_000_000:
+        score = 65
+        note = "Hồ sơ cần thẩm định thêm vì số tiền vay cao."
+    else:
+        score = 82
+        note = "Hồ sơ đạt điều kiện sơ bộ cho khoản vay vốn lưu động."
+
+    return {
+        "eli": score >= 70,
+        "score": score,
+        "note": note,
+    }
 
 
 @function_tool
@@ -239,6 +281,7 @@ async def precheck_performance_bond(
     amount: float,
 ) -> dict:
     """Gate and run the performance-bond precheck for one contract."""
+    _validate_performance_bond_arguments(contract_id, amount)
     arguments = {
         "contract_id": contract_id,
         "amount": amount,
@@ -260,6 +303,7 @@ async def precheck_trade_finance(
     amount: float,
 ) -> dict:
     """Gate and run the trade-finance precheck for one contract."""
+    _validate_trade_finance_arguments(contract_id, supplier_docs, amount)
     arguments = {
         "contract_id": contract_id,
         "supplier_docs": supplier_docs,
@@ -278,14 +322,19 @@ async def precheck_trade_finance(
 async def precheck_micro_credit(
     context: RunContextWrapper[AppContext],
     contract_id: str,
-    customer_type: str,
     amount: float,
     receivable_list: list[str],
 ) -> dict:
-    """Gate and run the micro-credit precheck for one contract."""
+    """Gate and run the deterministic mock micro-credit precheck."""
+    # Customer type is not part of this mock contract. The supplied receivables
+    # and amount deterministically select the local demo response.
+    _validate_micro_credit_arguments(
+        contract_id,
+        amount,
+        receivable_list,
+    )
     arguments = {
         "contract_id": contract_id,
-        "customer_type": customer_type,
         "amount": amount,
         "receivable_list": receivable_list,
     }

@@ -30,7 +30,7 @@ def main() -> None:
         pass
 
     port = int(os.environ.get("PORT", "8080"))
-    token = os.environ.get("NGROK_AUTHTOKEN", "").strip()
+    token = os.environ.get("NGROK_AUTHTOKEN", "3GlHwchhdvPnWIxNrwqNEOZD8lz_4JHu14hM3J27bi3Ewmv52").strip()
     if not token:
         sys.exit(
             "Thiếu NGROK_AUTHTOKEN.\n"

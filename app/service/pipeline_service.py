@@ -33,6 +33,10 @@ from app.database.context_store import (
     validate_pipeline_schema,
 )
 from app.service.approval import decide_approval, get_pending_approvals
+from app.service.credit_profile import (
+    load_contract_credit_profiles,
+    resolve_contract_funding_need,
+)
 from app.service.finance_handoff import infer_funding_need_type
 
 # Trạng thái snapshot được coi là ĐÃ KẾT THÚC (đóng SSE, task xong).
@@ -245,7 +249,23 @@ def _effective_funding_need_type(finance: dict[str, Any]) -> str | None:
     return raw_type
 
 
-def _summarize_context(row: dict[str, Any]) -> list[dict[str, Any]]:
+def _resolved_summary_funding(
+    finance: dict[str, Any],
+    credit_profiles: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Resolve the same authoritative amount exposed to Decision."""
+    effective_finance = dict(finance)
+    effective_finance["funding_need_type"] = _effective_funding_need_type(finance)
+    return resolve_contract_funding_need(
+        effective_finance,
+        credit_profiles.get(str(finance.get("contract_id"))),
+    )
+
+
+def _summarize_context(
+    row: dict[str, Any],
+    credit_profiles: dict[str, Any],
+) -> list[dict[str, Any]]:
     """Bung một run (raw dict) thành các dòng THEO HỢP ĐỒNG cho dashboard.
 
     Đọc bằng .get() nên dùng chung được cho schema batch mới và pack phẳng cũ; nhờ
@@ -259,6 +279,7 @@ def _summarize_context(row: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for finance in finance_packs:
         contract_id = finance.get("contract_id")
+        funding_need = _resolved_summary_funding(finance, credit_profiles)
         risk = risk_by.get(contract_id)
         decision = decision_by.get(contract_id)
         cash_impact = finance.get("cash_impact") or {}
@@ -276,8 +297,18 @@ def _summarize_context(row: dict[str, Any]) -> list[dict[str, Any]]:
                     "contract_name": finance.get("contract_name"),
                     "start_date": finance.get("start_date"),
                     "end_date": finance.get("end_date"),
-                    "funding_need_type": _effective_funding_need_type(finance),
-                    "requested_amount": finance.get("requested_amount"),
+                    "funding_need_type": (
+                        funding_need.get("need_type") if funding_need else None
+                    ),
+                    "requested_amount": (
+                        funding_need.get("requested_amount") if funding_need else None
+                    ),
+                    "requested_amount_source": (
+                        funding_need.get("source") if funding_need else None
+                    ),
+                    "credit_case_id": (
+                        funding_need.get("credit_case_id") if funding_need else None
+                    ),
                     "contract_value": finance.get("contract_value"),
                     "gross_margin": finance.get("gross_margin"),
                     "confidence_score": finance.get("confidence_score"),
@@ -392,9 +423,19 @@ async def list_processed_contracts(
     """
     rows = await asyncio.to_thread(fetch_context_rows, limit, offset)
     total_runs = await asyncio.to_thread(count_pipeline_contexts)
+    contract_ids = [
+        str(finance["contract_id"])
+        for row in rows
+        for finance in _pack_list(row.get("finance_pack"), "packs")
+        if finance.get("contract_id")
+    ]
+    credit_profiles = await asyncio.to_thread(
+        load_contract_credit_profiles,
+        contract_ids,
+    )
     contracts: list[dict[str, Any]] = []
     for row in rows:
-        contracts.extend(_summarize_context(row))
+        contracts.extend(_summarize_context(row, credit_profiles))
     if latest_only:
         contracts = _latest_per_contract(contracts)
     return {
@@ -419,11 +460,22 @@ async def list_contract_overviews(
     """
     rows = await asyncio.to_thread(fetch_context_rows, limit, offset)
     total_runs = await asyncio.to_thread(count_pipeline_contexts)
+    contract_ids = [
+        str(finance["contract_id"])
+        for row in rows
+        for finance in _pack_list(row.get("finance_pack"), "packs")
+        if finance.get("contract_id")
+    ]
+    credit_profiles = await asyncio.to_thread(
+        load_contract_credit_profiles,
+        contract_ids,
+    )
     contracts: list[dict[str, Any]] = []
     for row in rows:
         decision_by = _by_contract(_pack_list(row.get("decision_pack"), "decisions"))
         for finance in _pack_list(row.get("finance_pack"), "packs"):
             decision = decision_by.get(finance.get("contract_id"))
+            funding_need = _resolved_summary_funding(finance, credit_profiles)
             contracts.append(
                 {
                     "session_id": row["session_id"],
@@ -432,7 +484,17 @@ async def list_contract_overviews(
                     "contract_value": finance.get("contract_value"),  # giá trị hợp đồng
                     "start_date": finance.get("start_date"),          # ngày bắt đầu
                     "end_date": finance.get("end_date"),              # ngày kết thúc
-                    "requested_amount": finance.get("requested_amount"),  # giá trị đề xuất
+                    "requested_amount": (
+                        funding_need.get("requested_amount")
+                        if funding_need
+                        else None
+                    ),  # giá trị đề xuất đã resolve
+                    "requested_amount_source": (
+                        funding_need.get("source") if funding_need else None
+                    ),
+                    "credit_case_id": (
+                        funding_need.get("credit_case_id") if funding_need else None
+                    ),
                     # Giá trị đề xuất cuối theo quyết định (nếu Decision đã chạy).
                     "recommended_capital": (
                         decision.get("capital_need") if decision else None

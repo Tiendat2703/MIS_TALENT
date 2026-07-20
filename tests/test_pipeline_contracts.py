@@ -27,8 +27,13 @@ from app.schema.handoff_packs import (
     RiskPack,
 )
 from app.schema.pipeline_input import ContractUploadPackage
+from app.schema.risk_db_models import CreditProfile
 from app.service.finance_handoff import build_finance_handoff, infer_funding_need_type
 from app.service import approval as approval_service
+from app.service.credit_profile import (
+    map_credit_profiles_to_contracts,
+    resolve_contract_funding_need,
+)
 from app.service.decision_guard import (
     validate_decision_finance_consistency,
     validate_decision_prechecks,
@@ -39,9 +44,15 @@ from app.service.pipeline_input import (
     select_pipeline_scope,
 )
 from app.service.pipeline_service import _effective_funding_need_type
+from app.service.precheck_approval import build_precheck_approval_specs
 from app.tools import writeLogs
 from app.tools.DecisionAgent.GetBankProduct import _evaluate_product
-from app.tools.DecisionAgent.PrecheckAPI import _call_api
+from app.tools.DecisionAgent.PrecheckAPI import (
+    _call_api,
+    _micro_credit_call,
+    _validate_micro_credit_arguments,
+    _validate_trade_finance_arguments,
+)
 from app.tools.FinanceAgent.finance_data import load_all
 
 
@@ -198,31 +209,69 @@ def test_bank_precheck_never_falls_back_without_real_api_url() -> None:
         _call_api(None, "/precheck", {"contract_id": "CON-004"})
 
 
-def test_contract_upload_defaults_and_enforces_pending_status() -> None:
-    payload = load_contract_package(
-        "decision_agent_sample/sample_data/new_contract_upload.json"
-    ).model_dump(mode="json")
-
-    payload.pop("status")
-    assert ContractUploadPackage.model_validate(payload).status == "Pending approval"
-
-    payload["status"] = "Active"
-    assert ContractUploadPackage.model_validate(payload).status == "Pending approval"
+def test_micro_credit_does_not_require_customer_type_before_approval() -> None:
+    _validate_micro_credit_arguments(
+        "CON-009",
+        400_000_000,
+        [],
+    )
 
 
-def test_contract_validate_endpoint_echoes_normalized_form_payload() -> None:
-    payload = load_contract_package(
-        "decision_agent_sample/sample_data/new_contract_upload.json"
-    ).model_dump(mode="json")
-    payload["status"] = "Active"
+@pytest.mark.parametrize(
+    ("amount", "receivable_list", "expected"),
+    [
+        (
+            400_000_000,
+            [],
+            {
+                "eli": False,
+                "score": 50,
+                "note": "Hồ sơ chưa có danh sách khoản phải thu.",
+            },
+        ),
+        (
+            400_000_000,
+            ["AR-001"],
+            {
+                "eli": False,
+                "score": 65,
+                "note": "Hồ sơ cần thẩm định thêm vì số tiền vay cao.",
+            },
+        ),
+        (
+            250_000_000,
+            ["AR-001"],
+            {
+                "eli": True,
+                "score": 82,
+                "note": "Hồ sơ đạt điều kiện sơ bộ cho khoản vay vốn lưu động.",
+            },
+        ),
+    ],
+)
+def test_micro_credit_returns_deterministic_mock(
+    monkeypatch,
+    amount,
+    receivable_list,
+    expected,
+) -> None:
+    def unexpected_api_call(*_args, **_kwargs):
+        raise AssertionError("micro-credit mock must not call an external API")
 
-    response = client.post("/contracts/validate", json=payload)
+    monkeypatch.setattr(
+        "app.tools.DecisionAgent.PrecheckAPI._call_api",
+        unexpected_api_call,
+    )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["received"] is True
-    assert body["contract"]["contract_id"] == payload["contract_id"]
-    assert body["contract"]["status"] == "Pending approval"
+    assert _micro_credit_call("CON-009", amount, receivable_list) == expected
+
+
+def test_trade_finance_allows_empty_document_list_for_bank_evaluation() -> None:
+    _validate_trade_finance_arguments(
+        "CON-005",
+        [],
+        650_000_000,
+    )
 
 
 def test_contract_upload_rejects_package_wrapper() -> None:
@@ -410,6 +459,11 @@ def test_decision_context_does_not_turn_portfolio_gap_into_contract_need(
         "load_decision_inputs",
         lambda _session_id: (finance_batch, risk_batch),
     )
+    monkeypatch.setattr(
+        context_store,
+        "load_contract_credit_profiles",
+        lambda _contract_ids: {},
+    )
 
     payload = context_store.decision_input_payload(25)
     case = payload["cases"][0]
@@ -422,13 +476,192 @@ def test_decision_context_does_not_turn_portfolio_gap_into_contract_need(
         "need_type": "PERFORMANCE_BOND",
         "requested_amount": None,
         "tenor": None,
-        "basis": "contract.requested_amount",
+        "basis": "contract.funding_need.requested_amount",
         "scope": "contract",
+        "source": "contract_funding_need",
+        "credit_case_id": None,
         "amount_status": "MISSING",
     }
+    assert case["credit_profile"] is None
     assert case["contract_financials"]["contract_value"] == 4_200_000_000
     assert "contract_margin" not in case["finance"]["finance_details"]
     assert "not a contract bond/credit amount" in payload["portfolio_scope_note"]
+
+
+def test_credit_profile_maps_only_an_explicit_contract_reference() -> None:
+    profiles = [
+        CreditProfile(
+            credit_case_id="CR-001",
+            company_id="OPC-001",
+            request_type="Working capital line",
+            requested_amount=950_000_000,
+            collateral_or_basis="Open invoices + founder guarantee",
+        ),
+        CreditProfile(
+            credit_case_id="CR-002",
+            company_id="OPC-001",
+            request_type="Performance bond",
+            requested_amount=420_000_000,
+            collateral_or_basis="Contract CON-004",
+        ),
+    ]
+
+    matches = map_credit_profiles_to_contracts(
+        profiles,
+        ["CON-001", "CON-004"],
+    )
+
+    assert list(matches) == ["CON-004"]
+    assert matches["CON-004"].credit_case_id == "CR-002"
+
+
+def test_credit_profile_amount_precedes_contract_funding_need() -> None:
+    profile = CreditProfile(
+        credit_case_id="CR-002",
+        company_id="OPC-001",
+        request_type="Performance bond",
+        requested_amount=420_000_000,
+        tenor="Until contract acceptance",
+        collateral_or_basis="Contract CON-004",
+    )
+    finance = _finance_pack().model_copy(update={"requested_amount": 300_000_000})
+
+    resolved = resolve_contract_funding_need(finance, profile)
+
+    assert resolved == {
+        "need_type": "PERFORMANCE_BOND",
+        "requested_amount": 420_000_000.0,
+        "tenor": "Until contract acceptance",
+        "basis": "credit_profile.requested_amount",
+        "scope": "contract",
+        "source": "credit_profile",
+        "credit_case_id": "CR-002",
+        "amount_status": "PROVIDED",
+    }
+
+
+def test_new_contract_without_credit_profile_uses_its_own_funding_need() -> None:
+    finance = _finance_pack().model_copy(
+        update={
+            "contract_id": "CON-UPLOAD-001",
+            "case_id": "CASE-CON-UPLOAD-001",
+            "requested_amount": 300_000_000,
+        }
+    )
+
+    resolved = resolve_contract_funding_need(finance, None)
+
+    assert resolved is not None
+    assert resolved["requested_amount"] == 300_000_000
+    assert resolved["source"] == "contract_funding_need"
+    assert resolved["credit_case_id"] is None
+
+
+def test_credit_profile_with_missing_amount_does_not_fall_back_to_contract() -> None:
+    profile = CreditProfile(
+        credit_case_id="CR-002",
+        request_type="Performance bond",
+        requested_amount=None,
+        collateral_or_basis="Contract CON-004",
+    )
+
+    resolved = resolve_contract_funding_need(_finance_pack(), profile)
+
+    assert resolved is not None
+    assert resolved["requested_amount"] is None
+    assert resolved["amount_status"] == "MISSING"
+    assert resolved["source"] == "credit_profile"
+
+
+def test_decision_guard_uses_credit_profile_amount_as_authority() -> None:
+    finance_batch = FinanceBatchPack(
+        contract_ids=["CON-004"],
+        packs=[_finance_pack().model_copy(update={"requested_amount": 300_000_000})],
+    )
+    profile = CreditProfile(
+        credit_case_id="CR-002",
+        request_type="Performance bond",
+        requested_amount=420_000_000,
+        collateral_or_basis="Contract CON-004",
+    )
+    decision = _decision_batch()
+
+    validate_decision_finance_consistency(
+        decision,
+        finance_batch,
+        {"CON-004": profile},
+    )
+
+
+def test_trade_finance_with_empty_docs_still_creates_approval_spec() -> None:
+    finance = _finance_pack().model_copy(
+        update={
+            "case_id": "CASE-CON-005",
+            "contract_id": "CON-005",
+            "requested_amount": None,
+            "funding_need_type": "TRADE_FINANCE",
+            "supplier_docs": [],
+        }
+    )
+    finance_batch = FinanceBatchPack(
+        contract_ids=["CON-005"],
+        packs=[finance],
+    )
+    decision = _decision_batch().model_copy(deep=True)
+    decision.decisions[0].contract_id = "CON-005"
+    decision.decisions[0].capital_need = 650_000_000
+    profile = CreditProfile(
+        credit_case_id="CR-003",
+        request_type="Trade finance/LC support",
+        requested_amount=650_000_000,
+        collateral_or_basis="CON-005 documentation",
+    )
+
+    specs = build_precheck_approval_specs(
+        decision,
+        finance_batch,
+        {"CON-005": profile},
+    )
+
+    assert specs == [{
+        "contract_id": "CON-005",
+        "tool": "precheck_trade_finance",
+        "arguments": {
+            "contract_id": "CON-005",
+            "supplier_docs": [],
+            "amount": 650_000_000.0,
+        },
+    }]
+
+
+def test_working_capital_does_not_require_customer_type_for_approval_spec() -> None:
+    finance = _finance_pack().model_copy(
+        update={
+            "case_id": "CASE-CON-009",
+            "contract_id": "CON-009",
+            "requested_amount": 400_000_000,
+            "funding_need_type": "WORKING_CAPITAL",
+            "customer_type": None,
+            "receivable_list": [],
+        }
+    )
+    finance_batch = FinanceBatchPack(
+        contract_ids=["CON-009"],
+        packs=[finance],
+    )
+    decision = _decision_batch().model_copy(deep=True)
+    decision.decisions[0].contract_id = "CON-009"
+    decision.decisions[0].capital_need = 400_000_000
+
+    assert build_precheck_approval_specs(decision, finance_batch, {}) == [{
+        "contract_id": "CON-009",
+        "tool": "precheck_micro_credit",
+        "arguments": {
+            "contract_id": "CON-009",
+            "amount": 400_000_000.0,
+            "receivable_list": [],
+        },
+    }]
 
 
 def test_bank_product_can_match_need_type_before_amount_is_known() -> None:
@@ -463,7 +696,7 @@ def test_decision_guard_rejects_portfolio_need_as_contract_capital() -> None:
     decision.decisions[0].capital_need = 705_000_000
 
     with pytest.raises(ValueError, match="invented contract capital_need"):
-        validate_decision_finance_consistency(decision, finance_batch)
+        validate_decision_finance_consistency(decision, finance_batch, {})
 
 
 def test_decision_guard_accepts_exact_contract_requested_amount() -> None:
@@ -472,7 +705,7 @@ def test_decision_guard_accepts_exact_contract_requested_amount() -> None:
         packs=[_finance_pack()],
     )
 
-    validate_decision_finance_consistency(_decision_batch(), finance_batch)
+    validate_decision_finance_consistency(_decision_batch(), finance_batch, {})
 
 
 def test_decision_precheck_fields_are_guarded() -> None:

@@ -5,8 +5,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from app.api import app
 from app.Agent.bus import event_bus
 from app.database import context_store
 from app.schema.decisionAgent import DecisionBatchOutput, DecisionCardOutput
@@ -41,6 +43,9 @@ from app.tools import writeLogs
 from app.tools.DecisionAgent.GetBankProduct import _evaluate_product
 from app.tools.DecisionAgent.PrecheckAPI import _call_api
 from app.tools.FinanceAgent.finance_data import load_all
+
+
+client = TestClient(app)
 
 
 def _finance_pack() -> FinanceFeaturePack:
@@ -191,6 +196,33 @@ def test_finance_scenario_override_is_disabled_before_database_access(monkeypatc
 def test_bank_precheck_never_falls_back_without_real_api_url() -> None:
     with pytest.raises(RuntimeError, match="Bank API base URL is not configured"):
         _call_api(None, "/precheck", {"contract_id": "CON-004"})
+
+
+def test_contract_upload_defaults_and_enforces_pending_status() -> None:
+    payload = load_contract_package(
+        "decision_agent_sample/sample_data/new_contract_upload.json"
+    ).model_dump(mode="json")
+
+    payload.pop("status")
+    assert ContractUploadPackage.model_validate(payload).status == "Pending approval"
+
+    payload["status"] = "Active"
+    assert ContractUploadPackage.model_validate(payload).status == "Pending approval"
+
+
+def test_contract_validate_endpoint_echoes_normalized_form_payload() -> None:
+    payload = load_contract_package(
+        "decision_agent_sample/sample_data/new_contract_upload.json"
+    ).model_dump(mode="json")
+    payload["status"] = "Active"
+
+    response = client.post("/contracts/validate", json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["received"] is True
+    assert body["contract"]["contract_id"] == payload["contract_id"]
+    assert body["contract"]["status"] == "Pending approval"
 
 
 def test_contract_upload_rejects_package_wrapper() -> None:

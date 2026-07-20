@@ -98,6 +98,40 @@ async def start_pipeline_run(
     return {"session_id": session_id, "status": "running"}
 
 
+async def start_validated_pipeline_run(
+    *,
+    contract: dict[str, Any] | str | None = None,
+    scenario: str | None = None,
+    reference_date: str | date | None = None,
+    submission: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Như start_pipeline_run nhưng chạy pipeline CÓ CỔNG QC (validator sau mỗi stage).
+
+    Dừng tại cổng đầu tiên không PASS; validation event phát trên cùng session_id nên
+    dashboard xem được qua SSE /runs/{id}/events như thường.
+    """
+    from app.Agent.validated_pipeline import run_validated_pipeline
+
+    await asyncio.to_thread(validate_pipeline_schema)
+    session_id = await asyncio.to_thread(allocate_session_id)
+    reference = _coerce_reference_date(reference_date)
+
+    async def _runner() -> Any:
+        return await run_validated_pipeline(
+            contract,
+            session_id=session_id,
+            reference_date=reference,
+            scenario=scenario,
+            submission=submission,
+        )
+
+    task = asyncio.create_task(_runner(), name=f"validated-pipeline-{session_id}")
+    _RUNS[session_id] = task
+    task.add_done_callback(lambda finished: _on_run_done(session_id, finished))
+
+    return {"session_id": session_id, "status": "running", "gated": True}
+
+
 def _on_run_done(session_id: int, task: asyncio.Task) -> None:
     # Đọc exception để không bị "Task exception was never retrieved"; lỗi thật đã được
     # run_pipeline emit thành event run_error cho dashboard.
@@ -558,6 +592,25 @@ async def get_decision_cards(session_id: int) -> dict[str, Any]:
     }
 
 
+async def get_validation_reports(session_id: int) -> dict[str, Any]:
+    """Các ValidationReport của validator cho run này (đọc cột ValidatorLogs)."""
+    from app.tools.writeLogs import read_agent_logs
+
+    logs = await asyncio.to_thread(read_agent_logs, session_id)
+    validator = (logs or {}).get("validatorlogs") if logs else None
+    reports = []
+    if isinstance(validator, dict):
+        payload = validator.get("response", validator)
+        if isinstance(payload, dict):
+            reports = payload.get("reports", [])
+    return {
+        "session_id": session_id,
+        "found": logs is not None,
+        "count": len(reports),
+        "reports": reports,
+    }
+
+
 async def list_pending_approvals(session_id: int) -> list[dict[str, Any]]:
     """Các precheck đang chờ nhà sáng lập xác nhận (điểm cần con người duyệt)."""
     return await get_pending_approvals(session_id)
@@ -584,11 +637,13 @@ __all__ = [
     "get_decision_cards",
     "get_run_result",
     "get_run_snapshot",
+    "get_validation_reports",
     "list_contract_overviews",
     "list_pending_approvals",
     "list_processed_contracts",
     "run_pipeline_and_wait",
     "start_pipeline_run",
+    "start_validated_pipeline_run",
     "stream_dashboard_events",
     "stream_run_events",
     "submit_approval",

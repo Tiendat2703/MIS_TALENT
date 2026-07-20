@@ -282,6 +282,30 @@ def write_logs(
     )
 
 
+def read_agent_logs(id: int | str) -> dict[str, Any] | None:
+    """Đọc lại bốn cột log của một run theo shared id. None nếu chưa có row."""
+    normalized_id = _normalize_id(id)
+    table_name = _get_table_name()
+    statement = sql.SQL(
+        "SELECT {financelogs}, {risklogs}, {decisionlog}, {validatorlogs} "
+        "FROM {table} WHERE id = %s"
+    ).format(
+        table=sql.Identifier(table_name),
+        **{
+            key: sql.Identifier(value)
+            for key, value in DB_LOG_COLUMNS.items()
+        },
+    )
+    rows = query_db(statement, (normalized_id,))
+    if not rows:
+        return None
+    row = rows[0]
+    return {
+        stage: _normalize_log_value(row.get(column))
+        for stage, column in DB_LOG_COLUMNS.items()
+    }
+
+
 def persist_agent_stage_log(
     session_id: int,
     stage: Literal["finance", "risk", "decision", "validator"],
@@ -327,6 +351,7 @@ __all__ = [
     "build_decision_log_payload",
     "fetch_decision_log",
     "persist_agent_stage_log",
+    "read_agent_logs",
     "upsert_agent_logs",
     "upsert_agent_logs_partial",
     "write_logs",

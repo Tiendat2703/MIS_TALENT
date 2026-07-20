@@ -41,7 +41,9 @@ class DecisionCardOutput(StrictModel):
     accept_opportunity: bool
     recommended_option: RecommendedOption
     protective_condition: str = Field(min_length=1)
-    capital_need: float = Field(ge=0)
+    # Null means the contract-specific bond/credit amount was not supplied.
+    # Portfolio liquidity need must never be copied into this field.
+    capital_need: float | None = Field(default=None, ge=0)
     risk_level: RiskLevel
     decision_status: DecisionStatus
     reasons: list[str] = Field(min_length=3, max_length=3)

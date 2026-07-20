@@ -8,7 +8,6 @@ factory without rebuilding the Finance or Risk stages.
 from __future__ import annotations
 
 import asyncio
-import json
 import traceback
 from collections.abc import Sequence
 from pathlib import Path
@@ -214,44 +213,9 @@ async def run_decision_agent(
             )
 
 
-async def _demo() -> None:
-    from decision_agent_sample.sample_data import (
-        get_finance_agent_output,
-        get_mock_contract_ids,
-        get_risk_agent_output,
-    )
-
-    contract_ids = get_mock_contract_ids()
-    cases: list[dict[str, Any]] = []
-    for contract_id in contract_ids:
-        finance = get_finance_agent_output(contract_id)
-        cases.append(
-            {
-                "contract_id": contract_id,
-                "finance": finance,
-                "risk": get_risk_agent_output(contract_id),
-                "funding_need": {
-                    "need_type": finance["funding_need_type"],
-                    "requested_amount": finance["requested_amount"],
-                },
-            }
-        )
-    result = await run_decision_agent(
-        "Evaluate these cases independently:\n"
-        + json.dumps(cases, ensure_ascii=False, indent=2),
-        expected_contract_ids=contract_ids,
-        run_metadata={"mode": "decision_demo", "contract_ids": contract_ids},
-    )
-    print(result.final_output.model_dump_json(indent=2))
-
-
 __all__ = [
     "AGENT_NAME",
     "build_decision_agent",
     "get_decision_agent",
     "run_decision_agent",
 ]
-
-
-if __name__ == "__main__":
-    asyncio.run(_demo())

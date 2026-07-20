@@ -17,33 +17,27 @@ from app.Agent.state_store import (
 )
 
 
-def _response(score: int, note: str) -> dict[str, Any]:
-    return {
-        "eli": score >= 70,
-        "score": score,
-        "note": note,
-    }
-
-
 def _call_api(
     base_url: str | None,
     endpoint: str,
     payload: dict[str, Any],
-    mock_response: dict[str, Any],
 ) -> dict[str, Any]:
-    try:
-        if not base_url:
-            raise ValueError("API base URL is not configured")
-
-        response = requests.post(
-            f"{base_url.rstrip('/')}{endpoint}",
-            json=payload,
-            timeout=5,
+    """Call a real bank endpoint and never synthesize a precheck response."""
+    if not base_url:
+        raise RuntimeError(
+            f"Bank API base URL is not configured for endpoint {endpoint}"
         )
-        response.raise_for_status()
-        return response.json()
-    except (requests.RequestException, ValueError):
-        return mock_response
+
+    response = requests.post(
+        f"{base_url.rstrip('/')}{endpoint}",
+        json=payload,
+        timeout=5,
+    )
+    response.raise_for_status()
+    result = response.json()
+    if not isinstance(result, dict):
+        raise ValueError(f"Invalid response from bank API {endpoint}: expected object")
+    return result
 
 
 def _pending_response(request: dict[str, Any]) -> dict[str, Any]:
@@ -65,7 +59,7 @@ async def _run_gated_precheck(
     contract_id: str,
     tool_name: str,
     arguments: dict[str, Any],
-    execute: Callable[[bool], dict[str, Any]],
+    execute: Callable[[], dict[str, Any]],
 ) -> dict[str, Any]:
     """Gate the external call by exact tool arguments stored for this run."""
     run_id = context.context.run_id
@@ -130,9 +124,7 @@ async def _run_gated_precheck(
         return _pending_response(claimed)
 
     try:
-        state = await get_approval_state(run_id)
-        force_mock = state.get("metadata", {}).get("mode") == "approval_demo"
-        raw_result = await asyncio.to_thread(execute, force_mock)
+        raw_result = await asyncio.to_thread(execute)
 
         score = raw_result.get("score")
         note = raw_result.get("note")
@@ -176,30 +168,19 @@ async def _run_gated_precheck(
 def _performance_bond_call(
     contract_id: str,
     amount: float,
-    *,
-    force_mock: bool,
 ) -> dict[str, Any]:
     if not contract_id or amount <= 0:
-        mock_response = _response(
-            40,
-            "Hồ sơ thiếu thông tin hợp đồng hoặc số tiền bảo lãnh.",
+        raise ValueError(
+            "Hồ sơ thiếu thông tin hợp đồng hoặc số tiền bảo lãnh hợp lệ."
         )
-    elif amount > 1_000_000_000:
-        mock_response = _response(
-            60,
-            "Hồ sơ cần thẩm định thêm vì số tiền bảo lãnh cao.",
-        )
-    else:
-        mock_response = _response(85, "Hồ sơ đầy đủ và đủ điều kiện sơ bộ.")
 
     return _call_api(
-        None if force_mock else os.getenv("VIETINBANK_API_BASE_URL"),
+        os.getenv("VIETINBANK_API_BASE_URL"),
         "/openapi/v1/guarantee/precheck",
         {
             "contract_id": contract_id,
             "amount": amount,
         },
-        mock_response,
     )
 
 
@@ -207,31 +188,22 @@ def _trade_finance_call(
     contract_id: str,
     supplier_docs: list[str],
     amount: float,
-    *,
-    force_mock: bool,
 ) -> dict[str, Any]:
     if not contract_id or amount <= 0:
-        mock_response = _response(
-            40,
-            "Hồ sơ thiếu thông tin hợp đồng hoặc số tiền đề nghị.",
+        raise ValueError(
+            "Hồ sơ thiếu thông tin hợp đồng hoặc số tiền đề nghị hợp lệ."
         )
-    elif len(supplier_docs) < 2:
-        mock_response = _response(55, "Hồ sơ chưa đủ chứng từ nhà cung cấp.")
-    else:
-        mock_response = _response(
-            88,
-            "Hồ sơ đầy đủ và có thể chuyển sang bước thẩm định.",
-        )
+    if not isinstance(supplier_docs, list):
+        raise ValueError("supplier_docs phải là danh sách chứng từ")
 
     return _call_api(
-        None if force_mock else os.getenv("VIETINBANK_API_BASE_URL"),
+        os.getenv("VIETINBANK_API_BASE_URL"),
         "/openapi/v1/trade-finance/precheck",
         {
             "contract_id": contract_id,
             "supplier_docs": supplier_docs,
             "amount": amount,
         },
-        mock_response,
     )
 
 
@@ -240,29 +212,16 @@ def _micro_credit_call(
     customer_type: str,
     amount: float,
     receivable_list: list[str],
-    *,
-    force_mock: bool,
 ) -> dict[str, Any]:
     if not contract_id or not customer_type or amount <= 0:
-        mock_response = _response(
-            40,
-            "Hồ sơ thiếu hợp đồng, loại khách hàng hoặc số tiền vay.",
+        raise ValueError(
+            "Hồ sơ thiếu hợp đồng, loại khách hàng hoặc số tiền vay hợp lệ."
         )
-    elif not receivable_list:
-        mock_response = _response(50, "Hồ sơ chưa có danh sách khoản phải thu.")
-    elif amount > 300_000_000:
-        mock_response = _response(
-            65,
-            "Hồ sơ cần thẩm định thêm vì số tiền vay cao.",
-        )
-    else:
-        mock_response = _response(
-            82,
-            "Hồ sơ đạt điều kiện sơ bộ cho khoản vay vốn lưu động.",
-        )
+    if not isinstance(receivable_list, list):
+        raise ValueError("receivable_list phải là danh sách khoản phải thu")
 
     return _call_api(
-        None if force_mock else os.getenv("COOPBANK_API_BASE_URL"),
+        os.getenv("COOPBANK_API_BASE_URL"),
         "/sandbox/v1/micro-credit/precheck",
         {
             "contract_id": contract_id,
@@ -270,7 +229,6 @@ def _micro_credit_call(
             "amount": amount,
             "receivable_list": receivable_list,
         },
-        mock_response,
     )
 
 
@@ -290,10 +248,7 @@ async def precheck_performance_bond(
         contract_id=contract_id,
         tool_name="precheck_performance_bond",
         arguments=arguments,
-        execute=lambda force_mock: _performance_bond_call(
-            **arguments,
-            force_mock=force_mock,
-        ),
+        execute=lambda: _performance_bond_call(**arguments),
     )
 
 
@@ -315,10 +270,7 @@ async def precheck_trade_finance(
         contract_id=contract_id,
         tool_name="precheck_trade_finance",
         arguments=arguments,
-        execute=lambda force_mock: _trade_finance_call(
-            **arguments,
-            force_mock=force_mock,
-        ),
+        execute=lambda: _trade_finance_call(**arguments),
     )
 
 
@@ -342,10 +294,7 @@ async def precheck_micro_credit(
         contract_id=contract_id,
         tool_name="precheck_micro_credit",
         arguments=arguments,
-        execute=lambda force_mock: _micro_credit_call(
-            **arguments,
-            force_mock=force_mock,
-        ),
+        execute=lambda: _micro_credit_call(**arguments),
     )
 
 

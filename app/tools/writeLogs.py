@@ -289,6 +289,14 @@ def persist_agent_stage_log(
 ) -> dict[str, Any]:
     """Application-owned persistence path; it never depends on an LLM tool call."""
     payload = build_agent_log_payload(session_id, stage, response)
+    if stage == "decision":
+        try:
+            from app.Agent.state_store import read_approval_state_snapshot
+
+            payload["approval_state"] = read_approval_state_snapshot(session_id)
+        except FileNotFoundError:
+            # Standalone/legacy Decision logs may not have application state.
+            pass
     keyword = {
         "finance": "financelogs",
         "risk": "risklogs",
@@ -298,9 +306,26 @@ def persist_agent_stage_log(
     return upsert_agent_logs_partial(session_id, **{keyword: payload})
 
 
+def fetch_decision_log(session_id: int) -> dict[str, Any] | None:
+    """Load the durable Decision log used to recover approval state."""
+    normalized_id = _normalize_id(session_id)
+    statement = sql.SQL(
+        "SELECT {decisionlog} AS decision_log FROM {table} WHERE id = %s"
+    ).format(
+        decisionlog=sql.Identifier(DB_LOG_COLUMNS["decisionlog"]),
+        table=sql.Identifier(_get_table_name()),
+    )
+    rows = query_db(statement, (normalized_id,))
+    if not rows:
+        return None
+    value = _normalize_log_value(rows[0].get("decision_log"))
+    return value if isinstance(value, dict) else None
+
+
 __all__ = [
     "build_agent_log_payload",
     "build_decision_log_payload",
+    "fetch_decision_log",
     "persist_agent_stage_log",
     "upsert_agent_logs",
     "upsert_agent_logs_partial",

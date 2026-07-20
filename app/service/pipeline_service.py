@@ -33,6 +33,7 @@ from app.database.context_store import (
     validate_pipeline_schema,
 )
 from app.service.approval import decide_approval, get_pending_approvals
+from app.service.finance_handoff import infer_funding_need_type
 
 # Trạng thái snapshot được coi là ĐÃ KẾT THÚC (đóng SSE, task xong).
 _TERMINAL_STATUSES = {"done", "completed", "error", "cancelled"}
@@ -57,7 +58,6 @@ def _run_status(session_id: int) -> str:
 async def start_pipeline_run(
     *,
     contract: dict[str, Any] | str | None = None,
-    scenario: str | None = None,
     reference_date: str | date | None = None,
     submission: dict[str, Any] | None = None,
     max_turns: int = 35,
@@ -77,7 +77,6 @@ async def start_pipeline_run(
             contract,
             session_id=session_id,
             reference_date=reference,
-            scenario=scenario,
             submission=submission,
             max_turns=max_turns,
         )
@@ -101,7 +100,6 @@ def _on_run_done(session_id: int, task: asyncio.Task) -> None:
 async def run_pipeline_and_wait(
     *,
     contract: dict[str, Any] | str | None = None,
-    scenario: str | None = None,
     reference_date: str | date | None = None,
     submission: dict[str, Any] | None = None,
     max_turns: int = 35,
@@ -109,7 +107,6 @@ async def run_pipeline_and_wait(
     """Chạy pipeline đồng bộ và trả kết quả cuối (dùng khi API muốn chờ luôn)."""
     started = await start_pipeline_run(
         contract=contract,
-        scenario=scenario,
         reference_date=reference_date,
         submission=submission,
         max_turns=max_turns,
@@ -140,6 +137,8 @@ async def stream_run_events(
     max_seq = 0
     try:
         if include_history:
+            if event_bus.get_snapshot(session_id) is None:
+                event_bus.restore_snapshot(session_id)
             snapshot = event_bus.get_snapshot(session_id)
             for event in (snapshot or {}).get("events", []):
                 seq = int(event.get("seq", 0))
@@ -221,6 +220,31 @@ def _by_contract(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {item["contract_id"]: item for item in items if item.get("contract_id")}
 
 
+def _effective_funding_need_type(finance: dict[str, Any]) -> str | None:
+    """Normalize new packs and legacy packs to the no-default-loan rule."""
+    raw_type = finance.get("funding_need_type")
+    details = finance.get("finance_details") or {}
+    funding_meta = details.get("funding_need") or {}
+    source = funding_meta.get("source")
+
+    if source == "none":
+        return None
+    if source in {"contract", "payment_terms"}:
+        return raw_type
+
+    # Legacy packs did not record provenance and defaulted every unmatched
+    # payment schedule to WORKING_CAPITAL. Remove only that legacy default when
+    # there is neither a requested amount nor an explicit financing phrase.
+    payment_terms = str(details.get("payment_terms") or "")
+    if (
+        raw_type == "WORKING_CAPITAL"
+        and finance.get("requested_amount") is None
+        and infer_funding_need_type(payment_terms) is None
+    ):
+        return None
+    return raw_type
+
+
 def _summarize_context(row: dict[str, Any]) -> list[dict[str, Any]]:
     """Bung một run (raw dict) thành các dòng THEO HỢP ĐỒNG cho dashboard.
 
@@ -238,6 +262,9 @@ def _summarize_context(row: dict[str, Any]) -> list[dict[str, Any]]:
         risk = risk_by.get(contract_id)
         decision = decision_by.get(contract_id)
         cash_impact = finance.get("cash_impact") or {}
+        risk_summary = (risk or {}).get("summary") or {}
+        risk_evaluations = (risk or {}).get("rule_evaluations") or []
+        risk_alerts = (risk or {}).get("alerts") or []
         rows.append(
             {
                 "session_id": session_id,
@@ -249,10 +276,11 @@ def _summarize_context(row: dict[str, Any]) -> list[dict[str, Any]]:
                     "contract_name": finance.get("contract_name"),
                     "start_date": finance.get("start_date"),
                     "end_date": finance.get("end_date"),
-                    "funding_need_type": finance.get("funding_need_type"),
+                    "funding_need_type": _effective_funding_need_type(finance),
                     "requested_amount": finance.get("requested_amount"),
                     "contract_value": finance.get("contract_value"),
                     "gross_margin": finance.get("gross_margin"),
+                    "confidence_score": finance.get("confidence_score"),
                     "status": finance.get("status"),
                     "additional_funding_need": cash_impact.get("additional_funding_need"),
                     "worst_month_after": cash_impact.get("worst_month_after"),
@@ -262,6 +290,50 @@ def _summarize_context(row: dict[str, Any]) -> list[dict[str, Any]]:
                         "overall_risk_level": risk.get("overall_risk_level"),
                         "human_approval_required": risk.get("human_approval_required"),
                         "triggered_rule_ids": risk.get("triggered_rule_ids", []),
+                        "total_rules_triggered": risk_summary.get(
+                            "total_rules_triggered",
+                            len(risk.get("triggered_rule_ids", [])),
+                        ),
+                        "total_alerts_detected": risk_summary.get(
+                            "total_alerts_detected", len(risk.get("alerts", []))
+                        ),
+                        "total_proposed_alerts": risk_summary.get(
+                            "total_proposed_alerts",
+                            len(risk.get("proposed_alerts", [])),
+                        ),
+                        "insufficient_evidence_count": len(
+                            risk.get("insufficient_evidence", [])
+                        ),
+                        "highest_severity": risk_summary.get(
+                            "highest_severity", risk.get("overall_risk_level")
+                        ),
+                        "human_review_required": risk_summary.get(
+                            "human_review_required",
+                            risk.get("human_approval_required", False),
+                        ),
+                        "total_rules_evaluated": len(risk_evaluations),
+                        "not_triggered_count": sum(
+                            item.get("status") == "NOT_TRIGGERED"
+                            for item in risk_evaluations
+                        ),
+                        "insufficient_evidence_rule_count": sum(
+                            item.get("status") == "INSUFFICIENT_EVIDENCE"
+                            for item in risk_evaluations
+                        ),
+                        "triggered_rules": [
+                            {
+                                "rule_id": item.get("rule_id"),
+                                "severity": item.get("severity"),
+                                "required_action": item.get("required_action"),
+                                "message": item.get("message"),
+                            }
+                            for item in risk_evaluations
+                            if item.get("status") == "TRIGGERED"
+                        ],
+                        # Alerts in RiskPack are already masked by Risk Agent.
+                        "alerts": risk_alerts,
+                        "evidence_gaps": risk.get("insufficient_evidence", []),
+                        "required_actions": risk.get("required_actions", []),
                     }
                     if risk
                     else None
@@ -279,6 +351,9 @@ def _summarize_context(row: dict[str, Any]) -> list[dict[str, Any]]:
                             "requires_founder_confirmation"
                         ),
                         "approval_status": decision.get("approval_status"),
+                        "eligible_score": decision.get("eligible_score"),
+                        "precheck_note": decision.get("precheck_note"),
+                        "is_preliminary": decision.get("is_preliminary"),
                     }
                     if decision
                     else None

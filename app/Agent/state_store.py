@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 import fcntl
 import hashlib
 import json
@@ -85,6 +86,51 @@ def _read_state(run_id: int) -> dict[str, Any]:
             f"Run {run_id} uses a legacy approval format; start a new run"
         )
     return payload
+
+
+def read_approval_state_snapshot(run_id: int) -> dict[str, Any]:
+    """Return a detached local snapshot suitable for durable persistence."""
+    return deepcopy(_read_state(run_id))
+
+
+async def restore_approval_state(
+    run_id: int,
+    snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    """Restore a missing local StateStore file from a durable snapshot.
+
+    Existing local state always wins. This keeps recovery idempotent and avoids
+    overwriting a decision that may already be executing in this process.
+    """
+    if not isinstance(snapshot, dict):
+        raise TypeError("Approval state snapshot must be an object")
+
+    restored = deepcopy(snapshot)
+    restored_run_id = int(restored.get("run_id", run_id))
+    if restored_run_id != run_id:
+        raise ValueError(
+            f"Approval state run_id mismatch: expected {run_id}, got {restored_run_id}"
+        )
+
+    restored["version"] = 2
+    restored["run_id"] = run_id
+    restored.setdefault("revision", 0)
+    restored.setdefault("workflow_status", "review")
+    restored.setdefault("context", {})
+    restored.setdefault("user_input", "")
+    restored.setdefault("metadata", {})
+    restored.setdefault("approval_requests", [])
+    restored.setdefault("decision_result", None)
+    restored.setdefault("conversation_items", [])
+    restored.setdefault("created_at", _timestamp())
+    restored.setdefault("updated_at", _timestamp())
+
+    async with _RUN_LOCKS[run_id]:
+        with _process_lock(run_id):
+            if _state_path(run_id).exists():
+                return _read_state(run_id)
+            _write_state(run_id, restored)
+            return deepcopy(restored)
 
 
 def _approval_fingerprint(

@@ -35,7 +35,7 @@ async def contract_overviews(limit: int = 100, offset: int = 0, latest_only: boo
 @app.post("/runs")
 async def create_run(contract: ContractUploadPackage | None = None):
     # Có body -> chạy 1 hợp đồng upload. Bỏ trống -> chạy CẢ LÔ hợp đồng có sẵn
-    # trong nguồn (mock, hoặc DB thật khi FINANCE_USE_MOCK=false) trong 1 run.
+    # trong database thật. Không có fallback mock.
     payload = contract.model_dump(mode="json") if contract is not None else None
     return await start_pipeline_run(contract=payload)
 

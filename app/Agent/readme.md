@@ -1,7 +1,7 @@
 # Integrated agent pipeline
 
-Process every contract from the configured normal source (mock by default, DB
-when `FINANCE_USE_MOCK=false`):
+Process every contract from the configured database source. The runtime has no
+mock-data fallback; a database error stops the run:
 
 ```bash
 python3 -m app.Agent.pipeline

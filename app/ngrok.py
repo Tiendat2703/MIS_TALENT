@@ -29,7 +29,7 @@ def main() -> None:
     except ImportError:
         pass
 
-    port = int(os.environ.get("PORT", "8000"))
+    port = int(os.environ.get("PORT", "8080"))
     token = os.environ.get("NGROK_AUTHTOKEN", "").strip()
     if not token:
         sys.exit(

@@ -6,13 +6,13 @@ import { scaleSeries, smoothPath } from "./chart-utils";
 const WIDTH = 680;
 const HEIGHT = 300;
 const PADDING = { left: 46, right: 18, top: 16, bottom: 34 };
-const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"];
-const gridValues = [4, 6, 8, 10, 12, 14, 16, 18, 20, 22];
+const months = ["T1", "T2", "T3", "T4", "T5", "T6", "T7"];
+const gridValues = [0, 0.5, 1, 1.5, 2, 2.5];
 
 const series = [
-  { id: "inflow", label: "Inflow", values: [15, 12, 18, 14, 20, 18, 22], color: "#34d399" },
-  { id: "outflow", label: "Outflow", values: [12, 10, 13, 11, 15, 14, 16], color: "#a1a1aa" },
-  { id: "net-cash", label: "Net cash", values: [5, 4, 6, 5, 8, 7, 9], color: "var(--fin-net-cash)" },
+  { id: "inflow", label: "Tiền vào", values: [1.35, 1.12, 1.85, 1.42, 2.06, 1.88, 2.24], color: "#34d399" },
+  { id: "outflow", label: "Tiền ra", values: [1.1, 1.04, 1.38, 1.19, 1.62, 1.57, 1.73], color: "#a1a1aa" },
+  { id: "net-cash", label: "Dòng tiền thuần", values: [0.25, 0.08, 0.47, 0.23, 0.44, 0.31, 0.51], color: "var(--fin-net-cash)" },
 ] as const;
 
 interface HoveredPoint {
@@ -38,7 +38,7 @@ export function CashFlowChart() {
         ))}
       </div>
       
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="h-auto w-full" role="img" aria-label="Cash flow from January to July">
+      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="h-auto w-full" role="img" aria-label="Dòng tiền doanh nghiệp từ tháng một đến tháng bảy">
         <defs>
           {series.map((item) => (
             <linearGradient key={item.id} id={`${item.id}-area`} x1="0" y1="0" x2="0" y2="1">
@@ -49,7 +49,7 @@ export function CashFlowChart() {
         </defs>
 
         {gridValues.map((value) => {
-          const y = PADDING.top + ((22 - value) / 18) * (HEIGHT - PADDING.top - PADDING.bottom);
+          const y = PADDING.top + ((2.5 - value) / 2.5) * (HEIGHT - PADDING.top - PADDING.bottom);
           return (
             <g key={value}>
               <line x1={PADDING.left} x2={WIDTH - PADDING.right} y1={y} y2={y} stroke="rgba(255,255,255,.07)" />
@@ -64,7 +64,7 @@ export function CashFlowChart() {
         })}
 
         {series.map((item) => {
-          const points = scaleSeries(item.values, WIDTH, HEIGHT, PADDING, 4, 22);
+          const points = scaleSeries(item.values, WIDTH, HEIGHT, PADDING, 0, 2.5);
           const path = smoothPath(points);
           const area = `${path} L ${points.at(-1)?.x} ${plotBottom} L ${points[0].x} ${plotBottom} Z`;
           return (
@@ -113,7 +113,7 @@ export function CashFlowChart() {
           <div className="flex items-center gap-1.5 whitespace-nowrap">
             <span className="size-1.5 rounded-full" style={{ backgroundColor: hoveredPoint.color }} />
             <span>{hoveredPoint.label}:</span>
-            <span className="font-mono text-emerald-300 font-bold">${hoveredPoint.value}M</span>
+            <span className="font-mono font-bold text-emerald-300">{hoveredPoint.value.toLocaleString("vi-VN")} tỷ ₫</span>
           </div>
         </div>
       )}

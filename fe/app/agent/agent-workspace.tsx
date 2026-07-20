@@ -55,7 +55,10 @@ type ActivityItem = {
   events: PipelineEvent[];
 };
 
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://0.0.0.0:8080").replace(/\/+$/, "");
+const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_URL ?? "https://cc10-113-23-125-3.ngrok-free.app"
+).replace(/\/+$/, "");
+const ACTIVE_RUN_STORAGE_KEY = "mis-agent-active-run-id";
 const AGENT_IDS: AgentId[] = ["Finance", "Risk", "Decision"];
 
 const agents = {
@@ -475,6 +478,13 @@ export function AgentWorkspace() {
   const eventSourceRef = useRef<EventSource | null>(null);
   const startRequestRef = useRef<AbortController | null>(null);
 
+  useEffect(() => {
+    const storedRunId = window.localStorage.getItem(ACTIVE_RUN_STORAGE_KEY);
+    if (!storedRunId || !/^\d+$/.test(storedRunId)) return;
+    const restoreTimer = window.setTimeout(() => setSessionId(Number(storedRunId)), 0);
+    return () => window.clearTimeout(restoreTimer);
+  }, []);
+
   const activityItems = useMemo(() => buildActivityItems(activity), [activity]);
   const filteredItems = useMemo(
     () => activityItems.filter((item) => logFilter === "All" || item.agentId === logFilter),
@@ -581,11 +591,15 @@ export function AgentWorkspace() {
     setSelected("Finance");
     setLogFilter("All");
     setSessionId(null);
+    window.localStorage.removeItem(ACTIVE_RUN_STORAGE_KEY);
 
     try {
       const response = await fetch(`${API_BASE_URL}/runs`, {
         method: "POST",
-        headers: { Accept: "application/json" },
+        headers: {
+          Accept: "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
         signal: controller.signal,
       });
       if (!response.ok) throw new Error(`API returned ${response.status} ${response.statusText}`);
@@ -593,6 +607,7 @@ export function AgentWorkspace() {
       const payload = await response.json() as { session_id?: number };
       if (typeof payload.session_id !== "number") throw new Error("API response did not include a valid session_id.");
       if (controller.signal.aborted) return;
+      window.localStorage.setItem(ACTIVE_RUN_STORAGE_KEY, String(payload.session_id));
       setSessionId(payload.session_id);
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -606,7 +621,10 @@ export function AgentWorkspace() {
   useEffect(() => {
     if (sessionId === null) return;
 
-    const source = new EventSource(`${API_BASE_URL}/runs/${sessionId}/events`);
+    // Route SSE through Next.js so the server can add the ngrok bypass header.
+    // Native EventSource cannot attach custom request headers and otherwise gets
+    // the ERR_NGROK_6024 browser-warning response instead of an event stream.
+    const source = new EventSource(`/api/runs/${sessionId}/events`);
     eventSourceRef.current = source;
 
     source.onopen = () => {

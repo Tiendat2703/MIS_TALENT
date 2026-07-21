@@ -335,3 +335,45 @@ html.light svg circle[fill="#0f1210"] {
     animation-timing-function: linear;
     animation-iteration-count: infinite;
 }
+
+/* Dashboard data is dense, so its smallest type steps are raised without
+   changing the spacing or typography of the contract form and agent monitor. */
+.dashboard-readable-type .text-\[9px\] {
+  font-size: 0.6875rem;
+  line-height: 1rem;
+}
+
+.dashboard-readable-type .text-\[10px\] {
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.dashboard-readable-type .text-\[11px\] {
+  font-size: 0.8125rem;
+  line-height: 1.125rem;
+}
+
+.dashboard-readable-type .text-xs {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.dashboard-readable-type .text-sm {
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+
+.dashboard-readable-type .text-base {
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+}
+
+.dashboard-readable-type .text-lg {
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+}
+
+.dashboard-readable-type .text-xl {
+  font-size: 1.5rem;
+  line-height: 2rem;
+}

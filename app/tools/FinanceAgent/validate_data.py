@@ -13,11 +13,6 @@ from app.tools.FinanceAgent.util import to_float
 
 
 UPLOAD_FIELD_REQUIREMENTS = {
-    "contract_id": {
-        "label": "Mã hợp đồng",
-        "data_type": "text",
-        "reason": "Cần bổ sung trường Mã hợp đồng trong payload.",
-    },
     "customer_id": {
         "label": "Mã khách hàng",
         "data_type": "text",
@@ -43,30 +38,10 @@ UPLOAD_FIELD_REQUIREMENTS = {
         "data_type": "number",
         "reason": "Cần bổ sung trường Giá trị hợp đồng trong payload.",
     },
-    "gross_margin": {
-        "label": "Biên lợi nhuận gộp",
-        "data_type": "number",
-        "reason": "Cần bổ sung trường Biên lợi nhuận gộp trong payload.",
-    },
     "payment_terms": {
         "label": "Điều khoản thanh toán",
         "data_type": "text",
         "reason": "Cần bổ sung trường Điều khoản thanh toán trong payload.",
-    },
-    "requested_amount": {
-        "label": "Số tiền đề nghị",
-        "data_type": "number",
-        "reason": "Cần bổ sung trường Số tiền đề nghị trong payload.",
-    },
-    "funding_need_type": {
-        "label": "Loại nhu cầu vốn",
-        "data_type": "text",
-        "reason": "Cần bổ sung trường Loại nhu cầu vốn trong payload.",
-    },
-    "tenor": {
-        "label": "Thời hạn tài trợ",
-        "data_type": "text",
-        "reason": "Cần bổ sung trường Thời hạn tài trợ trong payload.",
     },
 }
 

@@ -17,14 +17,11 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-export const NEW_CONTRACT_STATUS = "Pending approval" as const;
-
 export type ContractFormData = {
   contract_id: string | null;
   customer_id: string | null;
   start_date: string | null;
   end_date: string | null;
-  status: typeof NEW_CONTRACT_STATUS;
   description: string | null;
   contract_value: number | null;
   gross_margin: number | null;
@@ -89,6 +86,9 @@ type FieldErrors = Partial<Record<keyof ContractFormState, string>>;
 
 export type ContractFormProps = {
   initialValues?: Partial<ContractFormData>;
+  contractIdPreviewStatus?: "loading" | "ready" | "error";
+  contractIdPreviewError?: string;
+  onRetryContractIdPreview?: () => void;
   onSubmit?: (
     values: ContractFormData,
   ) => void | FinancePreflightResponse | Promise<void | FinancePreflightResponse>;
@@ -163,9 +163,12 @@ function optionalNumber(value: string): number | null {
   return value.trim() ? Number(value) : null;
 }
 
-function buildContractPayload(values: ContractFormState): ContractFormData {
+function buildContractPayload(
+  values: ContractFormState,
+  contractIdPreview?: string | null,
+): ContractFormData {
   return {
-    contract_id: optionalText(values.contract_id),
+    contract_id: contractIdPreview ?? optionalText(values.contract_id),
     customer_id: optionalText(values.customer_id),
     start_date: optionalText(values.start_date),
     end_date: optionalText(values.end_date),
@@ -176,7 +179,6 @@ function buildContractPayload(values: ContractFormState): ContractFormData {
     requested_amount: null,
     funding_need_type: null,
     tenor: null,
-    status: NEW_CONTRACT_STATUS,
   };
 }
 
@@ -219,6 +221,9 @@ function SectionHeading({
 
 export function ContractForm({
   initialValues,
+  contractIdPreviewStatus = "ready",
+  contractIdPreviewError = "",
+  onRetryContractIdPreview,
   onSubmit,
   className,
   submitLabel = "Kiểm tra và gửi thẩm định",
@@ -262,7 +267,7 @@ export function ContractForm({
       return;
     }
 
-    const payload = buildContractPayload(values);
+    const payload = buildContractPayload(values, initialValues?.contract_id);
 
     try {
       setSubmitState("submitting");
@@ -372,16 +377,47 @@ export function ContractForm({
                 <input
                   id="contract_id"
                   name="contract_id"
-                  value={values.contract_id}
+                  value={initialValues?.contract_id ?? values.contract_id}
                   className={cn(inputClassName, "cursor-not-allowed pl-10 text-[var(--fin-muted)]")}
-                  placeholder="Đang cấp mã..."
+                  placeholder={
+                    contractIdPreviewStatus === "error"
+                      ? "Sẽ được cấp khi gửi"
+                      : "Đang cấp mã dự kiến..."
+                  }
                   autoComplete="off"
                   readOnly
                   aria-readonly="true"
                   aria-invalid={Boolean(errors.contract_id)}
-                  aria-describedby={describedBy("contract_id")}
+                  aria-describedby={describedBy("contract_id", "contract-id-preview-hint")}
                 />
               </div>
+              <span
+                id="contract-id-preview-hint"
+                className={cn(
+                  "mt-1.5 block text-sm font-normal",
+                  contractIdPreviewStatus === "error"
+                    ? "text-amber-300"
+                    : "text-[var(--fin-muted)]",
+                )}
+              >
+                {contractIdPreviewStatus === "loading" && "Đang lấy mã hợp đồng dự kiến..."}
+                {contractIdPreviewStatus === "ready" && "Backend sẽ cấp lại mã chính thức khi lưu."}
+                {contractIdPreviewStatus === "error" && (
+                  <>
+                    Không lấy được mã dự kiến. Backend sẽ cấp mã chính thức khi gửi.
+                    {onRetryContractIdPreview && (
+                      <button
+                        type="button"
+                        onClick={onRetryContractIdPreview}
+                        className="ml-2 font-semibold text-amber-200 underline decoration-amber-300/50 underline-offset-2 transition hover:text-amber-100"
+                        title={contractIdPreviewError || undefined}
+                      >
+                        Thử lại
+                      </button>
+                    )}
+                  </>
+                )}
+              </span>
               <FieldError id="contract_id-error" message={errors.contract_id} />
             </label>
 

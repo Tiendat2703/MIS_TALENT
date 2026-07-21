@@ -97,35 +97,17 @@ export function ContractFormCheck() {
     return result;
   };
 
-  if (previewError) {
-    return (
-      <section className="mx-auto max-w-5xl rounded-xl border border-red-400/25 bg-red-400/8 p-5 text-red-200">
-        <p>{previewError}</p>
-        <button
-          type="button"
-          onClick={() => {
-            setContractIdPreview(null);
-            setPreviewAttempt((current) => current + 1);
-          }}
-          className="mt-4 rounded-lg border border-red-300/30 px-4 py-2 text-sm font-semibold transition hover:bg-red-300/10"
-        >
-          Thử tải lại
-        </button>
-      </section>
-    );
-  }
-
-  if (!contractIdPreview) {
-    return (
-      <div className="mx-auto flex max-w-5xl items-center justify-center py-20 text-sm text-[var(--fin-muted)]">
-        Đang cấp mã hợp đồng dự kiến...
-      </div>
-    );
-  }
-
   return (
     <ContractForm
       initialValues={{ contract_id: contractIdPreview }}
+      contractIdPreviewStatus={
+        previewError ? "error" : contractIdPreview ? "ready" : "loading"
+      }
+      contractIdPreviewError={previewError}
+      onRetryContractIdPreview={() => {
+        setContractIdPreview(null);
+        setPreviewAttempt((current) => current + 1);
+      }}
       onSubmit={sendContract}
     />
   );

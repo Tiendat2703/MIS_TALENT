@@ -130,9 +130,32 @@ class FinanceSynthesis(StrictModel):
 
 
 class FinancePreflightSynthesis(StrictModel):
-    """Narrative-only output from the isolated Finance preflight agent."""
+    """Bounded semantic mapping produced by the isolated preflight agent.
+
+    The model may select catalog identifiers and explain the match, but it never
+    supplies a margin number.  The application resolves every number from the
+    database after validating the returned identifiers.
+    """
 
     summary: str
+    primary_service_id: str | None = None
+    alternative_service_ids: list[str] = Field(default_factory=list)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    reasoning: str | None = None
+
+
+class FinanceServiceMatch(StrictModel):
+    service_id: str
+    service_name: str
+    target_margin: float = Field(ge=0, le=1)
+
+
+class GrossMarginRecommendation(StrictModel):
+    primary_service: FinanceServiceMatch
+    alternative_services: list[FinanceServiceMatch] = Field(default_factory=list)
+    recommended_gross_margin: float = Field(ge=0, le=1)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    reasoning: str
 
 
 class FinancePreflightMissingField(StrictModel):
@@ -151,11 +174,13 @@ class FinancePreflightDataIssue(StrictModel):
 
 
 class FinancePreflightResult(StrictModel):
-    status: Literal["RUNNING", "AWAITING_INPUT"]
+    status: Literal["RUNNING", "AWAITING_INPUT", "AWAITING_CONFIRMATION"]
     can_start_pipeline: bool
     session_id: int | None = None
+    contract_id: str | None = None
     missing_fields: list[FinancePreflightMissingField] = Field(default_factory=list)
     data_issues: list[FinancePreflightDataIssue] = Field(default_factory=list)
+    gross_margin_recommendation: GrossMarginRecommendation | None = None
     summary: str
 
 
@@ -182,7 +207,9 @@ __all__ = [
     "FinancePreflightMissingField",
     "FinancePreflightResult",
     "FinancePreflightSynthesis",
+    "FinanceServiceMatch",
     "FinanceSynthesis",
+    "GrossMarginRecommendation",
     "InvoiceClassification",
     "LiquidityBrief",
     "LiquidityMonth",

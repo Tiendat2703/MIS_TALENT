@@ -1,8 +1,8 @@
 import asyncio
 from copy import deepcopy
-import fcntl
 import hashlib
 import json
+import os
 import uuid
 from collections import defaultdict
 from contextlib import contextmanager
@@ -15,6 +15,11 @@ from typing import Any
 from pydantic import BaseModel
 
 from app.Agent.hooks import AppContext
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 
 PENDING_STATE_DIR = (
@@ -50,11 +55,23 @@ def _process_lock(run_id: int):
     PENDING_STATE_DIR.mkdir(parents=True, exist_ok=True)
     lock_path = PENDING_STATE_DIR / f".{run_id}.lock"
     with lock_path.open("a+", encoding="utf-8") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        if os.name == "nt":
+            lock_file.seek(0, 2)
+            if lock_file.tell() == 0:
+                lock_file.write("\0")
+                lock_file.flush()
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         try:
             yield
         finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            if os.name == "nt":
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def _write_state(run_id: int, payload: dict[str, Any]) -> None:

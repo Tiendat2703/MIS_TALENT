@@ -10,6 +10,14 @@ from pydantic import Field, field_validator, model_validator
 from app.schema.handoff_packs import StrictModel
 
 
+PaymentTerms = Literal[
+    "Monthly payment",
+    "Milestone payment",
+    "Performance bond required",
+    "Possible LC/trade finance",
+]
+
+
 class ContractUploadPackage(StrictModel):
     """One contract draft merged run-locally with the normal portfolio data.
 
@@ -26,8 +34,8 @@ class ContractUploadPackage(StrictModel):
     status: Literal["Pending approval"] = "Pending approval"
     description: str | None = Field(default=None, min_length=1)
     contract_value: float | None = Field(default=None, gt=0)
-    gross_margin: float | None = Field(default=None, ge=-1, le=1)
-    payment_terms: str | None = Field(default=None, min_length=1)
+    gross_margin: float | None = Field(default=None, ge=0, le=1)
+    payment_terms: PaymentTerms | None = None
     requested_amount: float | None = Field(default=None, gt=0)
     funding_need_type: Literal[
         "PERFORMANCE_BOND",
@@ -54,4 +62,4 @@ class ContractUploadPackage(StrictModel):
         return self
 
 
-__all__ = ["ContractUploadPackage"]
+__all__ = ["ContractUploadPackage", "PaymentTerms"]

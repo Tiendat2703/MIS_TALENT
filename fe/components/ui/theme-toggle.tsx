@@ -1,30 +1,35 @@
 "use client";
 
 import { Moon, Sun } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 type Theme = "light" | "dark";
 
-export function ThemeToggle() {
-  const [mounted, setMounted] = useState(false);
-  const [theme, setTheme] = useState<Theme>("dark");
+function getThemeSnapshot(): Theme {
+  return document.documentElement.classList.contains("light") ? "light" : "dark";
+}
 
-  useEffect(() => {
-    setMounted(true);
-    const isLight = document.documentElement.classList.contains("light");
-    setTheme(isLight ? "light" : "dark");
-  }, []);
+function subscribeToTheme(onStoreChange: () => void) {
+  const observer = new MutationObserver(onStoreChange);
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["class"],
+  });
+  return () => observer.disconnect();
+}
+
+export function ThemeToggle() {
+  const theme = useSyncExternalStore(
+    subscribeToTheme,
+    getThemeSnapshot,
+    () => "dark",
+  );
 
   function toggleTheme() {
     const nextTheme: Theme = theme === "dark" ? "light" : "dark";
     document.documentElement.classList.remove("light", "dark");
     document.documentElement.classList.add(nextTheme);
     localStorage.setItem("finwise-theme", nextTheme);
-    setTheme(nextTheme);
-  }
-
-  if (!mounted) {
-    return <div className="size-8 shrink-0" />;
   }
 
   const isDark = theme === "dark";

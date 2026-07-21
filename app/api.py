@@ -5,6 +5,7 @@ import json
 import logging
 import os
 
+from app.schema.financeAgent import FinancePreflightResult
 from app.schema.pipeline_input import ContractUploadPackage
 from app.service.approval import ApprovalExecutionError
 from app.service.pipeline_service import (
@@ -22,6 +23,19 @@ def _pipeline_service():
     from app.service import pipeline_service
 
     return pipeline_service
+
+
+def _finance_preflight_service():
+    """Load the isolated Finance gate only for uploaded-contract requests."""
+    from app.service import finance_preflight_service
+
+    return finance_preflight_service
+
+
+async def _preflight_and_start(
+    contract: ContractUploadPackage,
+) -> FinancePreflightResult:
+    return await _finance_preflight_service().preflight_and_start_pipeline(contract)
 
 # Cho phép FE (React) gọi API + SSE từ origin khác. Dev: mặc định cho tất cả;
 # production đặt CORS_ORIGINS="https://your-fe.com,https://..." trong .env.
@@ -61,12 +75,22 @@ async def validate_contract(contract: ContractUploadPackage):
         "contract": payload,
     }
 
+
+@app.post("/finance/preflight", response_model=FinancePreflightResult)
+async def finance_preflight(
+    contract: ContractUploadPackage,
+) -> FinancePreflightResult:
+    """Check Finance readiness and start the full pipeline only when it is clean."""
+    return await _preflight_and_start(contract)
+
+
 @app.post("/runs")
 async def create_run(contract: ContractUploadPackage | None = None):
     # Có body -> chạy 1 hợp đồng upload. Bỏ trống -> chạy CẢ LÔ hợp đồng có sẵn
     # trong database thật. Không có fallback mock.
-    payload = contract.model_dump(mode="json") if contract is not None else None
-    return await _pipeline_service().start_pipeline_run(contract=payload)
+    if contract is not None:
+        return await _preflight_and_start(contract)
+    return await _pipeline_service().start_pipeline_run(contract=None)
 
 @app.post("/runs/validated")                               # chạy pipeline CÓ CỔNG QC
 async def create_validated_run(contract: ContractUploadPackage | None = None):

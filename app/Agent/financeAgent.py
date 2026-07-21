@@ -25,7 +25,11 @@ from typing import Any
 
 from app.Agent.bus import event_bus
 from app.Agent.prompt_loader import load_prompt
-from app.schema.financeAgent import FinanceAnalysisPack, FinanceSynthesis
+from app.schema.financeAgent import (
+    FinanceAnalysisPack,
+    FinancePreflightSynthesis,
+    FinanceSynthesis,
+)
 from app.tools.FinanceAgent.data_request import apply_form_submission, build_data_request_form
 from app.tools.FinanceAgent.finance_data import load_all
 from app.tools.FinanceAgent.invoices import classify_invoices
@@ -37,6 +41,7 @@ from app.tools.FinanceAgent.util import money, parse_date
 from app.tools.FinanceAgent.validate_data import validate_finance_data
 
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "skills" / "financeAgent.md"
+PREFLIGHT_PROMPT_PATH = Path(__file__).resolve().parents[1] / "skills" / "financePreflight.md"
 
 INPUT_TABLES = ["04_CONTRACTS", "06_ORDERS", "07_INVOICES", "08_BANK_TXN", "09_CASHFLOW",
                 "02_OPC_PROFILE", "03_CUSTOMERS", "05_PRODUCTS"]
@@ -48,9 +53,17 @@ _ANALYSIS_REQUEST = (
     "hoàn toàn trên số các tool trả về. Không đánh giá rủi ro, không kết luận."
 )
 
+_PREFLIGHT_REQUEST = (
+    "Chỉ kiểm tra payload upload có đầy đủ 11 trường đầu vào hay chưa. Gọi "
+    "load_and_validate trước, sau đó gọi missing_data. Chỉ liệt kê field còn "
+    "thiếu; không nhận xét database, không suy luận, không phân tích và không "
+    "handoff."
+)
+
 
 # Agent (LLM + tools) tạo trễ để module import được cả khi chưa cài `agents`.
 _AGENT = None
+_PREFLIGHT_AGENT = None
 
 
 def build_finance_agent(
@@ -90,11 +103,63 @@ def build_finance_agent(
     )
 
 
+def build_finance_preflight_agent():
+    """Build an isolated Finance Agent with no persistence or handoff surface."""
+    from agents import Agent, ModelSettings, OpenAIChatCompletionsModel
+    from app.Agent.config import OPENAI_MODEL, get_openai_client
+    from app.tools.FinanceAgent.tools import load_and_validate, missing_data
+
+    return Agent(
+        name="Finance_Agent_Preflight",
+        model=OpenAIChatCompletionsModel(
+            model=OPENAI_MODEL,
+            openai_client=get_openai_client(),
+        ),
+        instructions=load_prompt(PREFLIGHT_PROMPT_PATH),
+        output_type=FinancePreflightSynthesis,
+        tools=[load_and_validate, missing_data],
+        model_settings=ModelSettings(parallel_tool_calls=False),
+    )
+
+
 def _get_agent():
     global _AGENT
     if _AGENT is None:
         _AGENT = build_finance_agent()
     return _AGENT
+
+
+def _get_preflight_agent():
+    global _PREFLIGHT_AGENT
+    if _PREFLIGHT_AGENT is None:
+        _PREFLIGHT_AGENT = build_finance_preflight_agent()
+    return _PREFLIGHT_AGENT
+
+
+async def run_finance_preflight_agent(context) -> tuple[FinancePreflightSynthesis | None, str]:
+    """Run Finance in preflight mode, falling back to deterministic service rules."""
+    skip = os.getenv("FINANCE_SKIP_LLM", "false").strip().lower() == "true"
+    if skip:
+        return None, "deterministic_fallback"
+
+    try:
+        from agents import Runner
+
+        result = await Runner.run(
+            _get_preflight_agent(),
+            input=_PREFLIGHT_REQUEST,
+            context=context,
+            max_turns=6,
+        )
+        if not isinstance(result.final_output, FinancePreflightSynthesis):
+            raise TypeError("Finance preflight returned an unexpected output type")
+        return result.final_output, "agentic"
+    except Exception as exc:
+        print(
+            f"[finance-preflight] LLM unavailable ({type(exc).__name__}: {exc}); "
+            "using deterministic validation"
+        )
+        return None, "deterministic_fallback"
 
 
 # ---------- helpers ----------
@@ -434,5 +499,7 @@ if __name__ == "__main__":
 __all__ = [
     "assemble_finance_analysis",
     "build_finance_agent",
+    "build_finance_preflight_agent",
     "run_finance_agent",
+    "run_finance_preflight_agent",
 ]

@@ -17,44 +17,68 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import contractPayloadTemplate from "./contract-payload.json";
-
 export const NEW_CONTRACT_STATUS = "Pending approval" as const;
 
 export type ContractFormData = {
+  contract_id: string | null;
+  customer_id: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  status: typeof NEW_CONTRACT_STATUS;
+  description: string | null;
+  contract_value: number | null;
+  gross_margin: number | null;
+  payment_terms: string | null;
+  requested_amount: number | null;
+  funding_need_type: string | null;
+  tenor: string | null;
+};
+
+export type FinancePreflightMissingField = {
+  field: string;
+  label: string;
+  reason: string;
+  data_type: "text" | "number" | "date";
+};
+
+export type FinancePreflightDataIssue = {
+  table: string;
+  record: string;
+  reason: string;
+  severity: string;
+  kind: string;
+};
+
+export type FinancePreflightResponse = {
+  status: "RUNNING" | "AWAITING_INPUT";
+  can_start_pipeline: boolean;
+  session_id: number | null;
+  missing_fields: FinancePreflightMissingField[];
+  data_issues: FinancePreflightDataIssue[];
+  summary: string;
+};
+
+type ContractFormState = {
   contract_id: string;
   customer_id: string;
   start_date: string;
   end_date: string;
-  status: typeof NEW_CONTRACT_STATUS;
   description: string;
-  contract_value: number;
-  gross_margin: number;
-  payment_terms: string;
-  requested_amount: number;
-  funding_need_type: string;
-  tenor: string;
-};
-
-const contractPayloadBase: ContractFormData = {
-  ...contractPayloadTemplate,
-  status: NEW_CONTRACT_STATUS,
-};
-
-type ContractFormState = Omit<
-  ContractFormData,
-  "status" | "contract_value" | "gross_margin" | "requested_amount"
-> & {
   contract_value: string;
   gross_margin: string;
+  payment_terms: string;
   requested_amount: string;
+  funding_need_type: string;
+  tenor: string;
 };
 
 type FieldErrors = Partial<Record<keyof ContractFormState, string>>;
 
 export type ContractFormProps = {
   initialValues?: Partial<ContractFormData>;
-  onSubmit?: (values: ContractFormData) => void | Promise<void>;
+  onSubmit?: (
+    values: ContractFormData,
+  ) => void | FinancePreflightResponse | Promise<void | FinancePreflightResponse>;
   className?: string;
   submitLabel?: string;
   disabled?: boolean;
@@ -80,12 +104,12 @@ function toFormState(values?: Partial<ContractFormData>): ContractFormState {
     end_date: values?.end_date ?? "",
     description: values?.description ?? "",
     contract_value:
-      values?.contract_value === undefined ? "" : String(values.contract_value),
+      values?.contract_value == null ? "" : String(values.contract_value),
     gross_margin:
-      values?.gross_margin === undefined ? "" : String(values.gross_margin * 100),
+      values?.gross_margin == null ? "" : String(values.gross_margin * 100),
     payment_terms: values?.payment_terms ?? "",
     requested_amount:
-      values?.requested_amount === undefined ? "" : String(values.requested_amount),
+      values?.requested_amount == null ? "" : String(values.requested_amount),
     funding_need_type: values?.funding_need_type ?? "",
     tenor: values?.tenor ?? "",
   };
@@ -108,48 +132,56 @@ function validate(values: ContractFormState): FieldErrors {
   const requestedAmount = Number(values.requested_amount);
   const grossMargin = Number(values.gross_margin);
 
-  if (!values.contract_id.trim()) errors.contract_id = "Vui lòng nhập mã hợp đồng.";
-  if (!values.customer_id.trim()) errors.customer_id = "Vui lòng nhập mã khách hàng.";
-  if (!values.start_date) errors.start_date = "Vui lòng chọn ngày bắt đầu.";
-  if (!values.end_date) errors.end_date = "Vui lòng chọn ngày kết thúc.";
   if (values.start_date && values.end_date && values.end_date < values.start_date) {
     errors.end_date = "Ngày kết thúc phải sau ngày bắt đầu.";
   }
-  if (!values.description.trim()) errors.description = "Vui lòng mô tả hợp đồng.";
-  if (!Number.isFinite(contractValue) || contractValue <= 0) {
+  if (values.contract_value && (!Number.isFinite(contractValue) || contractValue <= 0)) {
     errors.contract_value = "Giá trị hợp đồng phải lớn hơn 0.";
   }
-  if (!Number.isFinite(grossMargin) || grossMargin < 0 || grossMargin > 100) {
+  if (
+    values.gross_margin
+    && (!Number.isFinite(grossMargin) || grossMargin < 0 || grossMargin > 100)
+  ) {
     errors.gross_margin = "Biên lợi nhuận phải nằm trong khoảng 0–100%.";
   }
-  if (!values.payment_terms.trim()) {
-    errors.payment_terms = "Vui lòng nhập điều khoản thanh toán.";
-  }
-  if (!values.funding_need_type) {
-    errors.funding_need_type = "Vui lòng chọn loại nhu cầu vốn.";
-  }
-  if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+  if (
+    values.requested_amount
+    && (!Number.isFinite(requestedAmount) || requestedAmount <= 0)
+  ) {
     errors.requested_amount = "Số tiền đề nghị phải lớn hơn 0.";
-  } else if (contractValue > 0 && requestedAmount > contractValue) {
+  } else if (
+    values.contract_value
+    && values.requested_amount
+    && contractValue > 0
+    && requestedAmount > contractValue
+  ) {
     errors.requested_amount = "Số tiền đề nghị không được vượt giá trị hợp đồng.";
   }
-  if (!values.tenor.trim()) errors.tenor = "Vui lòng nhập thời hạn tài trợ.";
 
   return errors;
 }
 
+function optionalText(value: string): string | null {
+  return value.trim() || null;
+}
+
+function optionalNumber(value: string): number | null {
+  return value.trim() ? Number(value) : null;
+}
+
 function buildContractPayload(values: ContractFormState): ContractFormData {
   return {
-    ...contractPayloadBase,
-    ...values,
-    contract_id: values.contract_id.trim(),
-    customer_id: values.customer_id.trim(),
-    description: values.description.trim(),
-    payment_terms: values.payment_terms.trim(),
-    tenor: values.tenor.trim(),
-    contract_value: Number(values.contract_value),
-    gross_margin: Number(values.gross_margin) / 100,
-    requested_amount: Number(values.requested_amount),
+    contract_id: optionalText(values.contract_id),
+    customer_id: optionalText(values.customer_id),
+    start_date: optionalText(values.start_date),
+    end_date: optionalText(values.end_date),
+    description: optionalText(values.description),
+    contract_value: optionalNumber(values.contract_value),
+    gross_margin: values.gross_margin.trim() ? Number(values.gross_margin) / 100 : null,
+    payment_terms: optionalText(values.payment_terms),
+    requested_amount: optionalNumber(values.requested_amount),
+    funding_need_type: optionalText(values.funding_need_type),
+    tenor: optionalText(values.tenor),
     status: NEW_CONTRACT_STATUS,
   };
 }
@@ -191,7 +223,7 @@ export function ContractForm({
   initialValues,
   onSubmit,
   className,
-  submitLabel = "Gửi yêu cầu thẩm định",
+  submitLabel = "Kiểm tra và gửi thẩm định",
   disabled = false,
 }: ContractFormProps) {
   const initialState = useMemo(() => toFormState(initialValues), [initialValues]);
@@ -201,10 +233,12 @@ export function ContractForm({
     "idle",
   );
   const [submitMessage, setSubmitMessage] = useState("");
+  const [dataIssues, setDataIssues] = useState<FinancePreflightDataIssue[]>([]);
 
   const updateField = (field: keyof ContractFormState, value: string) => {
     setValues((current) => ({ ...current, [field]: value }));
     setErrors((current) => ({ ...current, [field]: undefined }));
+    setDataIssues([]);
     if (submitState !== "idle") {
       setSubmitState("idle");
       setSubmitMessage("");
@@ -232,7 +266,20 @@ export function ContractForm({
     try {
       setSubmitState("submitting");
       setSubmitMessage("");
-      await onSubmit?.(payload);
+      const result = await onSubmit?.(payload);
+      if (result?.status === "AWAITING_INPUT") {
+        const serverErrors: FieldErrors = {};
+        for (const missing of result.missing_fields) {
+          if (missing.field in values) {
+            serverErrors[missing.field as keyof ContractFormState] = missing.reason;
+          }
+        }
+        setErrors(serverErrors);
+        setDataIssues(result.data_issues);
+        setSubmitState("error");
+        setSubmitMessage(result.summary);
+        return;
+      }
       setSubmitState("success");
       setSubmitMessage(
         onSubmit
@@ -250,6 +297,7 @@ export function ContractForm({
   const handleReset = () => {
     setValues(initialState);
     setErrors({});
+    setDataIssues([]);
     setSubmitState("idle");
     setSubmitMessage("");
   };
@@ -298,7 +346,7 @@ export function ContractForm({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="contract_id">
-              Mã hợp đồng <span className="text-emerald-400">*</span>
+              Mã hợp đồng
               <div className="relative">
                 <FileText className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
                 <input
@@ -318,7 +366,7 @@ export function ContractForm({
             </label>
 
             <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="customer_id">
-              Mã khách hàng <span className="text-emerald-400">*</span>
+              Mã khách hàng
               <div className="relative">
                 <Building2 className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
                 <input
@@ -338,7 +386,7 @@ export function ContractForm({
             </label>
 
             <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="start_date">
-              Ngày bắt đầu <span className="text-emerald-400">*</span>
+              Ngày bắt đầu
               <div className="relative">
                 <CalendarDays className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
                 <input
@@ -357,7 +405,7 @@ export function ContractForm({
             </label>
 
             <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="end_date">
-              Ngày kết thúc <span className="text-emerald-400">*</span>
+              Ngày kết thúc
               <div className="relative">
                 <CalendarDays className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
                 <input
@@ -377,7 +425,7 @@ export function ContractForm({
             </label>
 
             <label className="block text-base font-medium text-[var(--fin-text)] sm:col-span-2" htmlFor="description">
-              Mô tả hợp đồng <span className="text-emerald-400">*</span>
+              Mô tả hợp đồng
               <textarea
                 id="description"
                 name="description"
@@ -404,7 +452,7 @@ export function ContractForm({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="contract_value">
-              Giá trị hợp đồng <span className="text-emerald-400">*</span>
+              Giá trị hợp đồng
               <div className="relative">
                 <BadgeDollarSign className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
                 <input
@@ -430,7 +478,7 @@ export function ContractForm({
             </label>
 
             <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="gross_margin">
-              Biên lợi nhuận gộp <span className="text-emerald-400">*</span>
+              Biên lợi nhuận gộp
               <div className="relative">
                 <Percent className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
                 <input
@@ -459,7 +507,7 @@ export function ContractForm({
             </label>
 
             <label className="block text-base font-medium text-[var(--fin-text)] sm:col-span-2" htmlFor="requested_amount">
-              Số tiền đề nghị <span className="text-emerald-400">*</span>
+              Số tiền đề nghị
               <div className="relative">
                 <Landmark className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
                 <input
@@ -512,7 +560,7 @@ export function ContractForm({
             </label>
 
             <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="tenor">
-              Thời hạn tài trợ <span className="text-emerald-400">*</span>
+              Thời hạn tài trợ
               <div className="relative">
                 <Clock3 className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
                 <input
@@ -531,7 +579,7 @@ export function ContractForm({
             </label>
 
             <label className="block text-base font-medium text-[var(--fin-text)] sm:col-span-2" htmlFor="payment_terms">
-              Điều khoản thanh toán <span className="text-emerald-400">*</span>
+              Điều khoản thanh toán
               <textarea
                 id="payment_terms"
                 name="payment_terms"
@@ -549,6 +597,28 @@ export function ContractForm({
           </div>
         </section>
       </div>
+
+      {dataIssues.length > 0 ? (
+        <section
+          className="mx-5 mb-5 rounded-xl border border-red-400/25 bg-red-400/8 p-4 sm:mx-7"
+          aria-live="polite"
+        >
+          <h2 className="flex items-center gap-2 text-base font-semibold text-red-300">
+            <CircleAlert className="size-4" aria-hidden="true" />
+            Dữ liệu nền cần được bổ sung
+          </h2>
+          <ul className="mt-3 space-y-2 text-sm leading-6 text-red-100/80">
+            {dataIssues.map((issue, index) => (
+              <li key={`${issue.table}-${issue.record}-${index}`}>
+                <span className="font-medium text-red-200">
+                  {issue.table} · {issue.record}:
+                </span>{" "}
+                {issue.reason}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <footer className="border-t border-[var(--fin-soft-border)] bg-black/10 px-5 py-5 sm:px-7">
         <div className="flex flex-col-reverse gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -569,7 +639,7 @@ export function ContractForm({
               </p>
             ) : (
               <p className="text-sm text-[var(--fin-muted)]">
-                Các trường có dấu <span className="text-emerald-400">*</span> là bắt buộc.
+                Finance Agent sẽ kiểm tra và chỉ ra thông tin cần bổ sung sau khi gửi.
               </p>
             )}
           </div>

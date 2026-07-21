@@ -8,7 +8,7 @@
   "contract_value": 1200000000,
   "gross_margin": 0.25,
   "payment_terms": "Performance bond required; 30% advance, 50% delivery, 20% acceptance",
-  "requested_amount": 300000000,
-  "funding_need_type": "PERFORMANCE_BOND",
-  "tenor": "7 months"
+  "requested_amount": null,
+  "funding_need_type": null,
+  "tenor": null
 }

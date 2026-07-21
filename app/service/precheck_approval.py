@@ -56,7 +56,14 @@ def build_precheck_approval_specs(
         if decision.capital_need != amount:
             continue
 
-        need_type = funding_need.get("need_type")
+        # New runs take the banking form from Decision's selected catalog
+        # product. Historical cards fall back to the old Finance-owned type.
+        if decision.funding_need_type is not None:
+            if not decision.selected_bank_product_id:
+                continue
+            need_type = decision.funding_need_type
+        else:
+            need_type = funding_need.get("need_type")
         if need_type == "PERFORMANCE_BOND":
             tool_name = "precheck_performance_bond"
             arguments = {

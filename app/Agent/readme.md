@@ -24,8 +24,8 @@ The accepted upload contract contains exactly these fields:
 
 ```text
 contract_id, customer_id, start_date, end_date, status, description,
-contract_value, gross_margin, payment_terms, requested_amount,
-funding_need_type, tenor
+contract_value, gross_margin, payment_terms, requested_amount (nullable),
+funding_need_type (nullable; Decision owns the selected value), tenor (nullable)
 ```
 
 Precomputed risk fields are intentionally rejected. Risk evidence must come from

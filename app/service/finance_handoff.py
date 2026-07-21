@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -34,6 +35,118 @@ def infer_funding_need_type(payment_terms: str) -> str | None:
 
 def _optional_float(value: Any) -> float | None:
     return float(value) if value is not None else None
+
+
+_FUNDING_TERM_PATTERNS = (
+    (
+        "performance_bond",
+        r"(?:performance|perormance|performace|performan)[\s_-]+bond"
+        r"|bảo\s+lãnh\s+thực\s+hiện",
+    ),
+    (
+        "working_capital",
+        r"working[\s_-]+capital|vốn\s+lưu\s+động",
+    ),
+    (
+        "trade_finance",
+        r"trade[\s_-]+finance|tài\s+trợ\s+thương\s+mại|letter\s+of\s+credit"
+        r"|(?<!\w)l\s*/?\s*c(?!\w)",
+    ),
+)
+
+
+def resolve_funding_term_amount(
+    payment_terms: str | None,
+    contract_value: float | None,
+) -> dict[str, Any] | None:
+    """Resolve requested amount from an explicit financing term.
+
+    An explicit amount or percentage next to the financing clause wins. When
+    the clause contains neither, the agreed business fallback is 100% of the
+    contract value. Percentages belonging to later payment milestones are not
+    captured because they are not adjacent to the financing clause. This only
+    resolves the amount; Decision still owns the banking need/product type.
+    """
+    if contract_value is None or contract_value <= 0:
+        return None
+    normalized = str(payment_terms or "").casefold().strip()
+    matched_term = next(
+        (
+            (term_name, term_pattern)
+            for term_name, term_pattern in _FUNDING_TERM_PATTERNS
+            if re.search(term_pattern, normalized) is not None
+        ),
+        None,
+    )
+    if matched_term is None:
+        return None
+    term_name, term_pattern = matched_term
+
+    percentage_patterns = (
+        rf"(?:{term_pattern})\s*"
+        rf"(?:(?:required|requires|requirement|yêu\s+cầu|nhu\s+cầu)\s*)?"
+        rf"(?:[:=\-]\s*)?(\d+(?:[.,]\d+)?)\s*%",
+        rf"(\d+(?:[.,]\d+)?)\s*%\s*(?:of\s+contract\s+value\s*)?"
+        rf"(?:{term_pattern})",
+    )
+    for pattern in percentage_patterns:
+        match = re.search(pattern, normalized)
+        if match is None:
+            continue
+        percentage = float(match.group(1).replace(",", "."))
+        if not 0 < percentage <= 100:
+            continue
+        return {
+            "amount": round(contract_value * percentage / 100.0, 2),
+            "source": "payment_terms_percentage",
+            "status": "CALCULATED",
+            "formula": f"contract_value × {percentage:g}%",
+            "percentage": percentage,
+            "term": term_name,
+        }
+
+    amount_pattern = (
+        rf"(?:{term_pattern})\s*"
+        r"(?:amount|value|giá\s+trị)?\s*[:=\-]?\s*"
+        r"(\d[\d.,\s]*)\s*(vnd|vnđ|đồng|đ|triệu|tr)\b"
+    )
+    amount_match = re.search(amount_pattern, normalized)
+    if amount_match is not None:
+        raw_amount = amount_match.group(1).strip()
+        unit = amount_match.group(2)
+        if unit in {"triệu", "tr"}:
+            amount = float(raw_amount.replace(" ", "").replace(",", ".")) * 1_000_000
+        else:
+            amount = float(re.sub(r"[.,\s]", "", raw_amount))
+        if amount > 0:
+            return {
+                "amount": round(amount, 2),
+                "source": "payment_terms_explicit_amount",
+                "status": "EXTRACTED",
+                "formula": "explicit financing amount in payment_terms",
+                "percentage": None,
+                "term": term_name,
+            }
+
+    return {
+        "amount": contract_value,
+        "source": "payment_terms_full_contract_fallback",
+        "status": "ESTIMATED",
+        "formula": "contract_value × 100%",
+        "percentage": 100.0,
+        "term": term_name,
+    }
+
+
+def resolve_performance_bond_amount(
+    payment_terms: str | None,
+    contract_value: float | None,
+) -> dict[str, Any] | None:
+    """Backward-compatible wrapper restricted to performance-bond terms."""
+    result = resolve_funding_term_amount(payment_terms, contract_value)
+    if result is None or result.get("term") != "performance_bond":
+        return None
+    return result
 
 
 def build_finance_handoff(
@@ -153,11 +266,51 @@ def build_finance_handoff(
         and str(item.get("status", "")).casefold() != "paid"
     ]
 
-    explicit_funding_need_type = contract.get("funding_need_type")
-    inferred_funding_need_type = infer_funding_need_type(
-        str(contract.get("payment_terms") or "")
+    # Finance owns the amount, not the banking form. Explicit input wins. For a
+    # financing clause, use its stated amount/rate or the agreed 100% of
+    # contract-value fallback. Only ordinary payment terms continue to use the
+    # cashflow deficit.
+    explicit_requested_amount = _optional_float(contract.get("requested_amount"))
+    cashflow_requested_amount = _optional_float(
+        cash_impact.get("peak_contract_cash_deficit") if cash_impact else None
     )
-    funding_need_type = explicit_funding_need_type or inferred_funding_need_type
+    if cashflow_requested_amount is not None and cashflow_requested_amount <= 0:
+        cashflow_requested_amount = None
+    term_amount = resolve_funding_term_amount(
+        contract.get("payment_terms"),
+        contract_value,
+    )
+    if explicit_requested_amount is not None:
+        requested_amount = explicit_requested_amount
+        requested_amount_source = "contract"
+        requested_amount_status = "PROVIDED"
+        requested_amount_formula = None
+    elif term_amount is not None:
+        requested_amount = float(term_amount["amount"])
+        requested_amount_source = str(term_amount["source"])
+        requested_amount_status = str(term_amount["status"])
+        requested_amount_formula = str(term_amount["formula"])
+    else:
+        requested_amount = cashflow_requested_amount
+        requested_amount_source = (
+            "contract_cashflow_peak_deficit"
+            if cashflow_requested_amount is not None
+            else "missing"
+        )
+        requested_amount_status = (
+            "CALCULATED" if cashflow_requested_amount is not None else "MISSING"
+        )
+        requested_amount_formula = (
+            "max(0, -min(cumulative contract inflows - outflows))"
+            if cashflow_requested_amount is not None
+            else None
+        )
+    if cash_impact is not None:
+        cash_impact["requested_financing_amount"] = requested_amount
+
+    # Finance passes through a legacy/user-provided value only. New submissions
+    # leave this null; Decision chooses the banking form from payment_terms.
+    funding_need_type = contract.get("funding_need_type")
 
     return FinanceFeaturePack(
         case_id=f"CASE-{contract_id}",
@@ -177,9 +330,7 @@ def build_finance_handoff(
         gross_margin=contract_gross_margin,
         document_sent_to_partner=contract.get("document_sent_to_partner"),
         contract_value=contract_value,
-        # Never turn the portfolio liquidity gap into a contract request.  A
-        # missing bond/credit amount is evidence to collect, not a number to infer.
-        requested_amount=_optional_float(contract.get("requested_amount")),
+        requested_amount=requested_amount,
         confidence_score=contract.get("confidence_score"),
         delivery_delay_days=contract.get("delivery_delay_days"),
         funding_need_type=funding_need_type,
@@ -202,7 +353,7 @@ def build_finance_handoff(
             f"Contract {contract_id}: contract_value={contract_value}; "
             f"expected_gross_margin_rate={contract_gross_margin}; "
             f"allocated_order_revenue={allocated_order_revenue}; "
-            f"requested_amount={_optional_float(contract.get('requested_amount'))}. "
+            f"requested_amount={requested_amount}. "
             "Portfolio liquidity and reconciliation metrics are available only in "
             "FinanceBatchPack.portfolio_analysis and must not be treated as "
             "contract-specific amounts."
@@ -230,12 +381,20 @@ def build_finance_handoff(
             "payment_terms": contract.get("payment_terms"),
             "funding_need": {
                 "type": funding_need_type,
-                "source": (
-                    "contract"
-                    if explicit_funding_need_type
-                    else "payment_terms"
-                    if inferred_funding_need_type
-                    else "none"
+                "source": "contract" if funding_need_type else "decision_required",
+                "requested_amount_source": requested_amount_source,
+                "requested_amount_status": requested_amount_status,
+                "requested_amount_formula": requested_amount_formula,
+                "requested_amount_percentage": (
+                    term_amount.get("percentage") if term_amount else None
+                ),
+                "requested_amount_term": (
+                    term_amount.get("term") if term_amount else None
+                ),
+                "performance_bond_percentage": (
+                    term_amount.get("percentage")
+                    if term_amount and term_amount.get("term") == "performance_bond"
+                    else None
                 ),
             },
             "description": contract.get("description"),
@@ -243,4 +402,9 @@ def build_finance_handoff(
     )
 
 
-__all__ = ["build_finance_handoff", "infer_funding_need_type"]
+__all__ = [
+    "build_finance_handoff",
+    "infer_funding_need_type",
+    "resolve_funding_term_amount",
+    "resolve_performance_bond_amount",
+]

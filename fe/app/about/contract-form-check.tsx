@@ -9,8 +9,23 @@ import { ACTIVE_RUN_STORAGE_KEY } from "@/lib/run-session";
 type StartRunResponse = {
   session_id?: number;
   status?: string;
-  detail?: string;
+  detail?: string | Array<{
+    loc?: Array<string | number>;
+    msg?: string;
+  }>;
 };
+
+function responseError(result: StartRunResponse, status: number): string {
+  if (typeof result.detail === "string") return result.detail;
+  if (Array.isArray(result.detail)) {
+    const issues = result.detail.map((issue) => {
+      const field = issue.loc?.filter((part) => part !== "body").join(".");
+      return [field, issue.msg].filter(Boolean).join(": ");
+    }).filter(Boolean);
+    if (issues.length > 0) return issues.join(" · ");
+  }
+  return `Không thể khởi tạo pipeline (HTTP ${status}).`;
+}
 
 export function ContractFormCheck() {
   const router = useRouter();
@@ -28,11 +43,7 @@ export function ContractFormCheck() {
     const result = (await response.json()) as StartRunResponse;
 
     if (!response.ok) {
-      throw new Error(
-        typeof result.detail === "string"
-          ? result.detail
-          : `Không thể khởi tạo pipeline (HTTP ${response.status}).`,
-      );
+      throw new Error(responseError(result, response.status));
     }
 
     if (typeof result.session_id !== "number") {

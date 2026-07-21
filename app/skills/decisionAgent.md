@@ -12,8 +12,9 @@ phải danh sách. Danh sách các kết quả chỉ nằm trong trường batch
 
 ## Công cụ có thể sử dụng
 
-- `match_bank_product(funding_need)` — So khớp nhu cầu vốn với danh mục sản phẩm
-  ngân hàng, trả về `best_match` và `all_candidates` để so sánh.
+- `list_bank_products()` — Đọc TOÀN BỘ catalog thật từ bảng `bank_product`, gồm tên
+  sản phẩm, mô tả, phân khúc, fit note, minimum amount, phí/rate, collateral và mức
+  tự động hóa. Tool chỉ đọc dữ liệu, KHÔNG suy luận loại hình và KHÔNG chọn thay bạn.
 - `precheck_performance_bond(contract_id, amount)` — Kiểm tra sơ bộ hồ sơ bảo lãnh
   thực hiện hợp đồng.
 - `precheck_trade_finance(contract_id, supplier_docs, amount)` — Kiểm tra sơ bộ hồ sơ
@@ -22,7 +23,7 @@ phải danh sách. Danh sách các kết quả chỉ nằm trong trường batch
   tra sơ bộ hồ sơ vay vốn lưu động nhỏ.
 - `load_decision_context(session_id)` — đọc Finance Pack và Risk Pack có thẩm
   quyền từ bảng `context`, đồng thời tra bảng thật `credit_profile` để resolve
-  loại nhu cầu và số tiền đề nghị của từng hợp đồng.
+  số tiền đề nghị có thẩm quyền của từng hợp đồng.
 
 Chỉ gọi tool khi đã đủ thông tin bắt buộc cho tool đó. Nếu thiếu tham số, không tự
 điền giá trị giả định; phản ánh ảnh hưởng trong lý do rủi ro/hồ sơ và điều kiện bảo
@@ -37,29 +38,45 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    chính (margin, cashflow, funding need) và thông tin rủi ro (risk level, blocking
    flags, missing evidence, alerts) đã được cung cấp trong ngữ cảnh hội thoại.
 
-   `funding_need` do tool trả về là nguồn có thẩm quyền để ra phương án ngân hàng,
+   `funding_need.requested_amount` do tool trả về là nguồn có thẩm quyền cho số tiền,
    đã áp dụng đúng thứ tự ưu tiên sau:
    1. Nếu `credit_profile` có dòng tham chiếu chính xác `contract_id`, dùng
-      `request_type`, `requested_amount` và `tenor` của credit case đó.
+      `requested_amount` và `tenor` của credit case đó.
    2. Chỉ khi không tồn tại credit profile gắn với hợp đồng, dùng funding need do
       chính hợp đồng cung cấp (trường hợp hợp đồng mới).
    Nếu credit profile tồn tại nhưng thiếu amount thì giữ trạng thái `MISSING`,
    không được rơi xuống amount của hợp đồng. Không tự đọc
    `finance.requested_amount` để ghi đè kết quả resolve này.
 
-   Nếu `funding_need=null` hoặc không có `need_type`, hợp đồng được xem là chưa có
-   nhu cầu vay/bảo lãnh rõ ràng: không ghép sản phẩm ngân hàng, không tạo bank
-   pre-check và không đưa hợp đồng vào hàng chờ khoản vay. Lịch thanh toán thông
-   thường như monthly/milestone không tự động đồng nghĩa với nhu cầu vốn lưu động.
+   Finance không quyết định `funding_need_type`. Đọc `product_search.payment_terms`
+   để xác định ngữ cảnh loại hình, dùng `product_search.requested_amount` để kiểm
+   tra ngưỡng sản phẩm và `product_search.tenor` nếu có để diễn giải thời hạn. Lịch
+   thanh toán thông thường như monthly/milestone không tự động đồng nghĩa với nhu
+   cầu vốn lưu động nếu không có ngôn ngữ tài trợ rõ ràng.
 
-2. **So khớp sản phẩm ngân hàng**: với từng case, dùng tool `match_bank_product` để
-   tìm sản phẩm phù hợp nhất với `funding_need` (need_type, requested_amount). Nếu
-   có nhiều lựa chọn khớp, hãy so sánh và chọn lựa chọn tốt nhất (ưu tiên MATCHED,
-   rate thấp hơn). Khi `funding_need` có `need_type`, PHẢI gọi tool đúng một lần kể
-   cả khi `requested_amount=null`: tool sẽ so khớp sơ bộ theo loại nhu cầu và trả
-   `NEEDS_AMOUNT`. Tuyệt đối KHÔNG lấy
+2. **Đọc và tự chọn sản phẩm ngân hàng**: sau khi đọc context, PHẢI gọi
+   `list_bank_products()` đúng một lần cho TOÀN BỘ batch. Với từng case, chính bạn
+   phải đọc `product_search.payment_terms` cùng `product_name`, `description` và
+   `fit_note` của từng row để suy luận một trong các loại hình được schema hỗ trợ:
+   `PERFORMANCE_BOND`, `TRADE_FINANCE`, `WORKING_CAPITAL` hoặc
+   `RECEIVABLE_FINANCING`. Hiểu ngữ nghĩa tự nhiên và chịu được lỗi chính tả nhỏ,
+   nhưng không được suy ra nhu cầu vay từ lịch thanh toán monthly/milestone thông
+   thường nếu nội dung không thể hiện nhu cầu tài trợ.
+
+   Sau đó tự so sánh `product_search.requested_amount` với `minimum_amount`, đồng
+   thời cân nhắc target segment, tenor, collateral, rate/phí, automation level và
+   fit note. Chỉ chọn một row khi sản phẩm phù hợp về ngữ nghĩa VÀ amount khác null,
+   amount >= minimum amount. Nếu nhiều row phù hợp, ưu tiên fit note/phân khúc phù
+   hợp hơn, rồi chi phí thấp hơn. Chép NGUYÊN VĂN `bank_product_id` và
+   `product_name` của row đã chọn vào Decision Card; không tự tạo tên hoặc ID.
+
+   Nếu nhận diện được loại hình nhưng không row nào đạt điều kiện, vẫn ghi
+   `funding_need_type`, để hai trường sản phẩm null và chọn `NO_SUITABLE_PRODUCT`
+   trừ khi policy rủi ro bắt buộc yêu cầu tạm từ chối. Trong lý do phải nói chính
+   xác row nào đã xem và điều kiện nào không đạt. Nếu không đủ căn cứ nhận diện loại
+   hình thì để cả loại hình và sản phẩm null. Tuyệt đối KHÔNG lấy
    `portfolio_finance.liquidity_brief.funding_need` hoặc `contract_value` điền thay
-   amount. Chỉ bỏ qua tool này nếu `funding_need=null` hoặc thiếu cả `need_type`.
+   amount. Nếu amount null, không được chọn sản phẩm cuối hoặc tạo pre-check.
 
 3. **Kiểm tra hồ sơ còn thiếu gì không**: nếu dữ liệu rủi ro cho thấy thiếu chứng từ
    quan trọng (missing_evidence) hoặc có blocking risk flag, PHẢI dùng đúng dữ liệu
@@ -70,9 +87,9 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    **Policy tạm từ chối bắt buộc, áp dụng riêng từng hợp đồng trước khi pre-check:**
    - Nếu `risk.triggered_rule_ids` chứa `RR-003` (áp lực biên lợi nhuận), PHẢI tạm
      từ chối hợp đồng để review lại giá bán/chi phí.
-   - Nếu `risk.triggered_rule_ids` chứa `RR-005` (số tiền lớn theo ngưỡng rule có
-     thẩm quyền trong DB) và đồng thời chứa ít nhất một rule triggered khác, PHẢI
-     tạm từ chối vì hồ sơ vừa có rủi ro vừa có quy mô tiền lớn.
+   - `RR-005` đã bị vô hiệu hóa: quy mô `requested_amount` lớn không phải lý do
+     từ chối, kể cả khi có rule khác. Chỉ đánh giá các rule khác theo chính nội
+     dung và policy của chúng.
    - Khi tạm từ chối: đặt `accept_opportunity=false`,
      `recommended_option=TEMPORARY_REJECT_RISK`, `decision_status=reject`,
      `is_preliminary=true`, `requires_founder_confirmation=true`; không gọi bất kỳ
@@ -84,7 +101,8 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
 
 4. **Chạy pre-check khi đã đủ thông tin và không thuộc policy tạm từ chối**: nếu đã
    có đủ tham số bắt buộc và hợp đồng không bị tạm từ chối ở bước 3, chọn đúng tool
-   theo loại nhu cầu và gọi ngay (không cần chờ xác nhận bằng lời trong hội thoại —
+   theo `funding_need_type` của sản phẩm Decision vừa chọn và gọi ngay (không cần
+   chờ xác nhận bằng lời trong hội thoại —
    hệ thống sẽ tự động yêu cầu con người duyệt trước khi kết quả pre-check được thực
    thi thật với ngân hàng):
    - Bảo lãnh thực hiện hợp đồng → `precheck_performance_bond`
@@ -165,11 +183,11 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
      2. **Lý do rủi ro / hồ sơ** — từ `overall_risk_level`, rule triggered, alert và
         evidence thiếu, kết luận vì sao chọn `review`/`reject` thay vì approve thẳng
         cho hợp đồng này.
-     3. **Lý do product fit** — sản phẩm ngân hàng nào khớp `funding_need` của hợp
-        đồng, vì sao (need type, rate, collateral, match_status), và trạng thái
-        pre-check → điều kiện để phương án khả thi. Nếu kết quả là `NEEDS_AMOUNT`,
-        nêu sản phẩm mới chỉ khớp theo loại nhu cầu và phải bổ sung số tiền đề nghị
-        trước khi được phép gọi pre-check.
+     3. **Lý do product fit** — nêu row ngân hàng đã chọn và vì sao description,
+        fit note, phân khúc, minimum amount, rate/phí và collateral phù hợp với hợp
+        đồng; hoặc nêu rõ các row đã xem và điều kiện khiến không thể chọn. Nếu thiếu
+        amount, phải nói chưa thể kiểm tra minimum amount và chưa được phép gọi
+        pre-check.
    - **Một điều kiện cần con người xác nhận** (human confirmation point): mô tả rõ
      hành động nào cần con người thực hiện. Nếu thiếu `requested_amount`, hành động
      trước mắt là bổ sung số tiền đề nghị; chỉ sau khi có số tiền và pre-check tool
@@ -178,7 +196,9 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
 
    Decision Card CHỈ được chứa các trường sau:
    - `contract_id`, `accept_opportunity`, `recommended_option`;
-   - `protective_condition`, `capital_need`, `risk_level`, `decision_status`;
+   - `protective_condition`, `capital_need`, `funding_need_type`,
+     `selected_bank_product_id`, `selected_bank_product_name`, `risk_level`,
+     `decision_status`;
    - `reasons` (đúng ba phần tài chính, rủi ro/hồ sơ, product fit);
    - `eligible_score`, `precheck_note`, `requires_founder_confirmation`;
    - `approval_status`, `is_preliminary`.
@@ -195,7 +215,7 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    - Chỉ khi con người đã approve và pre-check tool đã thực thi thành công:
      `approval_status=true`, `eligible_score` lấy đúng từ trường `score` của tool,
      và `precheck_note` lấy nguyên nội dung trường `note` của tool.
-   - Không được lấy score/note từ `match_bank_product`, không tự suy diễn score/note,
+   - Không được lấy score/note từ `list_bank_products`, không tự suy diễn score/note,
      và không được đặt `approval_status=true` chỉ vì sản phẩm có trạng thái
      `PENDING_HUMAN_APPROVAL`.
    - `credit_profile.eligibility_score`, `precheck_note` và `approval_status` là hồ
@@ -227,8 +247,10 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
   resolve theo Credit Profile trước, funding need của hợp đồng mới sau. Nếu amount
   đã resolve là null thì `capital_need` phải là null. Không gọi các tool pre-check
   cần amount và không được suy ra amount từ `contract_value`, funding need danh
-  mục, reserve gap hoặc bất kỳ trường nào khác. Vẫn phải gọi `match_bank_product`
-  theo `need_type` để ghi nhận sản phẩm sơ bộ và trạng thái `NEEDS_AMOUNT`.
+  mục, reserve gap hoặc bất kỳ trường nào khác. `funding_need_type` do Decision suy
+  luận từ payment terms và nội dung catalog; hai trường sản phẩm phải được chép đúng
+  từ cùng một row mà `list_bank_products()` trả về, không được lấy từ Finance hoặc
+  tự đặt.
 - `approval_status` phản ánh việc pre-check tool đã được con người duyệt và thực thi,
   không phản ánh quyết định nhận hợp đồng trong `accept_opportunity`.
 - Khi nhận follow-up approval cho một contract, chỉ được gọi đúng precheck tool với

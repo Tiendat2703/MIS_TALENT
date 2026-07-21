@@ -304,13 +304,22 @@ def decision_input_payload(session_id: int) -> dict[str, Any]:
                 "order_allocation": details.get("order_allocation"),
             },
             "funding_need": funding_need,
+            "product_search": {
+                "requested_amount": (
+                    funding_need.get("requested_amount") if funding_need else None
+                ),
+                "payment_terms": details.get("payment_terms"),
+                "tenor": pack.tenor,
+            },
             "scope_rules": [
                 "contract_value is the authoritative full contract value",
                 "order_allocation contains order-scoped amounts only",
                 "portfolio_finance metrics apply to the whole company, not this contract",
                 "credit_profile requested_amount has priority for an explicitly referenced contract",
                 "contract funding need is used only when no contract-scoped credit_profile exists",
-                "funding_need.amount_status=MISSING means product type may be matched but bank precheck must not run",
+                "Finance owns requested_amount; Decision must not change it",
+                "Decision chooses the banking form and product from product_search.payment_terms and requested_amount",
+                "funding_need.amount_status=MISSING means bank precheck must not run",
             ],
         }
 

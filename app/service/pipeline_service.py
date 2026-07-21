@@ -440,6 +440,13 @@ def _summarize_context(
                         "accept_opportunity": decision.get("accept_opportunity"),
                         "risk_level": decision.get("risk_level"),
                         "capital_need": decision.get("capital_need"),
+                        "funding_need_type": decision.get("funding_need_type"),
+                        "selected_bank_product_id": decision.get(
+                            "selected_bank_product_id"
+                        ),
+                        "selected_bank_product_name": decision.get(
+                            "selected_bank_product_name"
+                        ),
                         "requires_founder_confirmation": decision.get(
                             "requires_founder_confirmation"
                         ),
@@ -508,6 +515,88 @@ async def list_processed_contracts(
         "limit": limit,
         "offset": offset,
         "contracts": contracts,
+    }
+
+
+def _dashboard_metrics(contracts: list[dict[str, Any]]) -> dict[str, int | float]:
+    """Compute the small dashboard counters from the same contract snapshot."""
+    awaiting = 0
+    high_risk = 0
+    total_value: int | float = 0
+
+    for contract in contracts:
+        finance = contract.get("finance") or {}
+        decision = contract.get("decision") or {}
+        risk = contract.get("risk") or {}
+
+        decision_status = str(decision.get("decision_status") or "").lower()
+        if not decision.get("approval_status") and decision_status != "reject":
+            awaiting += 1
+
+        risk_level = str(
+            decision.get("risk_level") or risk.get("overall_risk_level") or ""
+        ).lower()
+        if risk_level in {"high", "critical"}:
+            high_risk += 1
+
+        contract_value = finance.get("contract_value")
+        if isinstance(contract_value, (int, float)) and not isinstance(contract_value, bool):
+            total_value += contract_value
+
+    return {
+        "total": len(contracts),
+        "awaiting": awaiting,
+        "high_risk": high_risk,
+        "total_value": total_value,
+    }
+
+
+async def get_dashboard_data(
+    limit: int = 100,
+    offset: int = 0,
+    latest_only: bool = True,
+) -> dict[str, Any]:
+    """One bootstrap payload for the dashboard, including all pending approvals.
+
+    Approval state is still scoped by run internally, but the browser no longer
+    needs one HTTP round trip per run. A broken historical approval state is
+    reported as a partial error instead of making the contract list unavailable.
+    """
+    payload = await list_processed_contracts(
+        limit=limit,
+        offset=offset,
+        latest_only=latest_only,
+    )
+    contracts = payload["contracts"]
+    run_ids = sorted({
+        int(contract["session_id"])
+        for contract in contracts
+        if contract.get("session_id") is not None
+    })
+    results = await asyncio.gather(
+        *(get_pending_approvals(run_id) for run_id in run_ids),
+        return_exceptions=True,
+    )
+
+    pending_approvals: list[dict[str, Any]] = []
+    approval_errors: list[dict[str, Any]] = []
+    for run_id, result in zip(run_ids, results, strict=True):
+        if isinstance(result, Exception):
+            approval_errors.append({
+                "session_id": run_id,
+                "message": str(result),
+            })
+            continue
+        for request in result:
+            if not isinstance(request, dict):
+                continue
+            pending_approvals.append({**request, "session_id": run_id})
+
+    return {
+        **payload,
+        "pending_approvals": pending_approvals,
+        "approval_errors": approval_errors,
+        "metrics": _dashboard_metrics(contracts),
     }
 
 
@@ -592,6 +681,25 @@ async def get_decision_cards(session_id: int) -> dict[str, Any]:
     }
 
 
+async def get_run_detail(session_id: int) -> dict[str, Any]:
+    """Return the complete Decision and Risk payload needed by one open row."""
+    row = await asyncio.to_thread(fetch_context_row, session_id)
+    if row is None:
+        return {
+            "session_id": session_id,
+            "found": False,
+            "decisions": [],
+            "risk_pack": None,
+        }
+    decisions = _pack_list(row.get("decision_pack"), "decisions")
+    return {
+        "session_id": session_id,
+        "found": True,
+        "decisions": decisions,
+        "risk_pack": row.get("risk_pack"),
+    }
+
+
 async def get_validation_reports(session_id: int) -> dict[str, Any]:
     """Các ValidationReport của validator cho run này (đọc cột ValidatorLogs)."""
     from app.tools.writeLogs import read_agent_logs
@@ -634,7 +742,9 @@ async def submit_approval(
 
 
 __all__ = [
+    "get_dashboard_data",
     "get_decision_cards",
+    "get_run_detail",
     "get_run_result",
     "get_run_snapshot",
     "get_validation_reports",

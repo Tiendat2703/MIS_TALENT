@@ -31,9 +31,9 @@ export type ContractFormData = {
   contract_value: number;
   gross_margin: number;
   payment_terms: string;
-  requested_amount: number;
-  funding_need_type: string;
-  tenor: string;
+  requested_amount: number | null;
+  funding_need_type: string | null;
+  tenor: string | null;
 };
 
 const contractPayloadBase: ContractFormData = {
@@ -43,11 +43,17 @@ const contractPayloadBase: ContractFormData = {
 
 type ContractFormState = Omit<
   ContractFormData,
-  "status" | "contract_value" | "gross_margin" | "requested_amount"
+  | "status"
+  | "contract_value"
+  | "gross_margin"
+  | "requested_amount"
+  | "funding_need_type"
+  | "tenor"
 > & {
   contract_value: string;
   gross_margin: string;
   requested_amount: string;
+  tenor: string;
 };
 
 type FieldErrors = Partial<Record<keyof ContractFormState, string>>;
@@ -59,13 +65,6 @@ export type ContractFormProps = {
   submitLabel?: string;
   disabled?: boolean;
 };
-
-const fundingOptions = [
-  { value: "PERFORMANCE_BOND", label: "Bảo lãnh thực hiện" },
-  { value: "WORKING_CAPITAL", label: "Vốn lưu động" },
-  { value: "TRADE_FINANCE", label: "Tài trợ thương mại" },
-  { value: "RECEIVABLE_FINANCING", label: "Tài trợ khoản phải thu" },
-] as const;
 
 const inputClassName =
   "mt-2 h-12 w-full rounded-lg border border-[var(--fin-soft-border)] bg-[var(--fin-surface-raised)] px-4 text-base text-[var(--fin-text)] outline-none transition placeholder:text-[var(--fin-muted)]/60 hover:border-emerald-400/30 focus:border-emerald-400/70 focus:ring-3 focus:ring-emerald-400/10 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-red-400/70 aria-invalid:ring-3 aria-invalid:ring-red-400/10";
@@ -85,8 +84,7 @@ function toFormState(values?: Partial<ContractFormData>): ContractFormState {
       values?.gross_margin === undefined ? "" : String(values.gross_margin * 100),
     payment_terms: values?.payment_terms ?? "",
     requested_amount:
-      values?.requested_amount === undefined ? "" : String(values.requested_amount),
-    funding_need_type: values?.funding_need_type ?? "",
+      values?.requested_amount == null ? "" : String(values.requested_amount),
     tenor: values?.tenor ?? "",
   };
 }
@@ -105,7 +103,9 @@ function formatCurrency(value: string) {
 function validate(values: ContractFormState): FieldErrors {
   const errors: FieldErrors = {};
   const contractValue = Number(values.contract_value);
-  const requestedAmount = Number(values.requested_amount);
+  const requestedAmount = values.requested_amount.trim()
+    ? Number(values.requested_amount)
+    : null;
   const grossMargin = Number(values.gross_margin);
 
   if (!values.contract_id.trim()) errors.contract_id = "Vui lòng nhập mã hợp đồng.";
@@ -125,15 +125,11 @@ function validate(values: ContractFormState): FieldErrors {
   if (!values.payment_terms.trim()) {
     errors.payment_terms = "Vui lòng nhập điều khoản thanh toán.";
   }
-  if (!values.funding_need_type) {
-    errors.funding_need_type = "Vui lòng chọn loại nhu cầu vốn.";
-  }
-  if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+  if (requestedAmount != null && (!Number.isFinite(requestedAmount) || requestedAmount <= 0)) {
     errors.requested_amount = "Số tiền đề nghị phải lớn hơn 0.";
-  } else if (contractValue > 0 && requestedAmount > contractValue) {
+  } else if (requestedAmount != null && contractValue > 0 && requestedAmount > contractValue) {
     errors.requested_amount = "Số tiền đề nghị không được vượt giá trị hợp đồng.";
   }
-  if (!values.tenor.trim()) errors.tenor = "Vui lòng nhập thời hạn tài trợ.";
 
   return errors;
 }
@@ -146,10 +142,13 @@ function buildContractPayload(values: ContractFormState): ContractFormData {
     customer_id: values.customer_id.trim(),
     description: values.description.trim(),
     payment_terms: values.payment_terms.trim(),
-    tenor: values.tenor.trim(),
+    tenor: values.tenor.trim() || null,
+    funding_need_type: null,
     contract_value: Number(values.contract_value),
     gross_margin: Number(values.gross_margin) / 100,
-    requested_amount: Number(values.requested_amount),
+    requested_amount: values.requested_amount.trim()
+      ? Number(values.requested_amount)
+      : null,
     status: NEW_CONTRACT_STATUS,
   };
 }
@@ -458,8 +457,8 @@ export function ContractForm({
               <FieldError id="gross_margin-error" message={errors.gross_margin} />
             </label>
 
-            <label className="block text-base font-medium text-[var(--fin-text)] sm:col-span-2" htmlFor="requested_amount">
-              Số tiền đề nghị <span className="text-emerald-400">*</span>
+            <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="requested_amount">
+              Số tiền đề nghị <span className="text-sm font-normal text-[var(--fin-muted)]">(không bắt buộc)</span>
               <div className="relative">
                 <Landmark className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
                 <input
@@ -479,40 +478,15 @@ export function ContractForm({
                 </span>
               </div>
               <span id="requested-amount-hint" className="mt-1.5 block text-sm font-normal text-[var(--fin-muted)]">
-                {formatCurrency(values.requested_amount)}
+                {values.requested_amount
+                  ? formatCurrency(values.requested_amount)
+                  : "Để trống để Finance tính từ dòng tiền riêng của hợp đồng."}
               </span>
               <FieldError id="requested_amount-error" message={errors.requested_amount} />
             </label>
 
-            <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="funding_need_type">
-              Loại nhu cầu vốn
-              <select
-                id="funding_need_type"
-                name="funding_need_type"
-                value={values.funding_need_type}
-                onChange={(event) => updateField("funding_need_type", event.target.value)}
-                className={inputClassName}
-                disabled={disabled}
-                aria-invalid={Boolean(errors.funding_need_type)}
-                aria-describedby={describedBy("funding_need_type")}
-              >
-                <option value="" disabled>
-                  Chọn loại nhu cầu vốn
-                </option>
-                {fundingOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <FieldError
-                id="funding_need_type-error"
-                message={errors.funding_need_type}
-              />
-            </label>
-
             <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="tenor">
-              Thời hạn tài trợ <span className="text-emerald-400">*</span>
+              Thời hạn tài trợ <span className="text-sm font-normal text-[var(--fin-muted)]">(không bắt buộc)</span>
               <div className="relative">
                 <Clock3 className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
                 <input
@@ -527,6 +501,9 @@ export function ContractForm({
                   aria-describedby={describedBy("tenor")}
                 />
               </div>
+              <span className="mt-1.5 block text-sm font-normal text-[var(--fin-muted)]">
+                Nếu để trống, hệ thống dùng thời gian bắt đầu–kết thúc hợp đồng.
+              </span>
               <FieldError id="tenor-error" message={errors.tenor} />
             </label>
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import Field, model_validator
 
@@ -45,6 +46,16 @@ class DecisionCardOutput(StrictModel):
     # Null means the contract-specific bond/credit amount was not supplied.
     # Portfolio liquidity need must never be copied into this field.
     capital_need: float | None = Field(default=None, ge=0)
+    # Finance owns capital_need. Decision owns the banking form and selected
+    # catalog product after matching payment_terms against that amount.
+    funding_need_type: Literal[
+        "PERFORMANCE_BOND",
+        "TRADE_FINANCE",
+        "WORKING_CAPITAL",
+        "RECEIVABLE_FINANCING",
+    ] | None = None
+    selected_bank_product_id: str | None = Field(default=None, min_length=1)
+    selected_bank_product_name: str | None = Field(default=None, min_length=1)
     risk_level: RiskLevel
     decision_status: DecisionStatus
     reasons: list[str] = Field(min_length=3, max_length=3)
@@ -56,6 +67,25 @@ class DecisionCardOutput(StrictModel):
 
     @model_validator(mode="after")
     def validate_precheck_state(self) -> "DecisionCardOutput":
+        selected_product_fields = (
+            self.selected_bank_product_id,
+            self.selected_bank_product_name,
+        )
+        if any(selected_product_fields) and not all(selected_product_fields):
+            raise ValueError(
+                "Selected bank product id and name must be supplied together"
+            )
+        if self.selected_bank_product_id is not None and self.funding_need_type is None:
+            raise ValueError(
+                "Selected bank product requires a Decision-owned funding_need_type"
+            )
+        if (
+            self.recommended_option is RecommendedOption.NO_SUITABLE_PRODUCT
+            and self.selected_bank_product_id is not None
+        ):
+            raise ValueError(
+                "NO_SUITABLE_PRODUCT cannot contain a selected bank product"
+            )
         if self.recommended_option is RecommendedOption.TEMPORARY_REJECT_RISK:
             if self.accept_opportunity:
                 raise ValueError(

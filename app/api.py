@@ -50,6 +50,15 @@ async def contract_overviews(limit: int = 100, offset: int = 0, latest_only: boo
         latest_only=latest_only,
     )
 
+@app.get("/dashboard")
+async def dashboard_data(limit: int = 100, offset: int = 0, latest_only: bool = True):
+    """Bootstrap contracts, metrics and approvals with one browser request."""
+    return await _pipeline_service().get_dashboard_data(
+        limit=limit,
+        offset=offset,
+        latest_only=latest_only,
+    )
+
 @app.post("/contracts/validate")
 async def validate_contract(contract: ContractUploadPackage):
     """Validate and echo a form payload without starting or persisting a run."""
@@ -98,6 +107,10 @@ async def run_result(session_id: int):
 async def run_decision(session_id: int):
     return await _pipeline_service().get_decision_cards(session_id)
 
+@app.get("/runs/{session_id}/detail")
+async def run_detail(session_id: int):
+    return await _pipeline_service().get_run_detail(session_id)
+
 @app.get("/runs/{session_id}/validations")                 # ValidationReport của validator
 async def run_validations(session_id: int):
     return await _pipeline_service().get_validation_reports(session_id)
@@ -121,5 +134,13 @@ async def approve(session_id: int, approval_id: str, approved: bool):
                 "contract_id": exc.contract_id,
                 "approval_id": exc.approval_id,
                 "message": exc.execution_error,
+            },
+        ) from exc
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "APPROVAL_DECISION_REJECTED",
+                "message": str(exc),
             },
         ) from exc

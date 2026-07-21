@@ -78,23 +78,23 @@ def _patch(monkeypatch, *, rules, alerts, data_classes=_DATA_CLASSES) -> None:
 
 
 def test_triggered_rule_without_alert_becomes_proposed(monkeypatch) -> None:
-    rule = _rule("RR-005", "Large financial decision",
-                 "requested_amount > 300000000", Severity.HIGH,
+    rule = _rule("RR-007", "Delivery delay",
+                 "delivery_delay_days > 5", Severity.HIGH,
                  "Human approval required")
     _patch(monkeypatch, rules=[rule], alerts=[])
 
     pack = BuildRiskReport.build_risk_pack_impl(
-        _finance_pack(requested_amount=400_000_000)
+        _finance_pack(delivery_delay_days=10)
     )
 
-    assert pack.triggered_rule_ids == ["RR-005"]
+    assert pack.triggered_rule_ids == ["RR-007"]
     assert len(pack.proposed_alerts) == 1
     proposed = pack.proposed_alerts[0]
-    assert proposed.rule_id == "RR-005"
+    assert proposed.rule_id == "RR-007"
     assert proposed.requires_human_review is True
     assert proposed.alert_source == "AGENT_PROPOSED"
     assert "CON-001" not in proposed.proposed_alert_id  # contract id đã mask
-    assert pack.summary.unmapped_rule_ids == ["RR-005"]
+    assert pack.summary.unmapped_rule_ids == ["RR-007"]
     assert pack.summary.total_proposed_alerts == 1
     assert pack.summary.human_review_required is True
 
@@ -125,8 +125,8 @@ def test_alias_matches_alert_as_detected(monkeypatch) -> None:
 def test_summary_counts_detected_and_proposed(monkeypatch) -> None:
     rule_detected = _rule("RR-002", "Cash reserve breach",
                           "closing_cash < cash_reserve_minimum", Severity.HIGH)
-    rule_proposed = _rule("RR-005", "Large financial decision",
-                          "requested_amount > 300000000", Severity.HIGH,
+    rule_proposed = _rule("RR-007", "Delivery delay",
+                          "delivery_delay_days > 5", Severity.HIGH,
                           "Human approval required")
     alert = _alert("AL-002", "Cashflow shortage", "2026-07", Severity.HIGH)
     _patch(monkeypatch, rules=[rule_detected, rule_proposed], alerts=[alert])
@@ -136,6 +136,7 @@ def test_summary_counts_detected_and_proposed(monkeypatch) -> None:
             projected_closing_cash=100_000_000,
             cash_reserve_minimum=550_000_000,
             requested_amount=400_000_000,
+            delivery_delay_days=10,
             source_record_ids=["CON-002"],
         )
     )
@@ -143,7 +144,7 @@ def test_summary_counts_detected_and_proposed(monkeypatch) -> None:
     assert pack.summary.total_rules_triggered == 2
     assert pack.summary.total_alerts_detected == 1
     assert pack.summary.total_proposed_alerts == 1
-    assert pack.summary.unmapped_rule_ids == ["RR-005"]
+    assert pack.summary.unmapped_rule_ids == ["RR-007"]
     assert pack.summary.highest_severity == Severity.HIGH
     assert pack.summary.human_review_required is True
 
@@ -191,16 +192,17 @@ def test_masker_tokenizes_by_field_type() -> None:
     assert "OPC_MAIN" not in m.mask_field_value("account_id", "OPC_MAIN")
 
 
-def test_not_triggered_rule_has_no_proposed_or_alert(monkeypatch) -> None:
+def test_rr005_is_disabled_even_when_large_amount_exceeds_threshold(monkeypatch) -> None:
     rule = _rule("RR-005", "Large financial decision",
                  "requested_amount > 300000000", Severity.HIGH,
                  "Human approval required")
     _patch(monkeypatch, rules=[rule], alerts=[])
 
     pack = BuildRiskReport.build_risk_pack_impl(
-        _finance_pack(requested_amount=100_000_000)  # dưới ngưỡng -> không trigger
+        _finance_pack(requested_amount=400_000_000)
     )
 
+    assert pack.rule_evaluations == []
     assert pack.triggered_rule_ids == []
     assert pack.proposed_alerts == []
     assert pack.summary.total_rules_triggered == 0

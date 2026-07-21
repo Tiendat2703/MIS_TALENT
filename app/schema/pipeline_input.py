@@ -22,14 +22,14 @@ class ContractUploadPackage(StrictModel):
     contract_value: float = Field(gt=0)
     gross_margin: float = Field(ge=-1, le=1)
     payment_terms: str = Field(min_length=1)
-    requested_amount: float = Field(gt=0)
+    requested_amount: float | None = Field(default=None, gt=0)
     funding_need_type: Literal[
         "PERFORMANCE_BOND",
         "TRADE_FINANCE",
         "WORKING_CAPITAL",
         "RECEIVABLE_FINANCING",
-    ]
-    tenor: str = Field(min_length=1)
+    ] | None = None
+    tenor: str | None = Field(default=None, min_length=1)
 
     @field_validator("status", mode="before")
     @classmethod

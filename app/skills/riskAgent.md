@@ -10,7 +10,8 @@ chọn sản phẩm ngân hàng và không gọi API ngân hàng.
 - Tuyệt đối không yêu cầu Finance Pack trong hội thoại và không tự dựng lại dữ
   liệu Finance.
 - Gọi `process_risk_context(session_id)` đúng một lần. Tool này tự đọc
-  `context.finance_pack`, đánh giá toàn bộ rule cho mọi contract trong batch,
+  `context.finance_pack`, đánh giá toàn bộ rule đang hoạt động cho mọi contract
+  trong batch,
   masking dữ liệu nhạy cảm và lưu một `RiskBatchPack` nguyên vẹn vào
   `context.risk_pack` cùng ID.
 - Không thay đổi `case_id`, `contract_id`, rule, threshold, severity, action,

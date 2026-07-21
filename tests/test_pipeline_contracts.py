@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -29,14 +30,23 @@ from app.schema.handoff_packs import (
     RiskPack,
 )
 from app.schema.pipeline_input import ContractUploadPackage
+from app.schema.bank_product import BankProduct
 from app.schema.risk_db_models import CreditProfile
-from app.service.finance_handoff import build_finance_handoff, infer_funding_need_type
+from app.service.finance_handoff import (
+    build_finance_handoff,
+    infer_funding_need_type,
+    resolve_funding_term_amount,
+    resolve_performance_bond_amount,
+)
 from app.service import approval as approval_service
+from app.service import decision_guard as decision_guard_service
+from app.service import pipeline_service
 from app.service.credit_profile import (
     map_credit_profiles_to_contracts,
     resolve_contract_funding_need,
 )
 from app.service.decision_guard import (
+    apply_mandatory_risk_policy,
     validate_decision_finance_consistency,
     validate_decision_prechecks,
     validate_decision_risk_policy,
@@ -49,7 +59,7 @@ from app.service.pipeline_input import (
 from app.service.pipeline_service import _effective_funding_need_type
 from app.service.precheck_approval import build_precheck_approval_specs
 from app.tools import writeLogs
-from app.tools.DecisionAgent.GetBankProduct import _evaluate_product
+from app.tools.DecisionAgent.GetBankProduct import serialize_bank_product
 from app.tools.DecisionAgent.PrecheckAPI import (
     _call_api,
     _micro_credit_call,
@@ -62,6 +72,124 @@ from app.tools.FinanceAgent.finance_data import load_all
 
 
 client = TestClient(app)
+
+
+@pytest.mark.asyncio
+async def test_dashboard_bootstrap_collects_approvals_once_per_run(monkeypatch) -> None:
+    contracts = [
+        {
+            "session_id": 11,
+            "contract_id": "CON-001",
+            "finance": {"contract_value": 100},
+            "risk": {"overall_risk_level": "HIGH"},
+            "decision": {"decision_status": "review", "approval_status": False},
+        },
+        {
+            "session_id": 11,
+            "contract_id": "CON-002",
+            "finance": {"contract_value": 200},
+            "risk": {"overall_risk_level": "LOW"},
+            "decision": {"decision_status": "approve", "approval_status": True},
+        },
+        {
+            "session_id": 12,
+            "contract_id": "CON-003",
+            "finance": {"contract_value": 300},
+            "risk": None,
+            "decision": None,
+        },
+    ]
+    calls: list[int] = []
+
+    async def fake_contracts(**_kwargs):
+        return {"contracts": contracts, "count": len(contracts)}
+
+    async def fake_approvals(run_id: int):
+        calls.append(run_id)
+        if run_id == 12:
+            return []
+        return [{
+            "approval_id": "approval-1",
+            "contract_id": "CON-001",
+            "tool": "bank_precheck",
+            "arguments": {"amount": 100},
+        }]
+
+    monkeypatch.setattr(pipeline_service, "list_processed_contracts", fake_contracts)
+    monkeypatch.setattr(pipeline_service, "get_pending_approvals", fake_approvals)
+
+    result = await pipeline_service.get_dashboard_data()
+
+    assert sorted(calls) == [11, 12]
+    assert result["pending_approvals"] == [{
+        "approval_id": "approval-1",
+        "contract_id": "CON-001",
+        "tool": "bank_precheck",
+        "arguments": {"amount": 100},
+        "session_id": 11,
+    }]
+    assert result["metrics"] == {
+        "total": 3,
+        "awaiting": 2,
+        "high_risk": 1,
+        "total_value": 600,
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_detail_reads_decision_and_risk_in_one_snapshot(monkeypatch) -> None:
+    monkeypatch.setattr(
+        pipeline_service,
+        "fetch_context_row",
+        lambda session_id: {
+            "session_id": session_id,
+            "decision_pack": {"decisions": [{"contract_id": "CON-001"}]},
+            "risk_pack": {"packs": [{"contract_id": "CON-001"}]},
+        },
+    )
+
+    result = await pipeline_service.get_run_detail(42)
+
+    assert result == {
+        "session_id": 42,
+        "found": True,
+        "decisions": [{"contract_id": "CON-001"}],
+        "risk_pack": {"packs": [{"contract_id": "CON-001"}]},
+    }
+
+
+def test_dashboard_and_detail_http_routes(monkeypatch) -> None:
+    async def fake_dashboard(limit: int, offset: int, latest_only: bool):
+        return {
+            "limit": limit,
+            "offset": offset,
+            "latest_only": latest_only,
+            "contracts": [],
+            "pending_approvals": [],
+        }
+
+    async def fake_detail(session_id: int):
+        return {"session_id": session_id, "found": True}
+
+    monkeypatch.setattr(pipeline_service, "get_dashboard_data", fake_dashboard)
+    monkeypatch.setattr(pipeline_service, "get_run_detail", fake_detail)
+
+    dashboard_response = client.get(
+        "/dashboard",
+        params={"limit": 25, "offset": 5, "latest_only": False},
+    )
+    detail_response = client.get("/runs/42/detail")
+
+    assert dashboard_response.status_code == 200
+    assert dashboard_response.json() == {
+        "limit": 25,
+        "offset": 5,
+        "latest_only": False,
+        "contracts": [],
+        "pending_approvals": [],
+    }
+    assert detail_response.status_code == 200
+    assert detail_response.json() == {"session_id": 42, "found": True}
 
 
 def test_database_pool_defaults_to_twenty_connections(monkeypatch) -> None:
@@ -234,19 +362,50 @@ def test_rr003_requires_temporary_risk_rejection() -> None:
     )
 
 
+def test_approval_continuation_cannot_override_rr003_rejection() -> None:
+    payload = _decision_batch().model_dump(mode="json")
+    payload["decisions"][0].update(
+        approval_status=True,
+        eligible_score=85,
+        precheck_note="Hồ sơ đủ điều kiện sơ bộ.",
+        accept_opportunity=True,
+        recommended_option="APPROVE_WITH_CONDITION",
+        decision_status="approve",
+    )
+    continuation = DecisionBatchOutput.model_validate(payload)
+
+    corrected = apply_mandatory_risk_policy(
+        continuation,
+        _risk_batch("RR-003"),
+        contract_id="CON-004",
+    )
+
+    decision = corrected.decisions[0]
+    assert decision.accept_opportunity is False
+    assert decision.recommended_option.value == "TEMPORARY_REJECT_RISK"
+    assert decision.decision_status.value == "reject"
+    assert decision.approval_status is True
+    assert decision.eligible_score == 85
+    assert "rr-003" in " ".join([
+        decision.protective_condition,
+        *decision.reasons,
+    ]).casefold()
+    validate_decision_risk_policy(corrected, _risk_batch("RR-003"))
+
+
 def test_large_amount_alone_does_not_force_temporary_rejection() -> None:
     validate_decision_risk_policy(_decision_batch(), _risk_batch("RR-005"))
 
 
-def test_large_amount_with_another_risk_requires_temporary_rejection() -> None:
+def test_large_amount_with_another_nonblocking_risk_does_not_force_rejection() -> None:
     risk_batch = _risk_batch("RR-002", "RR-005")
-    with pytest.raises(ValueError, match="must be temporarily rejected"):
-        validate_decision_risk_policy(_decision_batch(), risk_batch)
+    decision = _decision_batch()
 
-    validate_decision_risk_policy(
-        _temporary_risk_rejection("RR-002", "RR-005"),
+    validate_decision_risk_policy(decision, risk_batch)
+    assert apply_mandatory_risk_policy(
+        decision,
         risk_batch,
-    )
+    ) == decision
 
 
 def test_temporary_risk_rejection_does_not_create_precheck_request() -> None:
@@ -341,15 +500,18 @@ def test_contract_json_is_direct_input_and_merge_is_run_local(tmp_path) -> None:
           "contract_value": 1200000000,
           "gross_margin": 0.25,
           "payment_terms": "Performance bond required",
-          "requested_amount": 300000000,
-          "funding_need_type": "PERFORMANCE_BOND",
-          "tenor": "7 months"
+          "requested_amount": null,
+          "funding_need_type": null,
+          "tenor": null
         }""",
         encoding="utf-8",
     )
     package = load_contract_package(path)
     assert isinstance(package, ContractUploadPackage)
     assert package.contract_id == "CON-NEW-001"
+    assert package.requested_amount is None
+    assert package.funding_need_type is None
+    assert package.tenor is None
 
     base = {
         "contracts": [{"contract_id": "CON-004", "contract_value": 1}],
@@ -555,9 +717,9 @@ def test_pipeline_scope_has_exactly_two_modes() -> None:
         contract_value=1_200_000_000,
         gross_margin=0.25,
         payment_terms="Performance bond required",
-        requested_amount=300_000_000,
-        funding_need_type="PERFORMANCE_BOND",
-        tenor="7 months",
+        requested_amount=None,
+        funding_need_type=None,
+        tenor=None,
     )
     merged, contract_ids, mode = select_pipeline_scope(base, upload)
     assert contract_ids == ["CON-UPLOAD-001"]
@@ -598,6 +760,94 @@ def test_only_explicit_financing_terms_are_classified(
     expected: str,
 ) -> None:
     assert infer_funding_need_type(payment_terms) == expected
+
+
+@pytest.mark.parametrize(
+    ("payment_terms", "expected_amount", "expected_source", "expected_percentage"),
+    [
+        (
+            "PERORMANCE BOND",
+            120_000_000,
+            "payment_terms_full_contract_fallback",
+            100.0,
+        ),
+        (
+            "PERFORMANCE_BOND",
+            120_000_000,
+            "payment_terms_full_contract_fallback",
+            100.0,
+        ),
+        (
+            "Performance bond 10%",
+            12_000_000,
+            "payment_terms_percentage",
+            10.0,
+        ),
+        (
+            "10% performance bond",
+            12_000_000,
+            "payment_terms_percentage",
+            10.0,
+        ),
+        (
+            "Performance bond amount 20,000,000 VND",
+            20_000_000,
+            "payment_terms_explicit_amount",
+            None,
+        ),
+    ],
+)
+def test_performance_bond_amount_follows_contract_term(
+    payment_terms: str,
+    expected_amount: float,
+    expected_source: str,
+    expected_percentage: float | None,
+) -> None:
+    result = resolve_performance_bond_amount(payment_terms, 120_000_000)
+
+    assert result is not None
+    assert result["amount"] == expected_amount
+    assert result["source"] == expected_source
+    assert result["percentage"] == expected_percentage
+
+
+def test_payment_schedule_percentage_is_not_used_as_bond_percentage() -> None:
+    result = resolve_performance_bond_amount(
+        "Performance bond required; 30% advance, 50% delivery, 20% acceptance",
+        120_000_000,
+    )
+
+    assert result is not None
+    assert result["amount"] == 120_000_000
+    assert result["source"] == "payment_terms_full_contract_fallback"
+
+
+@pytest.mark.parametrize(
+    ("payment_terms", "expected_amount", "expected_percentage"),
+    [
+        ("WORKING CAPITAL", 1_200_000_000, 100.0),
+        ("WORKING CAPITAL 25%", 300_000_000, 25.0),
+        ("25% vốn lưu động", 300_000_000, 25.0),
+        ("TRADE FINANCE", 1_200_000_000, 100.0),
+    ],
+)
+def test_all_financing_terms_use_contract_percentage_not_default_schedule(
+    payment_terms: str,
+    expected_amount: float,
+    expected_percentage: float,
+) -> None:
+    result = resolve_funding_term_amount(payment_terms, 1_200_000_000)
+
+    assert result is not None
+    assert result["amount"] == expected_amount
+    assert result["percentage"] == expected_percentage
+
+
+def test_non_bond_payment_terms_do_not_use_full_contract_fallback() -> None:
+    assert resolve_performance_bond_amount(
+        "Monthly payments",
+        120_000_000,
+    ) is None
 
 
 def test_legacy_default_working_capital_is_hidden_from_contract_api() -> None:
@@ -642,10 +892,10 @@ def test_rich_finance_analysis_adapts_to_one_contract_case() -> None:
 
     assert handoff.case_id == "CASE-CON-004"
     assert handoff.contract_id == "CON-004"
-    assert handoff.funding_need_type == "PERFORMANCE_BOND"
+    assert handoff.funding_need_type is None
     assert handoff.gross_margin == 0.24
     assert handoff.contract_value == 4_200_000_000
-    assert handoff.requested_amount is None
+    assert handoff.requested_amount == 4_200_000_000
     assert handoff.transaction_risk_score is None
     assert handoff.source_record_ids == ["CON-004", "ORD-005", "INV-005"]
     assert handoff.finance_details["contract_margin"]["margin_pct"] == 0.24
@@ -664,7 +914,7 @@ def test_rich_finance_analysis_adapts_to_one_contract_case() -> None:
     }
 
 
-def test_decision_context_does_not_turn_portfolio_gap_into_contract_need(
+def test_decision_context_uses_performance_bond_amount_not_portfolio_gap(
     monkeypatch,
 ) -> None:
     handoff = build_finance_handoff(
@@ -720,14 +970,20 @@ def test_decision_context_does_not_turn_portfolio_gap_into_contract_need(
     assert reconciliation["confirmed_invoice_collections"] == 45_000_000
     assert "confirmed_cash_total" not in reconciliation
     assert case["funding_need"] == {
-        "need_type": "PERFORMANCE_BOND",
-        "requested_amount": None,
+        "need_type": None,
+        "requested_amount": 4_200_000_000.0,
         "tenor": None,
-        "basis": "contract.funding_need.requested_amount",
+        "payment_terms": "Performance bond required",
+        "basis": "finance.payment_terms_full_contract_fallback",
         "scope": "contract",
-        "source": "contract_funding_need",
+        "source": "finance_inference",
         "credit_case_id": None,
-        "amount_status": "MISSING",
+        "amount_status": "ESTIMATED",
+    }
+    assert case["product_search"] == {
+        "requested_amount": 4_200_000_000.0,
+        "payment_terms": "Performance bond required",
+        "tenor": None,
     }
     assert case["credit_profile"] is None
     assert case["contract_financials"]["contract_value"] == 4_200_000_000
@@ -802,6 +1058,114 @@ def test_new_contract_without_credit_profile_uses_its_own_funding_need() -> None
     assert resolved["requested_amount"] == 300_000_000
     assert resolved["source"] == "contract_funding_need"
     assert resolved["credit_case_id"] is None
+
+
+def test_finance_uses_full_contract_for_bond_without_its_own_rate() -> None:
+    package = ContractUploadPackage(
+        contract_id="CON-UPLOAD-001",
+        customer_id="CUS-005",
+        start_date="2026-08-01",
+        end_date="2027-02-28",
+        description="Uploaded contract",
+        contract_value=1_200_000_000,
+        gross_margin=0.25,
+        payment_terms=(
+            "Performance bond required; 30% advance, 50% delivery, "
+            "20% acceptance"
+        ),
+        requested_amount=None,
+        funding_need_type=None,
+        tenor=None,
+    )
+    source = merge_contract_package(
+        {
+            "profile": {"company_id": "OPC-001"},
+            "contracts": [],
+            "customers": [],
+            "orders": [],
+            "invoices": [],
+            "source": "database",
+        },
+        package,
+    )
+
+    finance = build_finance_handoff(
+        package.contract_id,
+        _finance_analysis(),
+        source,
+    )
+
+    assert finance.requested_amount == 1_200_000_000
+    assert finance.funding_need_type is None
+    assert finance.tenor == "2026-08-01 to 2027-02-28"
+    assert finance.cash_impact is not None
+    assert finance.cash_impact["peak_contract_cash_deficit"] == 315_000_000
+    assert finance.cash_impact["requested_financing_amount"] == 1_200_000_000
+    assert finance.finance_details["funding_need"] == {
+        "type": None,
+        "source": "decision_required",
+        "requested_amount_source": "payment_terms_full_contract_fallback",
+        "requested_amount_status": "ESTIMATED",
+        "requested_amount_formula": "contract_value × 100%",
+        "requested_amount_percentage": 100.0,
+        "requested_amount_term": "performance_bond",
+        "performance_bond_percentage": 100.0,
+    }
+
+    resolved = resolve_contract_funding_need(finance, None)
+    assert resolved is not None
+    assert resolved["requested_amount"] == 1_200_000_000
+    assert resolved["need_type"] is None
+    assert resolved["source"] == "finance_inference"
+    assert resolved["amount_status"] == "ESTIMATED"
+
+
+def test_finance_uses_full_contract_for_working_capital_without_rate() -> None:
+    package = ContractUploadPackage(
+        contract_id="CON-UPLOAD-WC",
+        customer_id="CUS-005",
+        start_date="2026-07-01",
+        end_date="2027-07-31",
+        description="Working-capital contract",
+        contract_value=1_200_000_000,
+        gross_margin=0.29,
+        payment_terms="WORKING CAPITAL",
+        requested_amount=None,
+        funding_need_type=None,
+        tenor=None,
+    )
+    source = merge_contract_package(
+        {
+            "profile": {"company_id": "OPC-001"},
+            "contracts": [],
+            "customers": [],
+            "orders": [],
+            "invoices": [],
+            "source": "database",
+        },
+        package,
+    )
+
+    finance = build_finance_handoff(
+        package.contract_id,
+        _finance_analysis(),
+        source,
+    )
+
+    assert finance.requested_amount == 1_200_000_000
+    assert finance.cash_impact is not None
+    assert finance.cash_impact["peak_contract_cash_deficit"] == 370_285_714.26
+    assert finance.cash_impact["requested_financing_amount"] == 1_200_000_000
+    assert finance.finance_details["funding_need"] == {
+        "type": None,
+        "source": "decision_required",
+        "requested_amount_source": "payment_terms_full_contract_fallback",
+        "requested_amount_status": "ESTIMATED",
+        "requested_amount_formula": "contract_value × 100%",
+        "requested_amount_percentage": 100.0,
+        "requested_amount_term": "working_capital",
+        "performance_bond_percentage": None,
+    }
 
 
 def test_credit_profile_with_missing_amount_does_not_fall_back_to_contract() -> None:
@@ -911,26 +1275,117 @@ def test_working_capital_does_not_require_customer_type_for_approval_spec() -> N
     }]
 
 
-def test_bank_product_can_match_need_type_before_amount_is_known() -> None:
-    candidate = _evaluate_product(
-        {"need_type": "PERFORMANCE_BOND", "requested_amount": None},
-        {
-            "bank_product_id": "BANKPROD-002",
-            "bank": "VietinBank",
-            "product_name": "Performance bond",
-            "need_type": "PERFORMANCE_BOND",
-            "minimum_amount": 300_000_000.0,
-            "collateral_ratio": 0.2,
-            "annual_rate_or_fee": 0.012,
-            "automation_level": "Human approval",
+def test_precheck_uses_decision_selected_type_when_finance_type_is_null() -> None:
+    finance = _finance_pack().model_copy(
+        update={
+            "funding_need_type": None,
+            "finance_details": {
+                "payment_terms": "Performance bond required",
+                "funding_need": {"requested_amount_source": "contract"},
+            },
+        }
+    )
+    decision_payload = _decision_batch().model_dump(mode="json")
+    decision_payload["decisions"][0].update({
+        "funding_need_type": "PERFORMANCE_BOND",
+        "selected_bank_product_id": "BANKPROD-002",
+        "selected_bank_product_name": "Performance bond",
+    })
+    decision = DecisionBatchOutput.model_validate(decision_payload)
+
+    assert build_precheck_approval_specs(
+        decision,
+        FinanceBatchPack(contract_ids=["CON-004"], packs=[finance]),
+        {},
+    ) == [{
+        "contract_id": "CON-004",
+        "tool": "precheck_performance_bond",
+        "arguments": {
+            "contract_id": "CON-004",
+            "amount": 420_000_000.0,
         },
+    }]
+
+
+def _catalog_product(*, minimum_amount: int = 300_000_000) -> BankProduct:
+    return BankProduct(
+        bank_product_id="BANKPROD-002",
+        bank="VietinBank",
+        product_name="Performance bond",
+        target_segment="Contractors",
+        description="Guarantee for contract performance obligations.",
+        annual_rate_or_fee=Decimal("0.012"),
+        processing_fee_rate=Decimal("0"),
+        collateral_ratio=Decimal("0.2"),
+        minimum_amount=Decimal(minimum_amount),
+        automation_level="Human approval",
+        fit_note="Use when a customer contract requires a performance guarantee.",
     )
 
-    assert candidate is not None
-    assert candidate["match_status"] == "NEEDS_AMOUNT"
-    assert candidate["precheck_status"] == "MISSING_REQUESTED_AMOUNT"
-    assert candidate["minimum_amount"] == 300_000_000
-    assert "cannot be checked" in candidate["match_reasons"][1]
+
+def test_bank_catalog_exposes_raw_services_without_script_matching() -> None:
+    product = serialize_bank_product(_catalog_product())
+
+    assert product == {
+        "bank_product_id": "BANKPROD-002",
+        "bank": "VietinBank",
+        "product_name": "Performance bond",
+        "target_segment": "Contractors",
+        "description": "Guarantee for contract performance obligations.",
+        "annual_rate_or_fee": 0.012,
+        "processing_fee_rate": 0.0,
+        "collateral_ratio": 0.2,
+        "minimum_amount": 300_000_000.0,
+        "automation_level": "Human approval",
+        "fit_note": (
+            "Use when a customer contract requires a performance guarantee."
+        ),
+    }
+    assert "need_type" not in product
+    assert "match_status" not in product
+
+
+def test_decision_guard_verifies_agent_selected_catalog_row(monkeypatch) -> None:
+    monkeypatch.setattr(
+        decision_guard_service,
+        "load_bank_product_catalog",
+        lambda: [serialize_bank_product(_catalog_product())],
+    )
+    payload = _decision_batch().model_dump(mode="json")
+    payload["decisions"][0].update({
+        "funding_need_type": "PERFORMANCE_BOND",
+        "selected_bank_product_id": "BANKPROD-002",
+        "selected_bank_product_name": "Performance bond",
+    })
+
+    validate_decision_finance_consistency(
+        DecisionBatchOutput.model_validate(payload),
+        FinanceBatchPack(contract_ids=["CON-004"], packs=[_finance_pack()]),
+        {},
+    )
+
+
+def test_decision_guard_rejects_product_above_finance_amount(monkeypatch) -> None:
+    monkeypatch.setattr(
+        decision_guard_service,
+        "load_bank_product_catalog",
+        lambda: [
+            serialize_bank_product(_catalog_product(minimum_amount=500_000_000))
+        ],
+    )
+    payload = _decision_batch().model_dump(mode="json")
+    payload["decisions"][0].update({
+        "funding_need_type": "PERFORMANCE_BOND",
+        "selected_bank_product_id": "BANKPROD-002",
+        "selected_bank_product_name": "Performance bond",
+    })
+
+    with pytest.raises(ValueError, match="minimum_amount=500000000"):
+        validate_decision_finance_consistency(
+            DecisionBatchOutput.model_validate(payload),
+            FinanceBatchPack(contract_ids=["CON-004"], packs=[_finance_pack()]),
+            {},
+        )
 
 
 def test_decision_guard_rejects_portfolio_need_as_contract_capital() -> None:
@@ -1126,6 +1581,38 @@ async def test_pending_approvals_fall_back_to_durable_decision_log(
     assert len(requests) == 1
     assert requests[0]["contract_id"] == "CON-UPLOAD-001"
     assert requests[0]["approval_id"] == "approval-19"
+
+
+@pytest.mark.asyncio
+async def test_executed_but_unapplied_approval_remains_retryable(monkeypatch) -> None:
+    requests = [
+        {
+            "approval_id": "approval-retry",
+            "contract_id": "CON-012",
+            "status": "executed",
+            "decision_applied_at": None,
+        },
+        {
+            "approval_id": "approval-done",
+            "contract_id": "CON-013",
+            "status": "executed",
+            "decision_applied_at": "2026-07-21T00:00:00+00:00",
+        },
+    ]
+
+    async def list_requests(_run_id: int):
+        return requests
+
+    monkeypatch.setattr(approval_service, "list_approval_requests", list_requests)
+    monkeypatch.setattr(
+        approval_service,
+        "load_pipeline_context",
+        lambda _run_id: (_ for _ in ()).throw(LookupError),
+    )
+
+    pending = await approval_service.get_pending_approvals(54)
+
+    assert [request["approval_id"] for request in pending] == ["approval-retry"]
 
 
 @pytest.mark.asyncio

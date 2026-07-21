@@ -136,7 +136,7 @@ Kiểm `output_pack` (DecisionBatchOutput: `decisions[]`) + `run_log` + `policy`
 
 1. (PROCESS) Có nhận Finance Feature Pack không (`load_decision_context` được gọi)?
 2. (PROCESS) Có nhận Risk Pack không?
-3. (TOOL_DATA_SOURCE) Có match sản phẩm ngân hàng không (`match_bank_product`) khi có
+3. (TOOL_DATA_SOURCE) Có đọc catalog sản phẩm ngân hàng không (`list_bank_products`) khi có
    funding need?
 4. (OUTPUT_SCHEMA) Có tạo Decision Card đúng format không (đúng các field cho phép)?
 5. (OUTPUT_SCHEMA) Có `recommended_option` hợp lệ không?

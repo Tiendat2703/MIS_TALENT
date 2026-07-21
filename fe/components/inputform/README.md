@@ -7,8 +7,8 @@ payload tiếng Anh gửi tới `POST /runs` của BE.
 
 - FE có thể hiển thị label, hướng dẫn và thông báo lỗi bằng tiếng Việt.
 - Tên key trong payload phải giữ nguyên bằng tiếng Anh theo bảng bên dưới.
-- Không dịch các giá trị enum như `PERFORMANCE_BOND` hoặc
-  `RECEIVABLE_FINANCING` trước khi gửi tới BE.
+- FE không yêu cầu người dùng chọn loại nhu cầu vốn. Decision suy ra loại hình từ
+  `payment_terms`, sau khi Finance đã cung cấp `requested_amount`.
 - Hợp đồng mới luôn có `status: "Pending approval"`. Trường này không hiển thị
   trong form và BE tiếp tục cưỡng chế lại giá trị này.
 
@@ -25,18 +25,18 @@ payload tiếng Anh gửi tới `POST /runs` của BE.
 | Giá trị hợp đồng | `contract_value` | `number > 0` | `1200000000` | Đơn vị VND, không gửi chuỗi đã định dạng |
 | Biên lợi nhuận gộp | `gross_margin` | `number` từ `0` đến `1` | `0.25` | FE hiển thị `25%`, payload gửi `0.25` |
 | Điều khoản thanh toán | `payment_terms` | `string` | `"30% advance..."` | Bắt buộc, không được rỗng |
-| Số tiền đề nghị | `requested_amount` | `number > 0` | `300000000` | Đơn vị VND, không vượt giá trị hợp đồng |
-| Loại nhu cầu vốn | `funding_need_type` | `enum` | `"PERFORMANCE_BOND"` | Xem bảng enum bên dưới |
-| Thời hạn tài trợ | `tenor` | `string` | `"7 months"` | Hiện BE nhận chuỗi |
+| Số tiền đề nghị | `requested_amount` | `number > 0 \| null` | `null` | Không bắt buộc; null để Finance tính từ dòng tiền riêng của hợp đồng |
+| Loại nhu cầu vốn | `funding_need_type` | `null` ở submission mới | `null` | Decision xác định từ `payment_terms` và sản phẩm ngân hàng phù hợp |
+| Thời hạn tài trợ | `tenor` | `string \| null` | `null` | Không bắt buộc; Finance dùng khoảng ngày hợp đồng khi để trống |
 
-## Mapping loại nhu cầu vốn
+## Phân công xử lý
 
-| Nội dung trên FE | Giá trị gửi tới BE |
-| --- | --- |
-| Bảo lãnh thực hiện | `PERFORMANCE_BOND` |
-| Tài trợ thương mại | `TRADE_FINANCE` |
-| Vốn lưu động | `WORKING_CAPITAL` |
-| Tài trợ khoản phải thu | `RECEIVABLE_FINANCING` |
+- Finance giữ nguyên số tiền người dùng nhập. Nếu số tiền là null, Finance lấy đáy
+  âm lớn nhất của dòng tiền tích lũy riêng của hợp đồng làm `requested_amount`.
+- Decision đọc `payment_terms` và số tiền Finance trả ra, tìm sản phẩm ngân hàng
+  đáp ứng ngưỡng số tiền/collateral, rồi mới đặt `funding_need_type`.
+- Chỉ sau khi chọn được sản phẩm, hệ thống mới tạo yêu cầu approval cho bank
+  pre-check tương ứng.
 
 ## Chuyển đổi dữ liệu trước khi gửi
 
@@ -45,6 +45,7 @@ payload tiếng Anh gửi tới `POST /runs` của BE.
 | `1.200.000.000 ₫` | `1200000000` |
 | `25%` | `0.25` |
 | `01/08/2026` trên giao diện ngày | `"2026-08-01"` |
+| Để trống số tiền/thời hạn | `null` |
 | Không có trường trạng thái trên form | `"status": "Pending approval"` |
 
 Form thực hiện mapping tập trung trong hàm `buildContractPayload()` tại
@@ -68,9 +69,9 @@ không ghi database và không khởi chạy agent.
   "contract_value": 1200000000,
   "gross_margin": 0.25,
   "payment_terms": "Performance bond required; 30% advance, 50% delivery, 20% acceptance",
-  "requested_amount": 300000000,
-  "funding_need_type": "PERFORMANCE_BOND",
-  "tenor": "7 months"
+  "requested_amount": null,
+  "funding_need_type": null,
+  "tenor": null
 }
 ```
 

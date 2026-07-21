@@ -5,7 +5,7 @@ fallback nếu truy vấn DB lỗi.
 """
 
 from dataclasses import asdict
-from typing import NotRequired, TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 from agents import function_tool
 from app.database.repository import query_db

@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+import asyncio
 import json
 import logging
 import os
@@ -32,6 +33,13 @@ def _finance_preflight_service():
     return finance_preflight_service
 
 
+def _contract_service():
+    """Load contract persistence helpers without coupling list endpoints to them."""
+    from app.service import contract_service
+
+    return contract_service
+
+
 async def _preflight_and_start(
     contract: ContractUploadPackage,
 ) -> FinancePreflightResult:
@@ -55,6 +63,15 @@ async def processed_contracts(limit: int = 100, offset: int = 0, latest_only: bo
         offset=offset,
         latest_only=latest_only,
     )
+
+
+@app.get("/contracts/next-id")
+async def next_contract_id():
+    """Return a display-only preview; allocation happens atomically on submit."""
+    contract_id = await asyncio.to_thread(
+        _contract_service().get_next_contract_id_preview
+    )
+    return {"contract_id": contract_id}
 
 @app.get("/contracts/overview")                            # JSON gọn: tên, giá trị, ngày, đề xuất
 async def contract_overviews(limit: int = 100, offset: int = 0, latest_only: bool = True):

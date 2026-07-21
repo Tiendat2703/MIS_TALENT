@@ -1,7 +1,9 @@
 import logging
 import os
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Lock
+from typing import Iterator
 
 from dotenv import load_dotenv
 from psycopg2 import pool
@@ -91,6 +93,24 @@ def query_db(query: str, params=None):
         logger.error("Database query failed (%s)", type(exc).__name__)
         raise
 
+    finally:
+        db_pool.putconn(connection)
+
+
+@contextmanager
+def transaction_cursor() -> Iterator[RealDictCursor]:
+    """Yield one cursor bound to one short explicit database transaction."""
+    db_pool = init_db_pool()
+    connection = db_pool.getconn()
+
+    try:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            yield cursor
+        connection.commit()
+    except Exception as exc:
+        connection.rollback()
+        logger.error("Database transaction failed (%s)", type(exc).__name__)
+        raise
     finally:
         db_pool.putconn(connection)
 

@@ -29,24 +29,24 @@ POST /finance/preflight
   -> RUNNING: allocate session and start Finance -> Risk -> Decision
 ```
 
-The preflight agent has its own prompt and only the two read-only tools shown
-above. It receives only the uploaded draft and checks the eleven input fields;
-it does not load or validate customer, invoice, order, transaction, cashflow, or
-other portfolio rows. Structured validation decides whether the pipeline may
-start. The public summary is also built deterministically from the missing field
-list, so LLM text cannot expand the validation scope. `POST /runs` with a
-contract body uses the same gate, while `POST /runs` without a body keeps the
-automatic batch mode.
+The preflight agent has its own prompt and three read-only tools. Structured
+validation checks the six required contract fields. When `gross_margin` is
+missing, the agent may load only the OPC service catalog and select a service
+identifier from the description. Application code validates that identifier and
+resolves `target_margin` from the database; the LLM never supplies the number.
+`POST /runs` with a contract body uses the same gate, while `POST /runs` without
+a body keeps automatic batch mode.
 
-The upload draft accepts these optional fields so preflight can report all
-missing values in one response. A run starts only after all eleven business
-fields are present; `status` is always normalized to `Pending approval`:
+The upload schema remains optional so preflight can report all missing values in
+one response. The six initial required fields are:
 
 ```text
-contract_id, customer_id, start_date, end_date, status, description,
-contract_value, gross_margin, payment_terms, requested_amount,
-funding_need_type, tenor
+customer_id, start_date, end_date, description, contract_value, payment_terms
 ```
+
+`gross_margin` must be user-provided or explicitly confirmed from the catalog
+recommendation before the run starts. The backend then generates `contract_id`,
+persists the row with `Pending approval`, and starts the pipeline.
 
 Precomputed risk fields are intentionally rejected. Risk evidence must come from
 the authoritative portfolio/risk sources or be reported as insufficient.

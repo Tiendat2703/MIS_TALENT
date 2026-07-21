@@ -14,13 +14,14 @@ import {
   CircleAlert,
   CirclePause,
   Clock3,
+  ListChecks,
   LoaderCircle,
   Play,
   Scale,
   ShieldCheck,
 } from "lucide-react";
 
-type AgentId = "Finance" | "Risk" | "Decision";
+type AgentId = "Finance" | "Risk" | "Decision" | "Validator";
 type AgentStatus = "Idle" | "Working" | "Waiting" | "Done" | "Review" | "Error";
 type ConnectionStatus = "idle" | "starting" | "connected" | "reconnecting" | "review" | "completed" | "error";
 type LogFilter = "All" | AgentId;
@@ -58,7 +59,7 @@ type ActivityItem = {
   events: PipelineEvent[];
 };
 
-const AGENT_IDS: AgentId[] = ["Finance", "Risk", "Decision"];
+const AGENT_IDS: AgentId[] = ["Finance", "Risk", "Decision", "Validator"];
 
 const agents = {
   Finance: {
@@ -82,6 +83,13 @@ const agents = {
     icon: Scale,
     summary: "Kết hợp kết quả Finance và Risk để tạo Decision Card, điều kiện bảo vệ và yêu cầu phê duyệt khi cần.",
   },
+  Validator: {
+    name: "Validator Agent",
+    role: "Kiểm soát chất lượng và chốt cổng QC",
+    accent: "#fb7185",
+    icon: ListChecks,
+    summary: "Đối chiếu quy trình, nguồn dữ liệu, output schema và ranh giới thẩm quyền sau mỗi agent trước khi cho phép pipeline đi tiếp.",
+  },
 } as const;
 
 const TOOL_LABELS: Record<string, string> = {
@@ -94,10 +102,12 @@ const TOOL_LABELS: Record<string, string> = {
   list_bank_products: "Đọc danh mục dịch vụ ngân hàng",
   precheck_performance_bond: "Kiểm tra điều kiện bảo lãnh thực hiện",
   precheck_trade_finance: "Kiểm tra điều kiện tài trợ thương mại",
+  load_validation_evidence: "Thu thập bằng chứng kiểm soát chất lượng",
 };
 
 const TASK_LABELS: Record<string, string> = {
   "Finance → Risk → Decision pipeline started": "Khởi tạo quy trình Finance, Risk và Decision",
+  "Gated pipeline: Finance → Validate → Risk → Validate → Decision": "Khởi tạo quy trình bốn agent có cổng kiểm soát",
   "Persist Finance Batch Pack": "Lưu kết quả phân tích tài chính",
   "Build and persist Risk Batch Pack": "Xây dựng và lưu Risk Pack",
   "Risk Pack persisted": "Lưu Risk Pack",
@@ -111,6 +121,7 @@ function createInitialAgentStates(): Record<AgentId, AgentRuntimeState> {
     Finance: { status: "Idle", task: "Chưa bắt đầu" },
     Risk: { status: "Idle", task: "Đang chờ kết quả từ Finance Agent" },
     Decision: { status: "Idle", task: "Đang chờ kết quả từ Risk Agent" },
+    Validator: { status: "Idle", task: "Đang chờ kết quả từ các agent nghiệp vụ" },
   };
 }
 
@@ -120,6 +131,7 @@ function resolveAgentId(name?: string): AgentId | null {
   if (normalized.includes("finance")) return "Finance";
   if (normalized.includes("risk")) return "Risk";
   if (normalized.includes("decision")) return "Decision";
+  if (normalized.includes("validator") || normalized.includes("validate")) return "Validator";
   return null;
 }
 
@@ -172,6 +184,9 @@ function describeEvent(event: PipelineEvent): string {
       : "Kết quả đã được chuyển sang bước tiếp theo.";
   }
   if (event.type === "agent_started" && agentId) return agents[agentId].summary;
+  if (event.type === "validation_started") return agents.Validator.summary;
+  if (event.type === "validation_finished") return event.summary || "Cổng kiểm soát đã PASS, pipeline được phép tiếp tục.";
+  if (event.type === "validation_challenge") return event.summary || "Validator phát hiện vấn đề cần xem xét trước khi pipeline tiếp tục.";
   if (event.type === "tool_started") return "Đang thực hiện tác vụ này. Kết quả sẽ được cập nhật trên cùng một dòng khi hoàn tất.";
   if (event.type === "tool_finished") return summarizeTechnicalOutput(event.summary);
   if (event.type === "approval_requested" || event.type === "run_review") {
@@ -244,6 +259,8 @@ function buildActivityItems(events: PipelineEvent[]): ActivityItem[] {
 
     const closesAgentWork = event.type === "agent_handoff"
       || event.type === "agent_finished"
+      || event.type === "validation_finished"
+      || event.type === "validation_challenge"
       || event.type === "risk_finished"
       || event.type === "run_finished";
 
@@ -499,7 +516,7 @@ export function AgentWorkspace() {
     return AGENT_IDS.reduce<Record<AgentId, number>>((counts, id) => {
       counts[id] = activity.filter((event) => resolveAgentId(event.agent) === id).length;
       return counts;
-    }, { Finance: 0, Risk: 0, Decision: 0 });
+    }, { Finance: 0, Risk: 0, Decision: 0, Validator: 0 });
   }, [activity]);
 
   const handlePipelineEvent = useCallback((event: PipelineEvent) => {
@@ -528,7 +545,7 @@ export function AgentWorkspace() {
         let status = current[eventAgent].status;
         if (event.status === "running" || event.type === "agent_started") status = "Working";
         if (event.status === "review" || event.type === "approval_requested" || event.type === "run_review") status = "Review";
-        if (event.type === "agent_finished" || event.type === "risk_finished" || event.type === "run_finished") status = "Done";
+        if (event.type === "agent_finished" || event.type === "validation_finished" || event.type === "risk_finished" || event.type === "run_finished") status = "Done";
         if (event.status === "error" || event.type === "run_error") status = "Error";
         if (event.status === "awaiting_input") status = "Waiting";
         next[eventAgent] = { status, task };
@@ -546,7 +563,7 @@ export function AgentWorkspace() {
       setSelected(targetAgent);
     } else if (eventAgent) {
       setSelected(eventAgent);
-      if (event.type === "agent_finished" || event.type === "risk_finished" || event.type === "run_review" || event.type === "approval_requested") {
+      if (event.type === "agent_finished" || event.type === "validation_finished" || event.type === "validation_challenge" || event.type === "risk_finished" || event.type === "run_review" || event.type === "approval_requested") {
         setActiveAgent(null);
       } else {
         setActiveAgent(eventAgent);
@@ -602,7 +619,7 @@ export function AgentWorkspace() {
     window.localStorage.removeItem(ACTIVE_RUN_STORAGE_KEY);
 
     try {
-      const response = await fetch(apiUrl("/runs"), {
+      const response = await fetch(apiUrl("/runs/validated"), {
         method: "POST",
         headers: {
           Accept: "application/json",
@@ -746,9 +763,9 @@ export function AgentWorkspace() {
   const currentDescription = activeAgent
     ? currentAgent?.summary
     : connectionStatus === "review"
-      ? "Decision Agent đã hoàn tất phân tích. Người có thẩm quyền cần xem xét yêu cầu đang chờ."
+      ? "Validator Agent đã hoàn tất kiểm soát hoặc phát hiện nội dung cần người có thẩm quyền xem xét."
       : connectionStatus === "completed"
-        ? "Finance, Risk và Decision Agent đã hoàn tất toàn bộ quy trình."
+        ? "Finance, Risk, Decision và Validator Agent đã hoàn tất toàn bộ quy trình."
         : "Nhấn Start Pipeline để bắt đầu và theo dõi công việc của từng agent theo thời gian thực.";
 
   return (
@@ -766,7 +783,7 @@ export function AgentWorkspace() {
               {sessionId && <span className="font-mono text-[11px] tabular-nums text-zinc-600">RUN #{sessionId}</span>}
             </div>
             <h1 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-white sm:text-3xl">Agent execution monitor</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Theo dõi công việc, kết quả và quá trình chuyển giao giữa Finance, Risk và Decision Agent.</p>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Theo dõi công việc, kết quả và các cổng kiểm soát giữa Finance, Risk, Decision và Validator Agent.</p>
           </div>
 
           <button
@@ -810,7 +827,7 @@ export function AgentWorkspace() {
 
           <div className="grid grid-cols-3 divide-x divide-white/10 rounded-2xl border border-white/10 bg-white/[0.025]">
             <div className="p-4 sm:p-5">
-              <p className="font-mono text-xl font-semibold tabular-nums text-white">{completedAgentCount}/3</p>
+              <p className="font-mono text-xl font-semibold tabular-nums text-white">{completedAgentCount}/{AGENT_IDS.length}</p>
               <p className="mt-1 text-[11px] leading-4 text-zinc-600">Agent hoàn tất</p>
             </div>
             <div className="p-4 sm:p-5">
@@ -829,7 +846,7 @@ export function AgentWorkspace() {
             <h2 className="text-base font-semibold text-white">Luồng xử lý</h2>
             <p className="mt-1 text-xs text-zinc-600">Chọn một agent để xem log liên quan.</p>
           </div>
-          <ol className="grid gap-3 lg:grid-cols-3">
+          <ol className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {AGENT_IDS.map((id, index) => (
               <AgentStage
                 key={id}

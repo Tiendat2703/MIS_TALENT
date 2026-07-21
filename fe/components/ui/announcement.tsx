@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import type { ComponentProps, HTMLAttributes, ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +16,10 @@ import { ChevronDown } from 'lucide-react';
 import LustreText from '@/components/ui/lustretext';
 
 const EXPANDABLE_CONTENT_SYMBOL = Symbol.for('AnnouncementExpandedContent');
+
+const subscribeToClient = () => () => {};
+const getClientSnapshot = () => true;
+const getServerSnapshot = () => false;
 
 const MovingBorder = ({
   children,
@@ -118,7 +122,11 @@ function AnnouncementComponent({
   const containerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const isMounted = typeof window !== 'undefined';
+  const isMounted = useSyncExternalStore(
+    subscribeToClient,
+    getClientSnapshot,
+    getServerSnapshot,
+  );
 
   const { expandedContent, mainContent, hasExpandable } = React.useMemo(() => {
     const childArray = React.Children.toArray(children);

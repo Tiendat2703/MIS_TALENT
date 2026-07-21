@@ -121,6 +121,24 @@ def analyze_contract_cashflow_impact(
             inflow_by_month.get(month, 0.0) - outflow_by_month.get(month, 0.0), 2
         )
 
+    # Nhu cầu vốn riêng của hợp đồng, không phụ thuộc số dư hay reserve gap toàn
+    # công ty: lấy đáy âm lớn nhất của dòng tiền hợp đồng tích lũy từ mốc 0.
+    cumulative_contract_cash = 0.0
+    lowest_contract_cash = 0.0
+    contract_cash_curve: list[dict[str, Any]] = []
+    for month in active_months:
+        cumulative_contract_cash = round(
+            cumulative_contract_cash + monthly_net[month],
+            2,
+        )
+        lowest_contract_cash = min(lowest_contract_cash, cumulative_contract_cash)
+        contract_cash_curve.append({
+            "month": month,
+            "net_delta": monthly_net[month],
+            "cumulative_contract_cash": cumulative_contract_cash,
+        })
+    peak_contract_cash_deficit = round(max(0.0, -lowest_contract_cash), 2)
+
     # Chồng lên cửa sổ cashflow gốc. projected_closing_cash là SỐ DƯ cuối kỳ nên
     # delta tháng M dịch số dư của M và mọi tháng sau (cộng dồn).
     window = [str(m["month"]) for m in base_months]
@@ -180,6 +198,8 @@ def analyze_contract_cashflow_impact(
             else None
         ),
         "funding_need_type": upload.get("funding_need_type"),
+        "peak_contract_cash_deficit": peak_contract_cash_deficit,
+        "contract_cash_curve": contract_cash_curve,
         "payment_schedule": payment_schedule,
         "monthly_delta": monthly_delta,
         "in_horizon_net_delta": in_horizon_net,

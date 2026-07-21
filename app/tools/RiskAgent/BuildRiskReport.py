@@ -21,6 +21,7 @@ from app.schema.handoff_packs import (
 )
 from app.schema.risk_db_models import RiskRule
 from app.tools.RiskAgent.GetRiskControls import (
+    DISABLED_RISK_RULE_IDS,
     get_alerts_impl,
     get_data_classes_impl,
     get_risk_rules_impl,
@@ -241,7 +242,11 @@ def _requires_human_approval(evaluation: RuleEvaluation) -> bool:
 def build_risk_pack_impl(finance_pack: FinanceFeaturePack) -> RiskPack:
     """Build one contract-scoped Risk Pack from a Finance Feature Pack."""
     masker = Masker(get_data_classes_impl())
-    rules = get_risk_rules_impl()
+    rules = [
+        rule
+        for rule in get_risk_rules_impl()
+        if rule.rule_id not in DISABLED_RISK_RULE_IDS
+    ]
     rule_by_id = {rule.rule_id: rule for rule in rules}
     evaluations = [_evaluate_finance_rule(rule, finance_pack, masker) for rule in rules]
     triggered = [item for item in evaluations if item.status == "TRIGGERED"]
@@ -316,9 +321,10 @@ def build_risk_pack_impl(finance_pack: FinanceFeaturePack) -> RiskPack:
 def build_risk_pack(finance_pack: FinanceFeaturePack) -> str:
     """Build one masked RiskPack JSON for the supplied FinanceFeaturePack.
 
-    The tool loads all organizer-provided RR rules, existing alerts, and data
-    classification policy from PostgreSQL, evaluates every rule against the
-    supplied contract metrics, matches existing alerts (with risk-type aliases),
+    The tool loads all active organizer-provided RR rules, existing alerts, and
+    data classification policy from PostgreSQL, evaluates every active rule
+    against the supplied contract metrics, matches existing alerts (with
+    risk-type aliases),
     proposes alerts for triggered rules that have no mapping, masks restricted and
     confidential fields per 20_DATA_CLASS, and reports overall severity, required
     actions, missing evidence, a summary, and whether human approval is required,

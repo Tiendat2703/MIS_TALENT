@@ -129,6 +129,61 @@ class FinanceSynthesis(StrictModel):
     handoff_summary: str
 
 
+class FinancePreflightSynthesis(StrictModel):
+    """Bounded semantic mapping produced by the isolated preflight agent.
+
+    The model may select catalog identifiers and explain the match, but it never
+    supplies a margin number.  The application resolves every number from the
+    database after validating the returned identifiers.
+    """
+
+    summary: str
+    primary_service_id: str | None = None
+    alternative_service_ids: list[str] = Field(default_factory=list)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    reasoning: str | None = None
+
+
+class FinanceServiceMatch(StrictModel):
+    service_id: str
+    service_name: str
+    target_margin: float = Field(ge=0, le=1)
+
+
+class GrossMarginRecommendation(StrictModel):
+    primary_service: FinanceServiceMatch
+    alternative_services: list[FinanceServiceMatch] = Field(default_factory=list)
+    recommended_gross_margin: float = Field(ge=0, le=1)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    reasoning: str
+
+
+class FinancePreflightMissingField(StrictModel):
+    field: str
+    label: str
+    reason: str
+    data_type: Literal["text", "number", "date"]
+
+
+class FinancePreflightDataIssue(StrictModel):
+    table: str
+    record: str
+    reason: str
+    severity: str
+    kind: str
+
+
+class FinancePreflightResult(StrictModel):
+    status: Literal["RUNNING", "AWAITING_INPUT", "AWAITING_CONFIRMATION"]
+    can_start_pipeline: bool
+    session_id: int | None = None
+    contract_id: str | None = None
+    missing_fields: list[FinancePreflightMissingField] = Field(default_factory=list)
+    data_issues: list[FinancePreflightDataIssue] = Field(default_factory=list)
+    gross_margin_recommendation: GrossMarginRecommendation | None = None
+    summary: str
+
+
 # ============ Output cuối: Finance Feature Pack ============
 class FinanceAnalysisPack(StrictModel):
     metadata: dict[str, Any]
@@ -148,7 +203,13 @@ class FinanceAnalysisPack(StrictModel):
 __all__ = [
     "BankReconciliationSummary",
     "FinanceAnalysisPack",
+    "FinancePreflightDataIssue",
+    "FinancePreflightMissingField",
+    "FinancePreflightResult",
+    "FinancePreflightSynthesis",
+    "FinanceServiceMatch",
     "FinanceSynthesis",
+    "GrossMarginRecommendation",
     "InvoiceClassification",
     "LiquidityBrief",
     "LiquidityMonth",

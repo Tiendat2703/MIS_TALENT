@@ -137,19 +137,72 @@ def resolve_contract_funding_need(
         }
 
     need_type = _field(finance, "funding_need_type")
-    if need_type is None:
-        return None
     raw_amount = _field(finance, "requested_amount")
     amount = float(raw_amount) if raw_amount is not None else None
+    if need_type is None and amount is None:
+        return None
+    details = _field(finance, "finance_details") or {}
+    funding_details = details.get("funding_need") or {}
+    amount_source = funding_details.get("requested_amount_source")
+    source_metadata = {
+        "contract_cashflow_peak_deficit": {
+            "basis": "finance.contract_cashflow_peak_deficit",
+            "source": "finance_inference",
+            "status": "INFERRED",
+        },
+        "performance_bond_percentage": {
+            "basis": "finance.performance_bond_percentage",
+            "source": "finance_inference",
+            "status": "CALCULATED",
+        },
+        "performance_bond_explicit_amount": {
+            "basis": "contract.payment_terms.performance_bond_amount",
+            "source": "contract_term",
+            "status": "EXTRACTED",
+        },
+        "performance_bond_full_contract_fallback": {
+            "basis": "finance.performance_bond_full_contract_fallback",
+            "source": "finance_inference",
+            "status": "ESTIMATED",
+        },
+        "payment_terms_percentage": {
+            "basis": "finance.payment_terms_percentage",
+            "source": "finance_inference",
+            "status": "CALCULATED",
+        },
+        "payment_terms_explicit_amount": {
+            "basis": "contract.payment_terms.financing_amount",
+            "source": "contract_term",
+            "status": "EXTRACTED",
+        },
+        "payment_terms_full_contract_fallback": {
+            "basis": "finance.payment_terms_full_contract_fallback",
+            "source": "finance_inference",
+            "status": "ESTIMATED",
+        },
+    }.get(amount_source)
     return {
         "need_type": need_type,
         "requested_amount": amount,
         "tenor": _field(finance, "tenor"),
-        "basis": "contract.funding_need.requested_amount",
+        "payment_terms": details.get("payment_terms"),
+        "basis": (
+            source_metadata["basis"]
+            if source_metadata is not None
+            else "contract.funding_need.requested_amount"
+        ),
         "scope": "contract",
-        "source": "contract_funding_need",
+        "source": (
+            source_metadata["source"]
+            if source_metadata is not None
+            else "contract_funding_need"
+        ),
         "credit_case_id": None,
-        "amount_status": "PROVIDED" if amount is not None else "MISSING",
+        "amount_status": (
+            source_metadata["status"]
+            if source_metadata is not None and amount is not None
+            else "PROVIDED" if amount is not None else "MISSING"
+        ),
     }
 
 

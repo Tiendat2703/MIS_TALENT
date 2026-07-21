@@ -3,12 +3,11 @@
   "customer_id": "CUS-005",
   "start_date": "2026-08-01",
   "end_date": "2027-02-28",
-  "status": "Pending approval",
   "description": "Triển khai hệ thống quản lý chuỗi cung ứng cho 12 kho nông sản",
   "contract_value": 1200000000,
   "gross_margin": 0.25,
-  "payment_terms": "Performance bond required; 30% advance, 50% delivery, 20% acceptance",
-  "requested_amount": 300000000,
-  "funding_need_type": "PERFORMANCE_BOND",
-  "tenor": "7 months"
+  "payment_terms": "Performance bond required",
+  "requested_amount": null,
+  "funding_need_type": null,
+  "tenor": null
 }

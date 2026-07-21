@@ -20,13 +20,38 @@ The upload JSON is the contract object itself; it has no package wrapper. The
 application merges it into an in-memory copy for this run and does not insert it
 into the normal contract table.
 
-The accepted upload contract contains exactly these fields:
+HTTP uploads use a Finance preflight gate before a session is allocated:
 
 ```text
-contract_id, customer_id, start_date, end_date, status, description,
-contract_value, gross_margin, payment_terms, requested_amount,
-funding_need_type, tenor
+POST /finance/preflight
+  -> Finance_Agent_Preflight(load_and_validate, missing_data)
+  -> AWAITING_INPUT: return missing_fields/data_issues, no session
+  -> RUNNING: allocate session and start Finance -> Risk -> Decision
 ```
+
+The preflight agent has its own prompt and three read-only tools. Structured
+validation checks the six required contract fields. When `gross_margin` is
+missing, the agent may load only the OPC service catalog and select a service
+identifier from the description. Application code validates that identifier and
+resolves `target_margin` from the database; the LLM never supplies the number.
+`POST /runs` with a contract body uses the same gate, while `POST /runs` without
+a body keeps automatic batch mode.
+
+The upload schema remains optional so preflight can report all missing values in
+one response. The six initial required fields are:
+
+```text
+customer_id, start_date, end_date, description, contract_value, payment_terms
+```
+
+`gross_margin` must be user-provided or explicitly confirmed from the catalog
+recommendation before the run starts. The backend then generates `contract_id`,
+persists the row with `Pending approval`, and starts the pipeline.
+
+`requested_amount` may remain null at submission. For an explicit financing term
+in `payment_terms`, Finance uses its stated percentage/amount or 100% of
+`contract_value` when none is stated. Finance leaves `funding_need_type` null;
+Decision reads the bank catalog and owns the product/type selection.
 
 Precomputed risk fields are intentionally rejected. Risk evidence must come from
 the authoritative portfolio/risk sources or be reported as insufficient.

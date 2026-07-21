@@ -12,6 +12,44 @@ from app.schema.financeAgent import ValidationIssue, ValidationResult
 from app.tools.FinanceAgent.util import to_float
 
 
+UPLOAD_FIELD_REQUIREMENTS = {
+    "customer_id": {
+        "label": "Mã khách hàng",
+        "data_type": "text",
+        "reason": "Cần bổ sung trường Mã khách hàng trong payload.",
+    },
+    "start_date": {
+        "label": "Ngày bắt đầu",
+        "data_type": "date",
+        "reason": "Cần bổ sung trường Ngày bắt đầu trong payload.",
+    },
+    "end_date": {
+        "label": "Ngày kết thúc",
+        "data_type": "date",
+        "reason": "Cần bổ sung trường Ngày kết thúc trong payload.",
+    },
+    "description": {
+        "label": "Mô tả hợp đồng",
+        "data_type": "text",
+        "reason": "Cần bổ sung trường Mô tả hợp đồng trong payload.",
+    },
+    "contract_value": {
+        "label": "Giá trị hợp đồng",
+        "data_type": "number",
+        "reason": "Cần bổ sung trường Giá trị hợp đồng trong payload.",
+    },
+    "payment_terms": {
+        "label": "Điều khoản thanh toán",
+        "data_type": "text",
+        "reason": "Cần bổ sung trường Điều khoản thanh toán trong payload.",
+    },
+}
+
+
+def _is_missing(value: object) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
 def _looks_like_customer(cp) -> bool:
     return isinstance(cp, str) and cp.startswith("CUS-")
 
@@ -29,8 +67,31 @@ def validate_finance_data(data: dict) -> ValidationResult:
 
     issues: list[ValidationIssue] = []
 
+    upload = data.get("upload")
+    upload_record = str(
+        data.get("_preflight_upload_record_id")
+        or (upload or {}).get("contract_id")
+        or "UPLOAD-DRAFT"
+    )
+    payload_only = data.get("_preflight_payload_only") is True
+    if isinstance(upload, dict):
+        for column, requirement in UPLOAD_FIELD_REQUIREMENTS.items():
+            if _is_missing(upload.get(column)):
+                issues.append(ValidationIssue(
+                    kind="missing_field",
+                    table="04_CONTRACTS",
+                    record=upload_record,
+                    detail=str(requirement["reason"]),
+                    severity="error",
+                    column=column,
+                ))
+
     # --- Toàn vẹn tham chiếu ---
     for c in contracts:
+        if c.get("contract_id") == upload_record and (
+            payload_only or _is_missing(c.get("customer_id"))
+        ):
+            continue
         if c.get("customer_id") not in customer_ids:
             issues.append(ValidationIssue(
                 kind="broken_reference",
@@ -77,6 +138,8 @@ def validate_finance_data(data: dict) -> ValidationResult:
     # --- Field bắt buộc + số bất thường ---
     # Các trường tính toán cốt lõi thiếu -> error (chặn), vì không được bịa số.
     for c in contracts:
+        if c.get("contract_id") == upload_record and isinstance(upload, dict):
+            continue
         if c.get("contract_value") is None:
             issues.append(ValidationIssue(
                 kind="missing_field",
@@ -194,3 +257,6 @@ def validate_finance_data(data: dict) -> ValidationResult:
         external_counterparties=sorted(external_cp),
         unidentified_counterparties=sorted(unidentified_cp),
     )
+
+
+__all__ = ["UPLOAD_FIELD_REQUIREMENTS", "validate_finance_data"]

@@ -12,6 +12,7 @@ from app.schema.decisionAgent import (
 from app.schema.handoff_packs import FinanceBatchPack, RiskBatchPack, RiskPack
 from app.schema.risk_db_models import CreditProfile
 from app.service.credit_profile import resolve_contract_funding_need
+from app.tools.DecisionAgent.GetBankProduct import load_bank_product_catalog
 
 
 def validate_decision_finance_consistency(
@@ -28,6 +29,7 @@ def validate_decision_finance_consistency(
             f"expected={expected_ids}, returned={list(decisions)}"
         )
 
+    catalog_by_id: dict[str, dict[str, Any]] | None = None
     for finance in finance_batch.packs:
         decision = decisions[finance.contract_id]
         funding_need = resolve_contract_funding_need(
@@ -40,6 +42,37 @@ def validate_decision_finance_consistency(
         funding_source = (
             funding_need.get("basis") if funding_need is not None else "no funding need"
         )
+        if decision.selected_bank_product_id is not None:
+            if catalog_by_id is None:
+                catalog_by_id = {
+                    str(product["bank_product_id"]): product
+                    for product in load_bank_product_catalog()
+                }
+            product = catalog_by_id.get(decision.selected_bank_product_id)
+            if product is None:
+                raise ValueError(
+                    f"Decision for {finance.contract_id} selected an unknown bank "
+                    f"product id: {decision.selected_bank_product_id}"
+                )
+            if decision.selected_bank_product_name != product["product_name"]:
+                raise ValueError(
+                    f"Decision product name for {finance.contract_id} must match "
+                    f"catalog id {decision.selected_bank_product_id}: "
+                    f"{product['product_name']}"
+                )
+            if requested_amount is None:
+                raise ValueError(
+                    f"Decision for {finance.contract_id} selected a bank product "
+                    "before Finance supplied requested_amount"
+                )
+            minimum_amount = float(product["minimum_amount"])
+            if requested_amount < minimum_amount:
+                raise ValueError(
+                    f"Decision product {decision.selected_bank_product_id} requires "
+                    f"minimum_amount={minimum_amount}, but {finance.contract_id} "
+                    f"has requested_amount={requested_amount}"
+                )
+
         if requested_amount is None:
             if decision.capital_need is not None:
                 raise ValueError(
@@ -59,28 +92,75 @@ def validate_decision_finance_consistency(
 
 def _temporary_rejection_policy(
     risk: RiskPack,
-) -> tuple[set[str], set[str]]:
-    """Return mandatory rule ids and large-amount companion risk ids."""
+) -> set[str]:
+    """Return rule ids that independently require temporary rejection."""
     triggered = set(risk.triggered_rule_ids)
-    required_rule_ids: set[str] = set()
-    large_amount_companions: set[str] = set()
+    return {"RR-003"} if "RR-003" in triggered else set()
 
-    if "RR-003" in triggered:
-        required_rule_ids.add("RR-003")
 
-    if "RR-005" in triggered:
-        large_amount_companions = triggered - {"RR-005"}
-        if large_amount_companions:
-            required_rule_ids.add("RR-005")
+def apply_mandatory_risk_policy(
+    batch: DecisionBatchOutput,
+    risk_batch: RiskBatchPack,
+    *,
+    contract_id: str | None = None,
+) -> DecisionBatchOutput:
+    """Deterministically preserve mandatory risk rejection after continuation.
 
-    return required_rule_ids, large_amount_companions
+    A bank precheck result enriches a Decision Card; it must never override an
+    authoritative RR-003 rejection. This also repairs historical runs
+    created before the mandatory policy was enforced at the initial commit.
+    """
+    risk_by_contract = {risk.contract_id: risk for risk in risk_batch.packs}
+    payload = batch.model_dump(mode="json")
+
+    for decision in payload["decisions"]:
+        current_contract_id = decision["contract_id"]
+        if contract_id is not None and current_contract_id != contract_id:
+            continue
+        risk = risk_by_contract.get(current_contract_id)
+        if risk is None:
+            continue
+
+        required_rule_ids = _temporary_rejection_policy(risk)
+        if not required_rule_ids:
+            continue
+
+        decision.update(
+            accept_opportunity=False,
+            recommended_option=RecommendedOption.TEMPORARY_REJECT_RISK.value,
+            decision_status=DecisionStatus.REJECT.value,
+            is_preliminary=True,
+            requires_founder_confirmation=True,
+        )
+
+        cited_rule_ids = sorted(required_rule_ids)
+        rationale = " ".join([
+            str(decision.get("protective_condition") or ""),
+            *[str(reason) for reason in decision.get("reasons") or []],
+        ]).casefold()
+        if all(rule_id.casefold() in rationale for rule_id in cited_rule_ids):
+            continue
+
+        policy_note = (
+            "Chính sách rủi ro bắt buộc tạm từ chối theo "
+            f"{', '.join(cited_rule_ids)}; cần hoàn tất hành động khắc phục và "
+            "đánh giá lại rủi ro trước khi tiếp tục hồ sơ."
+        )
+        reasons = list(decision["reasons"])
+        reasons[-1] = f"{reasons[-1]} {policy_note}"
+        decision["reasons"] = reasons
+        decision["protective_condition"] = (
+            f"{decision['protective_condition']} {policy_note}"
+        )
+
+    return DecisionBatchOutput.model_validate(payload)
 
 
 def validate_decision_risk_policy(
     batch: DecisionBatchOutput,
     risk_batch: RiskBatchPack,
 ) -> None:
-    """Enforce temporary rejection for margin or large-risk combinations."""
+    """Enforce temporary rejection only for independently blocking rules."""
     decisions = {item.contract_id: item for item in batch.decisions}
     if list(decisions) != risk_batch.contract_ids:
         raise ValueError(
@@ -89,9 +169,7 @@ def validate_decision_risk_policy(
         )
 
     for risk in risk_batch.packs:
-        required_rule_ids, large_amount_companions = _temporary_rejection_policy(
-            risk
-        )
+        required_rule_ids = _temporary_rejection_policy(risk)
         if not required_rule_ids:
             continue
 
@@ -119,17 +197,6 @@ def validate_decision_risk_policy(
             raise ValueError(
                 f"Temporary rejection for {risk.contract_id} must explain "
                 f"risk rules {missing_rule_ids}"
-            )
-        if (
-            "RR-005" in required_rule_ids
-            and not any(
-                rule_id.casefold() in rationale
-                for rule_id in large_amount_companions
-            )
-        ):
-            raise ValueError(
-                f"Large-amount temporary rejection for {risk.contract_id} must "
-                "identify at least one companion triggered risk rule"
             )
 
 
@@ -178,6 +245,7 @@ def validate_decision_prechecks(
 
 
 __all__ = [
+    "apply_mandatory_risk_policy",
     "validate_decision_finance_consistency",
     "validate_decision_prechecks",
     "validate_decision_risk_policy",

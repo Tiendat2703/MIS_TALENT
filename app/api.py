@@ -1,10 +1,12 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+import asyncio
 import json
 import logging
 import os
 
+from app.schema.financeAgent import FinancePreflightResult
 from app.schema.pipeline_input import ContractUploadPackage
 from app.service.approval import ApprovalExecutionError
 from app.service.pipeline_service import (
@@ -22,6 +24,26 @@ def _pipeline_service():
     from app.service import pipeline_service
 
     return pipeline_service
+
+
+def _finance_preflight_service():
+    """Load the isolated Finance gate only for uploaded-contract requests."""
+    from app.service import finance_preflight_service
+
+    return finance_preflight_service
+
+
+def _contract_service():
+    """Load contract persistence helpers without coupling list endpoints to them."""
+    from app.service import contract_service
+
+    return contract_service
+
+
+async def _preflight_and_start(
+    contract: ContractUploadPackage,
+) -> FinancePreflightResult:
+    return await _finance_preflight_service().preflight_and_start_pipeline(contract)
 
 # Cho phép FE (React) gọi API + SSE từ origin khác. Dev: mặc định cho tất cả;
 # production đặt CORS_ORIGINS="https://your-fe.com,https://..." trong .env.
@@ -42,9 +64,27 @@ async def processed_contracts(limit: int = 100, offset: int = 0, latest_only: bo
         latest_only=latest_only,
     )
 
+
+@app.get("/contracts/next-id")
+async def next_contract_id():
+    """Return a display-only preview; allocation happens atomically on submit."""
+    contract_id = await asyncio.to_thread(
+        _contract_service().get_next_contract_id_preview
+    )
+    return {"contract_id": contract_id}
+
 @app.get("/contracts/overview")                            # JSON gọn: tên, giá trị, ngày, đề xuất
 async def contract_overviews(limit: int = 100, offset: int = 0, latest_only: bool = True):
     return await _pipeline_service().list_contract_overviews(
+        limit=limit,
+        offset=offset,
+        latest_only=latest_only,
+    )
+
+@app.get("/dashboard")
+async def dashboard_data(limit: int = 100, offset: int = 0, latest_only: bool = True):
+    """Bootstrap contracts, metrics and approvals with one browser request."""
+    return await _pipeline_service().get_dashboard_data(
         limit=limit,
         offset=offset,
         latest_only=latest_only,
@@ -61,12 +101,29 @@ async def validate_contract(contract: ContractUploadPackage):
         "contract": payload,
     }
 
+
+@app.post("/finance/preflight", response_model=FinancePreflightResult)
+async def finance_preflight(
+    contract: ContractUploadPackage,
+) -> FinancePreflightResult:
+    """Check Finance readiness and start the full pipeline only when it is clean."""
+    return await _preflight_and_start(contract)
+
+
 @app.post("/runs")
 async def create_run(contract: ContractUploadPackage | None = None):
     # Có body -> chạy 1 hợp đồng upload. Bỏ trống -> chạy CẢ LÔ hợp đồng có sẵn
     # trong database thật. Không có fallback mock.
+    if contract is not None:
+        return await _preflight_and_start(contract)
+    return await _pipeline_service().start_pipeline_run(contract=None)
+
+@app.post("/runs/validated")                               # chạy pipeline CÓ CỔNG QC
+async def create_validated_run(contract: ContractUploadPackage | None = None):
+    # Finance → Validate → Risk → Validate → Decision → Validate. Dừng tại cổng đầu
+    # tiên không PASS. Validation event phát trên cùng session_id (xem qua SSE).
     payload = contract.model_dump(mode="json") if contract is not None else None
-    return await _pipeline_service().start_pipeline_run(contract=payload)
+    return await _pipeline_service().start_validated_pipeline_run(contract=payload)
 
 @app.get("/runs/{session_id}/events")                      # SSE cho dashboard
 async def run_events(session_id: int):
@@ -91,6 +148,14 @@ async def run_result(session_id: int):
 async def run_decision(session_id: int):
     return await _pipeline_service().get_decision_cards(session_id)
 
+@app.get("/runs/{session_id}/detail")
+async def run_detail(session_id: int):
+    return await _pipeline_service().get_run_detail(session_id)
+
+@app.get("/runs/{session_id}/validations")                 # ValidationReport của validator
+async def run_validations(session_id: int):
+    return await _pipeline_service().get_validation_reports(session_id)
+
 @app.get("/runs/{session_id}/approvals")
 async def approvals(session_id: int):
     return await _pipeline_service().list_pending_approvals(session_id)
@@ -110,5 +175,13 @@ async def approve(session_id: int, approval_id: str, approved: bool):
                 "contract_id": exc.contract_id,
                 "approval_id": exc.approval_id,
                 "message": exc.execution_error,
+            },
+        ) from exc
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "APPROVAL_DECISION_REJECTED",
+                "message": str(exc),
             },
         ) from exc

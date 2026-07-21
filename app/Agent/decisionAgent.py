@@ -26,7 +26,7 @@ from app.Agent.state_store import (
 )
 from app.schema.decisionAgent import DecisionBatchOutput
 from app.service.decision_guard import validate_decision_prechecks
-from app.tools.DecisionAgent.GetBankProduct import match_bank_product
+from app.tools.DecisionAgent.GetBankProduct import list_bank_products
 from app.tools.DecisionAgent.PrecheckAPI import (
     precheck_micro_credit,
     precheck_performance_bond,
@@ -60,7 +60,7 @@ def build_decision_agent(
         output_type=DecisionBatchOutput,
         tools=[
             load_decision_context,
-            match_bank_product,
+            list_bank_products,
             precheck_performance_bond,
             precheck_trade_finance,
             precheck_micro_credit,

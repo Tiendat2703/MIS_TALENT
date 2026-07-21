@@ -18,7 +18,7 @@ from datetime import date
 from agents import RunContextWrapper, function_tool
 
 from app.Agent.hooks import AppContext
-from app.tools.FinanceAgent.finance_data import load_all
+from app.tools.FinanceAgent.finance_data import get_services, load_all
 from app.tools.FinanceAgent.invoices import classify_invoices
 from app.tools.FinanceAgent.liquidity import analyze_liquidity
 from app.tools.FinanceAgent.margin import analyze_margin
@@ -45,13 +45,39 @@ def _today(ctx: RunContextWrapper[AppContext]) -> date:
 
 
 @function_tool
+async def load_service_catalog(ctx: RunContextWrapper[AppContext]) -> dict:
+    """Preflight only: load the OPC service catalog for semantic description matching.
+
+    The tool keeps complete rows in the private run context so application code
+    can resolve ``target_margin`` after validating the LLM-selected service ID.
+    Margin numbers are deliberately omitted from the tool result shown to the
+    model; the model's only numeric output is an informational confidence score.
+    """
+    rows = await asyncio.to_thread(get_services)
+    catalog = [dict(row) for row in rows if row.get("service_id")]
+    ctx.context.finance_store["service_catalog"] = catalog
+    return {
+        "count": len(catalog),
+        "services": [
+            {
+                "service_id": row.get("service_id"),
+                "service_name": row.get("service_name"),
+                "pricing_model": row.get("pricing_model"),
+                "target_segment": row.get("target_segment"),
+            }
+            for row in catalog
+        ],
+    }
+
+
+@function_tool
 async def load_and_validate(ctx: RunContextWrapper[AppContext]) -> dict:
     """Bước 1: Nạp dữ liệu tài chính và kiểm tra tính hợp lệ (toàn vẹn tham chiếu,
     field bắt buộc, phân loại counterparty). Độc lập, có thể gọi song song."""
     data = await _data(ctx)
     result = await asyncio.to_thread(validate_finance_data, data)
     ctx.context.finance_store["validation"] = result
-    return {
+    output = {
         "data_source": data["source"],
         "readiness": result.readiness,
         "error_count": result.error_count,
@@ -61,6 +87,14 @@ async def load_and_validate(ctx: RunContextWrapper[AppContext]) -> dict:
         "unidentified_counterparties": result.unidentified_counterparties,
         "issues": [i.model_dump(mode="json") for i in result.issues],
     }
+    if data.get("_preflight_payload_only") is True:
+        # Expose only the one field required for semantic catalog matching.
+        # The prompt treats it as untrusted data and forbids following embedded
+        # instructions.
+        output["contract_description"] = (data.get("upload") or {}).get(
+            "description"
+        )
+    return output
 
 
 @function_tool

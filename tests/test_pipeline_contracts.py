@@ -228,6 +228,41 @@ async def test_global_event_subscriber_receives_pipeline_completion(tmp_path) ->
     assert bus.global_subscribers == []
 
 
+@pytest.mark.asyncio
+async def test_dashboard_waits_for_validator_terminal_event(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    bus = AgentEventBus(log_dir=tmp_path)
+    monkeypatch.setattr(pipeline_service, "event_bus", bus)
+    stream = pipeline_service.stream_dashboard_events(poll_interval=0.1)
+
+    ready = await anext(stream)
+    assert ready["type"] == "dashboard_ready"
+
+    await bus.emit(
+        42,
+        {
+            "type": "decision_ready",
+            "agent": "Decision_Agent",
+            "status": "running",
+        },
+    )
+    await bus.emit(
+        42,
+        {
+            "type": "run_finished",
+            "agent": "Validator_Agent",
+            "status": "done",
+        },
+    )
+
+    event = await anext(stream)
+    assert event["type"] == "run_finished"
+    assert event["agent"] == "Validator_Agent"
+    await stream.aclose()
+
+
 def _finance_pack() -> FinanceFeaturePack:
     return FinanceFeaturePack(
         case_id="CASE-CON-004",

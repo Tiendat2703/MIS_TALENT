@@ -113,10 +113,10 @@ async def finance_preflight(
 @app.post("/runs")
 async def create_run(contract: ContractUploadPackage | None = None):
     # Có body -> chạy 1 hợp đồng upload. Bỏ trống -> chạy CẢ LÔ hợp đồng có sẵn
-    # trong database thật. Không có fallback mock.
+    # trong database thật. Mọi chế độ đều đi qua Validator sau từng agent.
     if contract is not None:
         return await _preflight_and_start(contract)
-    return await _pipeline_service().start_pipeline_run(contract=None)
+    return await _pipeline_service().start_validated_pipeline_run(contract=None)
 
 @app.post("/runs/validated")                               # chạy pipeline CÓ CỔNG QC
 async def create_validated_run(contract: ContractUploadPackage | None = None):

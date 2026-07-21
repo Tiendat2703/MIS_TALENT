@@ -7,64 +7,101 @@ import {
   CalendarDays,
   CheckCircle2,
   CircleAlert,
-  Clock3,
   FileCheck2,
   FileText,
   Landmark,
   Percent,
   RotateCcw,
   Send,
+  Sparkles,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import contractPayloadTemplate from "./contract-payload.json";
-
 export const NEW_CONTRACT_STATUS = "Pending approval" as const;
 
 export type ContractFormData = {
+  contract_id: string | null;
+  customer_id: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  status: typeof NEW_CONTRACT_STATUS;
+  description: string | null;
+  contract_value: number | null;
+  gross_margin: number | null;
+  payment_terms: string | null;
+  requested_amount: number | null;
+  funding_need_type: string | null;
+  tenor: string | null;
+};
+
+export type FinancePreflightMissingField = {
+  field: string;
+  label: string;
+  reason: string;
+  data_type: "text" | "number" | "date";
+};
+
+export type FinancePreflightDataIssue = {
+  table: string;
+  record: string;
+  reason: string;
+  severity: string;
+  kind: string;
+};
+
+export type FinanceServiceMatch = {
+  service_id: string;
+  service_name: string;
+  target_margin: number;
+};
+
+export type GrossMarginRecommendation = {
+  primary_service: FinanceServiceMatch;
+  alternative_services: FinanceServiceMatch[];
+  recommended_gross_margin: number;
+  confidence: number | null;
+  reasoning: string;
+};
+
+export type FinancePreflightResponse = {
+  status: "RUNNING" | "AWAITING_INPUT" | "AWAITING_CONFIRMATION";
+  can_start_pipeline: boolean;
+  session_id: number | null;
+  contract_id: string | null;
+  missing_fields: FinancePreflightMissingField[];
+  data_issues: FinancePreflightDataIssue[];
+  gross_margin_recommendation: GrossMarginRecommendation | null;
+  summary: string;
+};
+
+type ContractFormState = {
   contract_id: string;
   customer_id: string;
   start_date: string;
   end_date: string;
-  status: typeof NEW_CONTRACT_STATUS;
   description: string;
-  contract_value: number;
-  gross_margin: number;
-  payment_terms: string;
-  requested_amount: number;
-  funding_need_type: string;
-  tenor: string;
-};
-
-const contractPayloadBase: ContractFormData = {
-  ...contractPayloadTemplate,
-  status: NEW_CONTRACT_STATUS,
-};
-
-type ContractFormState = Omit<
-  ContractFormData,
-  "status" | "contract_value" | "gross_margin" | "requested_amount"
-> & {
   contract_value: string;
   gross_margin: string;
-  requested_amount: string;
+  payment_terms: string;
 };
 
 type FieldErrors = Partial<Record<keyof ContractFormState, string>>;
 
 export type ContractFormProps = {
   initialValues?: Partial<ContractFormData>;
-  onSubmit?: (values: ContractFormData) => void | Promise<void>;
+  onSubmit?: (
+    values: ContractFormData,
+  ) => void | FinancePreflightResponse | Promise<void | FinancePreflightResponse>;
   className?: string;
   submitLabel?: string;
   disabled?: boolean;
 };
 
-const fundingOptions = [
-  { value: "PERFORMANCE_BOND", label: "Bảo lãnh thực hiện" },
-  { value: "WORKING_CAPITAL", label: "Vốn lưu động" },
-  { value: "TRADE_FINANCE", label: "Tài trợ thương mại" },
-  { value: "RECEIVABLE_FINANCING", label: "Tài trợ khoản phải thu" },
+const paymentTermOptions = [
+  "Monthly payment",
+  "Milestone payment",
+  "Performance bond required",
+  "Possible LC/trade finance",
 ] as const;
 
 const inputClassName =
@@ -80,14 +117,10 @@ function toFormState(values?: Partial<ContractFormData>): ContractFormState {
     end_date: values?.end_date ?? "",
     description: values?.description ?? "",
     contract_value:
-      values?.contract_value === undefined ? "" : String(values.contract_value),
+      values?.contract_value == null ? "" : String(values.contract_value),
     gross_margin:
-      values?.gross_margin === undefined ? "" : String(values.gross_margin * 100),
+      values?.gross_margin == null ? "" : String(values.gross_margin * 100),
     payment_terms: values?.payment_terms ?? "",
-    requested_amount:
-      values?.requested_amount === undefined ? "" : String(values.requested_amount),
-    funding_need_type: values?.funding_need_type ?? "",
-    tenor: values?.tenor ?? "",
   };
 }
 
@@ -105,53 +138,50 @@ function formatCurrency(value: string) {
 function validate(values: ContractFormState): FieldErrors {
   const errors: FieldErrors = {};
   const contractValue = Number(values.contract_value);
-  const requestedAmount = Number(values.requested_amount);
   const grossMargin = Number(values.gross_margin);
 
-  if (!values.contract_id.trim()) errors.contract_id = "Vui lòng nhập mã hợp đồng.";
-  if (!values.customer_id.trim()) errors.customer_id = "Vui lòng nhập mã khách hàng.";
-  if (!values.start_date) errors.start_date = "Vui lòng chọn ngày bắt đầu.";
-  if (!values.end_date) errors.end_date = "Vui lòng chọn ngày kết thúc.";
   if (values.start_date && values.end_date && values.end_date < values.start_date) {
     errors.end_date = "Ngày kết thúc phải sau ngày bắt đầu.";
   }
-  if (!values.description.trim()) errors.description = "Vui lòng mô tả hợp đồng.";
-  if (!Number.isFinite(contractValue) || contractValue <= 0) {
+  if (values.contract_value && (!Number.isFinite(contractValue) || contractValue <= 0)) {
     errors.contract_value = "Giá trị hợp đồng phải lớn hơn 0.";
   }
-  if (!Number.isFinite(grossMargin) || grossMargin < 0 || grossMargin > 100) {
+  if (
+    values.gross_margin
+    && (!Number.isFinite(grossMargin) || grossMargin < 0 || grossMargin > 100)
+  ) {
     errors.gross_margin = "Biên lợi nhuận phải nằm trong khoảng 0–100%.";
   }
-  if (!values.payment_terms.trim()) {
-    errors.payment_terms = "Vui lòng nhập điều khoản thanh toán.";
-  }
-  if (!values.funding_need_type) {
-    errors.funding_need_type = "Vui lòng chọn loại nhu cầu vốn.";
-  }
-  if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
-    errors.requested_amount = "Số tiền đề nghị phải lớn hơn 0.";
-  } else if (contractValue > 0 && requestedAmount > contractValue) {
-    errors.requested_amount = "Số tiền đề nghị không được vượt giá trị hợp đồng.";
-  }
-  if (!values.tenor.trim()) errors.tenor = "Vui lòng nhập thời hạn tài trợ.";
-
   return errors;
+}
+
+function optionalText(value: string): string | null {
+  return value.trim() || null;
+}
+
+function optionalNumber(value: string): number | null {
+  return value.trim() ? Number(value) : null;
 }
 
 function buildContractPayload(values: ContractFormState): ContractFormData {
   return {
-    ...contractPayloadBase,
-    ...values,
-    contract_id: values.contract_id.trim(),
-    customer_id: values.customer_id.trim(),
-    description: values.description.trim(),
-    payment_terms: values.payment_terms.trim(),
-    tenor: values.tenor.trim(),
-    contract_value: Number(values.contract_value),
-    gross_margin: Number(values.gross_margin) / 100,
-    requested_amount: Number(values.requested_amount),
+    contract_id: optionalText(values.contract_id),
+    customer_id: optionalText(values.customer_id),
+    start_date: optionalText(values.start_date),
+    end_date: optionalText(values.end_date),
+    description: optionalText(values.description),
+    contract_value: optionalNumber(values.contract_value),
+    gross_margin: values.gross_margin.trim() ? Number(values.gross_margin) / 100 : null,
+    payment_terms: optionalText(values.payment_terms),
+    requested_amount: null,
+    funding_need_type: null,
+    tenor: null,
     status: NEW_CONTRACT_STATUS,
   };
+}
+
+function RequiredMark() {
+  return <span className="ml-1 text-emerald-400" aria-hidden="true">*</span>;
 }
 
 function FieldError({ id, message }: { id: string; message?: string }) {
@@ -191,20 +221,25 @@ export function ContractForm({
   initialValues,
   onSubmit,
   className,
-  submitLabel = "Gửi yêu cầu thẩm định",
+  submitLabel = "Kiểm tra và gửi thẩm định",
   disabled = false,
 }: ContractFormProps) {
   const initialState = useMemo(() => toFormState(initialValues), [initialValues]);
   const [values, setValues] = useState<ContractFormState>(initialState);
   const [errors, setErrors] = useState<FieldErrors>({});
-  const [submitState, setSubmitState] = useState<"idle" | "submitting" | "success" | "error">(
-    "idle",
-  );
+  const [submitState, setSubmitState] = useState<
+    "idle" | "submitting" | "success" | "error" | "confirmation"
+  >("idle");
   const [submitMessage, setSubmitMessage] = useState("");
+  const [dataIssues, setDataIssues] = useState<FinancePreflightDataIssue[]>([]);
+  const [marginRecommendation, setMarginRecommendation] =
+    useState<GrossMarginRecommendation | null>(null);
 
   const updateField = (field: keyof ContractFormState, value: string) => {
     setValues((current) => ({ ...current, [field]: value }));
     setErrors((current) => ({ ...current, [field]: undefined }));
+    setDataIssues([]);
+    setMarginRecommendation(null);
     if (submitState !== "idle") {
       setSubmitState("idle");
       setSubmitMessage("");
@@ -212,7 +247,7 @@ export function ContractForm({
   };
 
   const updateMoneyField = (
-    field: "contract_value" | "requested_amount",
+    field: "contract_value",
     value: string,
   ) => updateField(field, value.replace(/[^\d]/g, ""));
 
@@ -232,7 +267,28 @@ export function ContractForm({
     try {
       setSubmitState("submitting");
       setSubmitMessage("");
-      await onSubmit?.(payload);
+      const result = await onSubmit?.(payload);
+      if (result?.status === "AWAITING_INPUT") {
+        const serverErrors: FieldErrors = {};
+        for (const missing of result.missing_fields) {
+          if (missing.field in values) {
+            serverErrors[missing.field as keyof ContractFormState] = missing.reason;
+          }
+        }
+        setErrors(serverErrors);
+        setDataIssues(result.data_issues);
+        setSubmitState("error");
+        setSubmitMessage(result.summary);
+        return;
+      }
+      if (result?.status === "AWAITING_CONFIRMATION") {
+        setErrors({});
+        setDataIssues(result.data_issues);
+        setMarginRecommendation(result.gross_margin_recommendation);
+        setSubmitState("confirmation");
+        setSubmitMessage(result.summary);
+        return;
+      }
       setSubmitState("success");
       setSubmitMessage(
         onSubmit
@@ -250,8 +306,20 @@ export function ContractForm({
   const handleReset = () => {
     setValues(initialState);
     setErrors({});
+    setDataIssues([]);
+    setMarginRecommendation(null);
     setSubmitState("idle");
     setSubmitMessage("");
+  };
+
+  const applyMarginRecommendation = () => {
+    if (!marginRecommendation) return;
+    const percentage = marginRecommendation.recommended_gross_margin * 100;
+    setValues((current) => ({ ...current, gross_margin: String(percentage) }));
+    setErrors((current) => ({ ...current, gross_margin: undefined }));
+    setMarginRecommendation(null);
+    setSubmitState("confirmation");
+    setSubmitMessage("Đã áp dụng đề xuất. Vui lòng gửi lại để bắt đầu pipeline.");
   };
 
   const describedBy = (field: keyof ContractFormState, hintId?: string) =>
@@ -298,18 +366,18 @@ export function ContractForm({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="contract_id">
-              Mã hợp đồng <span className="text-emerald-400">*</span>
+              Mã hợp đồng
               <div className="relative">
                 <FileText className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
                 <input
                   id="contract_id"
                   name="contract_id"
                   value={values.contract_id}
-                  onChange={(event) => updateField("contract_id", event.target.value)}
-                  className={cn(inputClassName, "pl-10")}
-                  placeholder="VD: CON-001"
+                  className={cn(inputClassName, "cursor-not-allowed pl-10 text-[var(--fin-muted)]")}
+                  placeholder="Đang cấp mã..."
                   autoComplete="off"
-                  disabled={disabled}
+                  readOnly
+                  aria-readonly="true"
                   aria-invalid={Boolean(errors.contract_id)}
                   aria-describedby={describedBy("contract_id")}
                 />
@@ -318,7 +386,7 @@ export function ContractForm({
             </label>
 
             <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="customer_id">
-              Mã khách hàng <span className="text-emerald-400">*</span>
+              Mã khách hàng<RequiredMark />
               <div className="relative">
                 <Building2 className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
                 <input
@@ -338,7 +406,7 @@ export function ContractForm({
             </label>
 
             <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="start_date">
-              Ngày bắt đầu <span className="text-emerald-400">*</span>
+              Ngày bắt đầu<RequiredMark />
               <div className="relative">
                 <CalendarDays className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
                 <input
@@ -357,7 +425,7 @@ export function ContractForm({
             </label>
 
             <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="end_date">
-              Ngày kết thúc <span className="text-emerald-400">*</span>
+              Ngày kết thúc<RequiredMark />
               <div className="relative">
                 <CalendarDays className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
                 <input
@@ -377,7 +445,7 @@ export function ContractForm({
             </label>
 
             <label className="block text-base font-medium text-[var(--fin-text)] sm:col-span-2" htmlFor="description">
-              Mô tả hợp đồng <span className="text-emerald-400">*</span>
+              Mô tả hợp đồng<RequiredMark />
               <textarea
                 id="description"
                 name="description"
@@ -385,7 +453,7 @@ export function ContractForm({
                 value={values.description}
                 onChange={(event) => updateField("description", event.target.value)}
                 className={textareaClassName}
-                placeholder="Mô tả phạm vi và mục tiêu triển khai..."
+                placeholder="Mô tả dịch vụ OPC chính, phạm vi và mục tiêu triển khai..."
                 disabled={disabled}
                 aria-invalid={Boolean(errors.description)}
                 aria-describedby={describedBy("description")}
@@ -398,13 +466,13 @@ export function ContractForm({
         <section className="rounded-xl border border-[var(--fin-soft-border)] bg-black/10 p-4 sm:p-5">
           <SectionHeading
             icon={Landmark}
-            title="Tài chính & nhu cầu vốn"
-            description="Giá trị thương mại và cấu trúc khoản tài trợ đề nghị."
+            title="Thông tin tài chính"
+            description="Giá trị thương mại, điều khoản thanh toán và biên lợi nhuận dự kiến."
           />
 
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="contract_value">
-              Giá trị hợp đồng <span className="text-emerald-400">*</span>
+              Giá trị hợp đồng<RequiredMark />
               <div className="relative">
                 <BadgeDollarSign className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
                 <input
@@ -430,7 +498,7 @@ export function ContractForm({
             </label>
 
             <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="gross_margin">
-              Biên lợi nhuận gộp <span className="text-emerald-400">*</span>
+              Biên lợi nhuận gộp
               <div className="relative">
                 <Percent className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
                 <input
@@ -453,102 +521,110 @@ export function ContractForm({
                 </span>
               </div>
               <span id="gross-margin-hint" className="mt-1.5 block text-sm font-normal text-[var(--fin-muted)]">
-                Giá trị gửi đi: {Number(values.gross_margin || 0) / 100}
+                {values.gross_margin
+                  ? `Giá trị gửi đi: ${Number(values.gross_margin) / 100}`
+                  : "Để trống để Finance Agent đề xuất từ mô tả dịch vụ."}
               </span>
               <FieldError id="gross_margin-error" message={errors.gross_margin} />
             </label>
 
-            <label className="block text-base font-medium text-[var(--fin-text)] sm:col-span-2" htmlFor="requested_amount">
-              Số tiền đề nghị <span className="text-emerald-400">*</span>
-              <div className="relative">
-                <Landmark className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
-                <input
-                  id="requested_amount"
-                  name="requested_amount"
-                  inputMode="numeric"
-                  value={values.requested_amount}
-                  onChange={(event) => updateMoneyField("requested_amount", event.target.value)}
-                  className={cn(inputClassName, "pl-10 pr-12")}
-                  placeholder="VD: 300.000.000"
-                  disabled={disabled}
-                  aria-invalid={Boolean(errors.requested_amount)}
-                  aria-describedby={describedBy("requested_amount", "requested-amount-hint")}
-                />
-                <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-sm font-medium text-[var(--fin-muted)]">
-                  VND
-                </span>
-              </div>
-              <span id="requested-amount-hint" className="mt-1.5 block text-sm font-normal text-[var(--fin-muted)]">
-                {formatCurrency(values.requested_amount)}
-              </span>
-              <FieldError id="requested_amount-error" message={errors.requested_amount} />
-            </label>
-
-            <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="funding_need_type">
-              Loại nhu cầu vốn
-              <select
-                id="funding_need_type"
-                name="funding_need_type"
-                value={values.funding_need_type}
-                onChange={(event) => updateField("funding_need_type", event.target.value)}
-                className={inputClassName}
-                disabled={disabled}
-                aria-invalid={Boolean(errors.funding_need_type)}
-                aria-describedby={describedBy("funding_need_type")}
-              >
-                <option value="" disabled>
-                  Chọn loại nhu cầu vốn
-                </option>
-                {fundingOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <FieldError
-                id="funding_need_type-error"
-                message={errors.funding_need_type}
-              />
-            </label>
-
-            <label className="block text-base font-medium text-[var(--fin-text)]" htmlFor="tenor">
-              Thời hạn tài trợ <span className="text-emerald-400">*</span>
-              <div className="relative">
-                <Clock3 className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[var(--fin-muted)]" />
-                <input
-                  id="tenor"
-                  name="tenor"
-                  value={values.tenor}
-                  onChange={(event) => updateField("tenor", event.target.value)}
-                  className={cn(inputClassName, "pl-10")}
-                  placeholder="VD: 7 months"
-                  disabled={disabled}
-                  aria-invalid={Boolean(errors.tenor)}
-                  aria-describedby={describedBy("tenor")}
-                />
-              </div>
-              <FieldError id="tenor-error" message={errors.tenor} />
-            </label>
-
             <label className="block text-base font-medium text-[var(--fin-text)] sm:col-span-2" htmlFor="payment_terms">
-              Điều khoản thanh toán <span className="text-emerald-400">*</span>
-              <textarea
+              Điều khoản thanh toán<RequiredMark />
+              <select
                 id="payment_terms"
                 name="payment_terms"
-                rows={4}
                 value={values.payment_terms}
                 onChange={(event) => updateField("payment_terms", event.target.value)}
-                className={textareaClassName}
-                placeholder="Nhập lịch thanh toán, tỷ lệ ứng trước và điều kiện nghiệm thu..."
+                className={inputClassName}
                 disabled={disabled}
                 aria-invalid={Boolean(errors.payment_terms)}
                 aria-describedby={describedBy("payment_terms")}
-              />
+              >
+                <option value="" disabled>
+                  Chọn điều khoản thanh toán
+                </option>
+                {paymentTermOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
               <FieldError id="payment_terms-error" message={errors.payment_terms} />
             </label>
           </div>
         </section>
       </div>
+
+      {marginRecommendation ? (
+        <section
+          className="mx-5 mb-5 rounded-xl border border-amber-300/25 bg-amber-300/8 p-4 sm:mx-7 sm:p-5"
+          aria-live="polite"
+        >
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="flex items-center gap-2 text-base font-semibold text-amber-200">
+                <Sparkles className="size-4" aria-hidden="true" />
+                Gross margin do Finance Agent đề xuất
+              </h2>
+              <p className="mt-3 text-2xl font-semibold text-[var(--fin-text)]">
+                {new Intl.NumberFormat("vi-VN", {
+                  style: "percent",
+                  maximumFractionDigits: 2,
+                }).format(marginRecommendation.recommended_gross_margin)}
+              </p>
+              <p className="mt-1 text-sm text-amber-100/80">
+                Dịch vụ chính: {marginRecommendation.primary_service.service_name}
+                {" "}({marginRecommendation.primary_service.service_id})
+              </p>
+              {marginRecommendation.confidence != null ? (
+                <p className="mt-1 text-sm text-[var(--fin-muted)]">
+                  Độ tin cậy mapping: {Math.round(marginRecommendation.confidence * 100)}%
+                </p>
+              ) : null}
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-[var(--fin-muted)]">
+                {marginRecommendation.reasoning}
+              </p>
+              {marginRecommendation.alternative_services.length > 0 ? (
+                <p className="mt-2 text-sm text-[var(--fin-muted)]">
+                  Dịch vụ liên quan: {marginRecommendation.alternative_services
+                    .map((service) => service.service_name)
+                    .join(", ")}
+                </p>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={applyMarginRecommendation}
+              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-amber-300 px-4 text-sm font-semibold text-amber-950 transition hover:bg-amber-200 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-amber-300/30"
+            >
+              <Sparkles className="size-4" aria-hidden="true" />
+              Áp dụng đề xuất
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {dataIssues.length > 0 ? (
+        <section
+          className="mx-5 mb-5 rounded-xl border border-red-400/25 bg-red-400/8 p-4 sm:mx-7"
+          aria-live="polite"
+        >
+          <h2 className="flex items-center gap-2 text-base font-semibold text-red-300">
+            <CircleAlert className="size-4" aria-hidden="true" />
+            Dữ liệu nền cần được bổ sung
+          </h2>
+          <ul className="mt-3 space-y-2 text-sm leading-6 text-red-100/80">
+            {dataIssues.map((issue, index) => (
+              <li key={`${issue.table}-${issue.record}-${index}`}>
+                <span className="font-medium text-red-200">
+                  {issue.table} · {issue.record}:
+                </span>{" "}
+                {issue.reason}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <footer className="border-t border-[var(--fin-soft-border)] bg-black/10 px-5 py-5 sm:px-7">
         <div className="flex flex-col-reverse gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -557,11 +633,17 @@ export function ContractForm({
               <p
                 className={cn(
                   "flex items-center gap-2 text-base",
-                  submitState === "success" ? "text-emerald-400" : "text-red-400",
+                  submitState === "success"
+                    ? "text-emerald-400"
+                    : submitState === "confirmation"
+                      ? "text-amber-300"
+                      : "text-red-400",
                 )}
               >
                 {submitState === "success" ? (
                   <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />
+                ) : submitState === "confirmation" ? (
+                  <Sparkles className="size-4 shrink-0" aria-hidden="true" />
                 ) : (
                   <CircleAlert className="size-4 shrink-0" aria-hidden="true" />
                 )}
@@ -569,7 +651,7 @@ export function ContractForm({
               </p>
             ) : (
               <p className="text-sm text-[var(--fin-muted)]">
-                Các trường có dấu <span className="text-emerald-400">*</span> là bắt buộc.
+                Finance Agent sẽ kiểm tra và chỉ ra thông tin cần bổ sung sau khi gửi.
               </p>
             )}
           </div>

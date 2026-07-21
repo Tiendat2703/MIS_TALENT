@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import Bar from "@/components/ui/about/Bar";
 import { API_REQUEST_HEADERS, apiUrl } from "@/lib/api";
 import { ACTIVE_RUN_STORAGE_KEY } from "@/lib/run-session";
@@ -466,6 +467,7 @@ function ActivityRow({ item }: { item: ActivityItem }) {
 }
 
 export function AgentWorkspace() {
+  const router = useRouter();
   const [selected, setSelected] = useState<AgentId>("Finance");
   const [logFilter, setLogFilter] = useState<LogFilter>("All");
   const [activeAgent, setActiveAgent] = useState<AgentId | null>(null);
@@ -476,6 +478,7 @@ export function AgentWorkspace() {
   const [errorMessage, setErrorMessage] = useState("");
   const eventStreamRef = useRef<AbortController | null>(null);
   const startRequestRef = useRef<AbortController | null>(null);
+  const dashboardRedirectedRef = useRef(false);
 
   useEffect(() => {
     const storedRunId = window.localStorage.getItem(ACTIVE_RUN_STORAGE_KEY);
@@ -562,6 +565,14 @@ export function AgentWorkspace() {
       eventStreamRef.current = null;
     }
 
+    if ((event.type === "run_review" || event.type === "run_finished") && !dashboardRedirectedRef.current) {
+      dashboardRedirectedRef.current = true;
+      eventStreamRef.current?.abort();
+      eventStreamRef.current = null;
+      window.localStorage.removeItem(ACTIVE_RUN_STORAGE_KEY);
+      router.replace("/dashboard");
+    }
+
     if (event.type === "run_error" || event.type === "run_cancelled") {
       setConnectionStatus("error");
       setErrorMessage(event.task || "Pipeline dừng trước khi hoàn tất.");
@@ -569,7 +580,7 @@ export function AgentWorkspace() {
       eventStreamRef.current?.abort();
       eventStreamRef.current = null;
     }
-  }, []);
+  }, [router]);
 
   const startPipeline = useCallback(async () => {
     startRequestRef.current?.abort();
@@ -587,6 +598,7 @@ export function AgentWorkspace() {
     setSelected("Finance");
     setLogFilter("All");
     setSessionId(null);
+    dashboardRedirectedRef.current = false;
     window.localStorage.removeItem(ACTIVE_RUN_STORAGE_KEY);
 
     try {

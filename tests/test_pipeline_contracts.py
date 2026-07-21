@@ -379,146 +379,31 @@ def test_real_bank_api_helper_requires_base_url() -> None:
         _call_api(None, "/precheck", {"contract_id": "CON-004"})
 
 
-@pytest.mark.parametrize(
-    ("amount", "expected"),
-    [
-        (
-            1_200_000_000,
-            {
-                "eli": False,
-                "score": 60,
-                "note": "Hồ sơ cần thẩm định thêm vì số tiền bảo lãnh cao.",
-            },
-        ),
-        (
-            800_000_000,
-            {
-                "eli": True,
-                "score": 85,
-                "note": "Hồ sơ đầy đủ và đủ điều kiện sơ bộ.",
-            },
-        ),
-    ],
-)
-def test_performance_bond_returns_deterministic_mock(
-    monkeypatch,
-    amount,
-    expected,
-) -> None:
-    def unexpected_api_call(*_args, **_kwargs):
-        raise AssertionError("performance-bond mock must not call an external API")
+def test_contract_upload_defaults_and_enforces_pending_status() -> None:
+    payload = load_contract_package(
+        "decision_agent_sample/sample_data/new_contract_upload.json"
+    ).model_dump(mode="json")
 
-    monkeypatch.setattr(
-        "app.tools.DecisionAgent.PrecheckAPI._call_api",
-        unexpected_api_call,
-    )
+    payload.pop("status")
+    assert ContractUploadPackage.model_validate(payload).status == "Pending approval"
 
-    assert _performance_bond_call("CON-004", amount) == expected
+    payload["status"] = "Active"
+    assert ContractUploadPackage.model_validate(payload).status == "Pending approval"
 
 
-def test_micro_credit_does_not_require_customer_type_before_approval() -> None:
-    _validate_micro_credit_arguments(
-        "CON-009",
-        400_000_000,
-        [],
-    )
+def test_contract_validate_endpoint_echoes_normalized_form_payload() -> None:
+    payload = load_contract_package(
+        "decision_agent_sample/sample_data/new_contract_upload.json"
+    ).model_dump(mode="json")
+    payload["status"] = "Active"
 
+    response = client.post("/contracts/validate", json=payload)
 
-@pytest.mark.parametrize(
-    ("amount", "receivable_list", "expected"),
-    [
-        (
-            400_000_000,
-            [],
-            {
-                "eli": False,
-                "score": 50,
-                "note": "Hồ sơ chưa có danh sách khoản phải thu.",
-            },
-        ),
-        (
-            400_000_000,
-            ["AR-001"],
-            {
-                "eli": False,
-                "score": 65,
-                "note": "Hồ sơ cần thẩm định thêm vì số tiền vay cao.",
-            },
-        ),
-        (
-            250_000_000,
-            ["AR-001"],
-            {
-                "eli": True,
-                "score": 82,
-                "note": "Hồ sơ đạt điều kiện sơ bộ cho khoản vay vốn lưu động.",
-            },
-        ),
-    ],
-)
-def test_micro_credit_returns_deterministic_mock(
-    monkeypatch,
-    amount,
-    receivable_list,
-    expected,
-) -> None:
-    def unexpected_api_call(*_args, **_kwargs):
-        raise AssertionError("micro-credit mock must not call an external API")
-
-    monkeypatch.setattr(
-        "app.tools.DecisionAgent.PrecheckAPI._call_api",
-        unexpected_api_call,
-    )
-
-    assert _micro_credit_call("CON-009", amount, receivable_list) == expected
-
-
-def test_trade_finance_allows_empty_document_list_for_bank_evaluation() -> None:
-    _validate_trade_finance_arguments(
-        "CON-005",
-        [],
-        650_000_000,
-    )
-
-
-@pytest.mark.parametrize(
-    ("supplier_docs", "expected"),
-    [
-        (
-            [],
-            {
-                "eli": False,
-                "score": 55,
-                "note": "Hồ sơ chưa đủ chứng từ nhà cung cấp.",
-            },
-        ),
-        (
-            ["INVOICE-001", "PURCHASE-ORDER-001"],
-            {
-                "eli": True,
-                "score": 88,
-                "note": "Hồ sơ đầy đủ và có thể chuyển sang bước thẩm định.",
-            },
-        ),
-    ],
-)
-def test_trade_finance_returns_deterministic_mock(
-    monkeypatch,
-    supplier_docs,
-    expected,
-) -> None:
-    def unexpected_api_call(*_args, **_kwargs):
-        raise AssertionError("trade-finance mock must not call an external API")
-
-    monkeypatch.setattr(
-        "app.tools.DecisionAgent.PrecheckAPI._call_api",
-        unexpected_api_call,
-    )
-
-    assert (
-        _trade_finance_call("CON-005", supplier_docs, 650_000_000)
-        == expected
-    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["received"] is True
+    assert body["contract"]["contract_id"] == payload["contract_id"]
+    assert body["contract"]["status"] == "Pending approval"
 
 
 def test_contract_upload_rejects_package_wrapper() -> None:

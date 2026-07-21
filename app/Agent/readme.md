@@ -20,7 +20,27 @@ The upload JSON is the contract object itself; it has no package wrapper. The
 application merges it into an in-memory copy for this run and does not insert it
 into the normal contract table.
 
-The accepted upload contract contains exactly these fields:
+HTTP uploads use a Finance preflight gate before a session is allocated:
+
+```text
+POST /finance/preflight
+  -> Finance_Agent_Preflight(load_and_validate, missing_data)
+  -> AWAITING_INPUT: return missing_fields/data_issues, no session
+  -> RUNNING: allocate session and start Finance -> Risk -> Decision
+```
+
+The preflight agent has its own prompt and only the two read-only tools shown
+above. It receives only the uploaded draft and checks the eleven input fields;
+it does not load or validate customer, invoice, order, transaction, cashflow, or
+other portfolio rows. Structured validation decides whether the pipeline may
+start. The public summary is also built deterministically from the missing field
+list, so LLM text cannot expand the validation scope. `POST /runs` with a
+contract body uses the same gate, while `POST /runs` without a body keeps the
+automatic batch mode.
+
+The upload draft accepts these optional fields so preflight can report all
+missing values in one response. A run starts only after all eleven business
+fields are present; `status` is always normalized to `Pending approval`:
 
 ```text
 contract_id, customer_id, start_date, end_date, status, description,

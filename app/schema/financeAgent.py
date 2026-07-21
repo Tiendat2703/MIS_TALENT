@@ -129,6 +129,36 @@ class FinanceSynthesis(StrictModel):
     handoff_summary: str
 
 
+class FinancePreflightSynthesis(StrictModel):
+    """Narrative-only output from the isolated Finance preflight agent."""
+
+    summary: str
+
+
+class FinancePreflightMissingField(StrictModel):
+    field: str
+    label: str
+    reason: str
+    data_type: Literal["text", "number", "date"]
+
+
+class FinancePreflightDataIssue(StrictModel):
+    table: str
+    record: str
+    reason: str
+    severity: str
+    kind: str
+
+
+class FinancePreflightResult(StrictModel):
+    status: Literal["RUNNING", "AWAITING_INPUT"]
+    can_start_pipeline: bool
+    session_id: int | None = None
+    missing_fields: list[FinancePreflightMissingField] = Field(default_factory=list)
+    data_issues: list[FinancePreflightDataIssue] = Field(default_factory=list)
+    summary: str
+
+
 # ============ Output cuối: Finance Feature Pack ============
 class FinanceAnalysisPack(StrictModel):
     metadata: dict[str, Any]
@@ -148,6 +178,10 @@ class FinanceAnalysisPack(StrictModel):
 __all__ = [
     "BankReconciliationSummary",
     "FinanceAnalysisPack",
+    "FinancePreflightDataIssue",
+    "FinancePreflightMissingField",
+    "FinancePreflightResult",
+    "FinancePreflightSynthesis",
     "FinanceSynthesis",
     "InvoiceClassification",
     "LiquidityBrief",

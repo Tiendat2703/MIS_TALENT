@@ -147,6 +147,12 @@ def test_concurrent_allocations_receive_distinct_sequential_ids(monkeypatch) -> 
     assert sorted(ids) == ["CON-006", "CON-007"]
 
 
-def test_contract_schema_rejects_unlisted_payment_terms() -> None:
+def test_contract_schema_accepts_financing_percentage_in_payment_terms() -> None:
+    contract = _contract(payment_terms="WORKING CAPITAL 25%")
+
+    assert contract.payment_terms == "WORKING CAPITAL 25%"
+
+
+def test_contract_schema_rejects_empty_payment_terms() -> None:
     with pytest.raises(ValidationError, match="payment_terms"):
-        _contract(payment_terms="30% advance and payment after delivery")
+        _contract(payment_terms="")

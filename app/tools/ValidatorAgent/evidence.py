@@ -47,7 +47,7 @@ STAGE_POLICY: dict[str, dict[str, Any]] = {
             "prepare_finance_handoff",
         ],
         "forbidden_tools": [
-            "match_bank_product", "precheck_performance_bond",
+            "list_bank_products", "precheck_performance_bond",
             "precheck_trade_finance", "precheck_micro_credit",
             "load_decision_context", "process_risk_context",
         ],
@@ -68,7 +68,7 @@ STAGE_POLICY: dict[str, dict[str, Any]] = {
         ],
         "allowed_tools": ["process_risk_context"],
         "forbidden_tools": [
-            "match_bank_product", "precheck_performance_bond",
+            "list_bank_products", "precheck_performance_bond",
             "precheck_trade_finance", "precheck_micro_credit",
             "load_decision_context",
         ],
@@ -97,7 +97,7 @@ STAGE_POLICY: dict[str, dict[str, Any]] = {
             "11_BANK_PRODUCTS", "12_API_CATALOG",
         ],
         "allowed_tools": [
-            "load_decision_context", "match_bank_product",
+            "load_decision_context", "list_bank_products",
             "precheck_performance_bond", "precheck_trade_finance",
             "precheck_micro_credit",
         ],
@@ -109,7 +109,7 @@ STAGE_POLICY: dict[str, dict[str, Any]] = {
             "precheck_micro_credit",
         ],
         "required_process_steps": [
-            "load_decision_context", "bank_product_matching",
+            "load_decision_context", "bank_product_catalog_review",
             "precheck_evaluation", "decision_card_generation",
         ],
         "expected_output": (

@@ -17,6 +17,12 @@ from app.tools.RiskAgent._helpers import parse_severity, require_rows
 from app.tools.RiskAgent._masking import mask_alert, mask_example
 
 
+# Business policy: a large requested amount by itself is not a risk rule and
+# must not block or reject an otherwise eligible contract. Keep the database row
+# for audit/history, but exclude it from every active runtime rule set.
+DISABLED_RISK_RULE_IDS = frozenset({"RR-005"})
+
+
 def get_risk_rules_impl() -> list[RiskRule]:
     rows = query_db(
         """
@@ -29,6 +35,7 @@ def get_risk_rules_impl() -> list[RiskRule]:
     return [
         RiskRule(**{**row, "severity": parse_severity(row["severity"])})
         for row in require_rows(rows, "risk_rule")
+        if str(row.get("rule_id")) not in DISABLED_RISK_RULE_IDS
     ]
 
 
@@ -83,7 +90,7 @@ def get_masking_examples_impl() -> list[MaskingExample]:
 
 @function_tool
 def get_risk_rules() -> list[RiskRule]:
-    """Read all organizer-provided RR rules from PostgreSQL."""
+    """Read all active organizer-provided RR rules from PostgreSQL."""
     return get_risk_rules_impl()
 
 

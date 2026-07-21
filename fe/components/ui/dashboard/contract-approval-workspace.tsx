@@ -15,7 +15,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API_BASE_URL, API_REQUEST_HEADERS, apiUrl } from "@/lib/api";
 
 type ApprovalStatus = "pending" | "approved" | "review" | "rejected";
@@ -151,12 +151,92 @@ type ApiContract = {
     decision_status?: string | null;
     risk_level?: string | null;
     capital_need?: number | null;
+    funding_need_type?: string | null;
+    selected_bank_product_id?: string | null;
+    selected_bank_product_name?: string | null;
     requires_founder_confirmation?: boolean | null;
     approval_status?: boolean | null;
     eligible_score?: number | null;
     precheck_note?: string | null;
     is_preliminary?: boolean | null;
   } | null;
+};
+
+type ApiPendingApproval = {
+  approval_id?: string;
+  contract_id?: string;
+  session_id?: number;
+  status?: string;
+  result?: {
+    eligible_score?: number | null;
+    precheck_note?: string | null;
+  } | null;
+  tool?: string;
+  arguments?: Record<string, unknown>;
+};
+
+type DashboardBootstrap = {
+  contracts: ContractRecord[];
+  pendingRequests: Record<string, PendingApprovalRequest>;
+  approvalIssue: string;
+};
+
+type RunDecisionDetail = {
+  contract_id?: string;
+  recommended_option?: string;
+  reasons?: string[];
+  protective_condition?: string;
+  capital_need?: number | null;
+  funding_need_type?: string | null;
+  selected_bank_product_id?: string | null;
+  selected_bank_product_name?: string | null;
+  eligible_score?: number | null;
+  precheck_note?: string | null;
+  approval_status?: boolean;
+  requires_founder_confirmation?: boolean;
+};
+
+type RunRiskEvaluation = {
+  status?: string;
+  rule_id?: string;
+  risk_type?: string;
+  severity?: string;
+  message?: string;
+  observed_value?: string;
+  required_action?: string;
+  missing_fields?: string[];
+};
+
+type RunRiskDetail = {
+  contract_id?: string;
+  overall_risk_level?: string;
+  human_approval_required?: boolean;
+  triggered_rule_ids?: string[];
+  summary?: {
+    total_rules_triggered?: number;
+    total_alerts_detected?: number;
+    total_proposed_alerts?: number;
+    human_review_required?: boolean;
+  };
+  rule_evaluations?: RunRiskEvaluation[];
+  alerts?: Array<{
+    alert?: {
+      alert_id?: string;
+      alert_type?: string;
+      severity?: string;
+      risk_score?: number | null;
+      description?: string;
+      recommended_action?: string;
+    };
+  }>;
+  proposed_alerts?: unknown[];
+  insufficient_evidence?: string[];
+  required_actions?: string[];
+};
+
+type RunDetailPayload = {
+  decisions?: RunDecisionDetail[];
+  risk_pack?: { packs?: RunRiskDetail[] } | null;
 };
 
 const optionLabels: Record<string, string> = {
@@ -213,6 +293,7 @@ function paymentLabel(type?: string | null): string {
 function mapApiContract(item: ApiContract): ContractRecord {
   const finance = item.finance ?? {};
   const decision = item.decision ?? {};
+  const selectedFundingType = decision.funding_need_type ?? finance.funding_need_type;
   const riskLevel = normalizeRiskLevel(decision.risk_level ?? item.risk?.overall_risk_level);
   const triggeredRules = item.risk?.triggered_rule_ids ?? [];
   const contractValue = finance.contract_value ?? null;
@@ -226,8 +307,10 @@ function mapApiContract(item: ApiContract): ContractRecord {
     startDate: finance.start_date || "",
     endDate: finance.end_date || "",
     submittedAt: item.generated_at || "",
-    paymentTerms: paymentLabel(finance.funding_need_type),
-    contractType: finance.funding_need_type?.replaceAll("_", " ") || "Hợp đồng thương mại",
+    paymentTerms: paymentLabel(selectedFundingType),
+    contractType: decision.selected_bank_product_name
+      || selectedFundingType?.replaceAll("_", " ")
+      || "Hợp đồng thương mại",
     owner: "Chưa có dữ liệu",
     summary: finance.status
       ? `Hồ sơ đã hoàn tất bước ${finance.status.toLowerCase()} và đang chờ quyết định cuối.`
@@ -280,8 +363,8 @@ function mapApiContract(item: ApiContract): ContractRecord {
       requiredActions: item.risk?.required_actions ?? [],
     },
     bankPrecheck: {
-      available: Boolean(item.decision || finance.funding_need_type),
-      requestType: finance.funding_need_type ?? null,
+      available: Boolean(item.decision || selectedFundingType),
+      requestType: selectedFundingType ?? null,
       requestedAmount: decision.capital_need ?? finance.requested_amount ?? null,
       eligibleScore: decision.eligible_score ?? null,
       precheckNote: decision.precheck_note ?? null,
@@ -291,15 +374,42 @@ function mapApiContract(item: ApiContract): ContractRecord {
   };
 }
 
-async function fetchApiContracts(signal?: AbortSignal): Promise<ContractRecord[]> {
-  const response = await fetch(apiUrl("/contracts?latest_only=true"), {
+async function fetchDashboard(signal?: AbortSignal): Promise<DashboardBootstrap> {
+  const response = await fetch(apiUrl("/dashboard?latest_only=true"), {
     cache: "no-store",
     headers: API_REQUEST_HEADERS,
     signal,
   });
-  if (!response.ok) throw new Error(`Contract API returned ${response.status}`);
-  const payload = (await response.json()) as { contracts?: ApiContract[] };
-  return (payload.contracts ?? []).map(mapApiContract);
+  if (!response.ok) throw new Error(`Dashboard API returned ${response.status}`);
+  const payload = (await response.json()) as {
+    contracts?: ApiContract[];
+    pending_approvals?: ApiPendingApproval[];
+    approval_errors?: Array<{ session_id?: number; message?: string }>;
+  };
+  const pendingRequests: Record<string, PendingApprovalRequest> = {};
+  (payload.pending_approvals ?? []).forEach((request) => {
+    if (!request.approval_id || !request.contract_id || request.session_id == null) return;
+    pendingRequests[request.contract_id] = {
+      approvalId: request.approval_id,
+      contractId: request.contract_id,
+      runId: request.session_id,
+      status: request.status || "pending",
+      result: request.result ? {
+        eligibleScore: request.result.eligible_score ?? null,
+        precheckNote: request.result.precheck_note ?? null,
+      } : null,
+      tool: request.tool || "bank_precheck",
+      arguments: request.arguments ?? {},
+    };
+  });
+  const approvalErrors = payload.approval_errors ?? [];
+  return {
+    contracts: (payload.contracts ?? []).map(mapApiContract),
+    pendingRequests,
+    approvalIssue: approvalErrors.length > 0
+      ? `Không tải được approval của ${approvalErrors.length} pipeline.`
+      : "",
+  };
 }
 
 function formatCurrency(value: number): string {
@@ -554,6 +664,11 @@ type PendingApprovalRequest = {
   approvalId: string;
   contractId: string;
   runId?: number;
+  status: string;
+  result: {
+    eligibleScore: number | null;
+    precheckNote: string | null;
+  } | null;
   tool: string;
   arguments: Record<string, unknown>;
 };
@@ -579,72 +694,26 @@ const requestTypeLabels: Record<string, string> = {
 
 function BankPrecheckApprovals({
   contracts,
+  pendingRequests,
+  isLoadingRequests,
   onResult,
+  onRequestResolved,
   connectionIssue,
 }: {
   contracts: ContractRecord[];
+  pendingRequests: Record<string, PendingApprovalRequest>;
+  isLoadingRequests: boolean;
   onResult: (contractId: string, result: {
     eligibleScore: number | null;
     precheckNote: string | null;
     approvalStatus: boolean;
   }) => void;
+  onRequestResolved: (contractId: string) => void;
   connectionIssue: string;
 }) {
-  const [pendingRequests, setPendingRequests] = useState<Record<string, PendingApprovalRequest>>({});
   const [processing, setProcessing] = useState<{ contractId: string; approved: boolean } | null>(null);
   const [resolutions, setResolutions] = useState<Record<string, "approved" | "rejected">>({});
   const [notice, setNotice] = useState("");
-  const [isLoadingRequests, setIsLoadingRequests] = useState(true);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    const runIds = Array.from(new Set(contracts.flatMap((contract) => contract.runId ? [contract.runId] : [])));
-
-    async function loadPendingRequests() {
-      if (runIds.length === 0) {
-        setPendingRequests({});
-        setIsLoadingRequests(false);
-        return;
-      }
-      setIsLoadingRequests(true);
-      try {
-        const responses = await Promise.all(runIds.map(async (runId) => {
-          const response = await fetch(apiUrl(`/runs/${runId}/approvals`), {
-            signal: controller.signal,
-            cache: "no-store",
-            headers: API_REQUEST_HEADERS,
-          });
-          if (!response.ok) throw new Error(`Approval API returned ${response.status} for run ${runId}`);
-          const requests = await response.json();
-          return (Array.isArray(requests) ? requests : []).map((request: {
-            approval_id?: string;
-            contract_id?: string;
-            tool?: string;
-            arguments?: Record<string, unknown>;
-          }) => ({
-            approvalId: request.approval_id || "",
-            contractId: request.contract_id || "",
-            runId,
-            tool: request.tool || "bank_precheck",
-            arguments: request.arguments ?? {},
-          })).filter((request: PendingApprovalRequest) => request.approvalId && request.contractId);
-        }));
-
-        if (!controller.signal.aborted) {
-          const indexed: Record<string, PendingApprovalRequest> = {};
-          responses.flat().forEach((request) => { indexed[request.contractId] = request; });
-          setPendingRequests(indexed);
-        }
-      } catch (error) {
-        if ((error as Error).name !== "AbortError") setNotice("Chưa tải được danh sách approval từ pipeline.");
-      } finally {
-        if (!controller.signal.aborted) setIsLoadingRequests(false);
-      }
-    }
-
-    void loadPendingRequests();
-    return () => controller.abort();
-  }, [contracts]);
 
   const rows = useMemo<PrecheckRow[]>(() => {
     return contracts
@@ -663,8 +732,12 @@ function BankPrecheckApprovals({
         runId: contract.runId,
         requestType: contract.bankPrecheck.requestType || "BANK_PRECHECK",
         requestedAmount: contract.bankPrecheck.requestedAmount,
-        eligibleScore: contract.bankPrecheck.eligibleScore,
-        precheckNote: contract.bankPrecheck.precheckNote,
+        eligibleScore: contract.bankPrecheck.eligibleScore
+          ?? pendingRequests[contract.id]?.result?.eligibleScore
+          ?? null,
+        precheckNote: contract.bankPrecheck.precheckNote
+          ?? pendingRequests[contract.id]?.result?.precheckNote
+          ?? null,
         approvalStatus: contract.bankPrecheck.approvalStatus,
         requiresFounderConfirmation: contract.bankPrecheck.requiresFounderConfirmation,
         request: pendingRequests[contract.id],
@@ -713,11 +786,7 @@ function BankPrecheckApprovals({
         approvalStatus: decision.approval_status ?? false,
       });
       setResolutions((current) => ({ ...current, [row.contractId]: approved ? "approved" : "rejected" }));
-      setPendingRequests((current) => {
-        const next = { ...current };
-        delete next[row.contractId];
-        return next;
-      });
+      onRequestResolved(row.contractId);
       setNotice(
         approved
           ? `Đã chạy bank pre-check cho ${row.contractId} và nhận kết quả mới.`
@@ -771,6 +840,7 @@ function BankPrecheckApprovals({
             <tbody>
               {rows.map((row) => {
                 const isProcessing = processing?.contractId === row.contractId;
+                const requestStatus = row.request?.status || "pending";
                 const resolution = resolutions[row.contractId];
                 const isCompleted = row.approvalStatus || resolution === "approved";
                 const isRejected = resolution === "rejected";
@@ -841,24 +911,40 @@ function BankPrecheckApprovals({
                         <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-300/25 bg-amber-300/[0.08] px-2.5 py-1.5 text-[10px] font-semibold text-amber-100">
                           <AlertTriangle className="size-3" aria-hidden="true" /> Cần nhập số tiền
                         </span>
+                      ) : row.request && requestStatus === "executing" ? (
+                        <span className="inline-flex items-center gap-1.5 text-[10px] text-amber-200">
+                          <RefreshCw className="size-3 animate-spin motion-reduce:animate-none" aria-hidden="true" /> Đang chạy pre-check…
+                        </span>
                       ) : row.request ? (
                         <div className="flex items-center gap-2">
+                          {requestStatus === "pending" && (
+                            <button
+                              type="button"
+                              onClick={() => void submitApproval(row, false)}
+                              disabled={isProcessing}
+                              className="min-h-9 rounded-lg border border-red-400/20 px-3 text-[10px] font-semibold text-red-300 transition hover:bg-red-400/[0.08] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/60"
+                            >
+                              Từ chối
+                            </button>
+                          )}
                           <button
                             type="button"
-                            onClick={() => void submitApproval(row, false)}
-                            disabled={isProcessing}
-                            className="min-h-9 rounded-lg border border-red-400/20 px-3 text-[10px] font-semibold text-red-300 transition hover:bg-red-400/[0.08] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/60"
-                          >
-                            Từ chối
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void submitApproval(row, true)}
+                            onClick={() => void submitApproval(row, requestStatus !== "rejected")}
                             disabled={isProcessing}
                             className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-emerald-300 px-3 text-[10px] font-bold text-[#07110c] transition hover:bg-emerald-200 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200"
                           >
                             {isProcessing ? <RefreshCw className="size-3 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Check className="size-3" aria-hidden="true" />}
-                            {isProcessing ? "Đang gọi API…" : "Duyệt & kiểm tra"}
+                            {isProcessing
+                              ? "Đang xử lý…"
+                              : requestStatus === "executed"
+                                ? "Áp dụng kết quả"
+                                : requestStatus === "failed"
+                                  ? "Thử lại pre-check"
+                                  : requestStatus === "rejected"
+                                    ? "Áp dụng từ chối"
+                                    : requestStatus === "approved"
+                                      ? "Tiếp tục pre-check"
+                                      : "Duyệt & kiểm tra"}
                           </button>
                         </div>
                       ) : (
@@ -883,7 +969,7 @@ function BankPrecheckApprovals({
 
       <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--fin-soft-border)] px-5 py-3 text-[9px] text-[var(--fin-muted)]" aria-live="polite">
         <span>{notice || connectionIssue || "Approval chỉ cấp quyền cho đúng tool và arguments đã lưu trong StateStore."}</span>
-        <span>Nguồn: /runs/:id/approvals</span>
+        <span>Nguồn: /dashboard</span>
       </footer>
     </section>
   );
@@ -891,13 +977,18 @@ function BankPrecheckApprovals({
 
 export function ContractApprovalWorkspace() {
   const [contracts, setContracts] = useState<ContractRecord[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<Record<string, PendingApprovalRequest>>({});
   const [selectedId, setSelectedId] = useState("");
   const [filter, setFilter] = useState<FilterStatus>("all");
   const [query, setQuery] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(true);
   const [apiConnectionIssue, setApiConnectionIssue] = useState("");
+  const [approvalDataIssue, setApprovalDataIssue] = useState("");
   const [actionState, setActionState] = useState<"idle" | "saving">("idle");
   const [notice, setNotice] = useState("");
+  const [detailRefreshVersion, setDetailRefreshVersion] = useState(0);
+  const detailGenerationRef = useRef(0);
+  const detailCacheRef = useRef<Map<number, RunDetailPayload>>(new Map());
 
   const selectedForDetail = contracts.find((item) => item.id === selectedId);
   const selectedRunId = selectedForDetail?.runId;
@@ -905,15 +996,27 @@ export function ContractApprovalWorkspace() {
   const loadContracts = useCallback(async ({
     signal,
     silent = false,
+    invalidateDetails = false,
   }: {
     signal?: AbortSignal;
     silent?: boolean;
+    invalidateDetails?: boolean;
   } = {}) => {
+    if (invalidateDetails) {
+      detailGenerationRef.current += 1;
+      detailCacheRef.current.clear();
+    }
     if (!silent) setIsRefreshing(true);
     setApiConnectionIssue("");
     try {
-      const apiContracts = await fetchApiContracts(signal);
+      const dashboard = await fetchDashboard(signal);
+      const apiContracts = dashboard.contracts;
       setContracts(apiContracts);
+      setPendingRequests(dashboard.pendingRequests);
+      setApprovalDataIssue(dashboard.approvalIssue);
+      if (invalidateDetails) {
+        setDetailRefreshVersion(detailGenerationRef.current);
+      }
       setSelectedId((current) => (
         apiContracts.some((item) => item.id === current)
           ? current
@@ -923,6 +1026,7 @@ export function ContractApprovalWorkspace() {
       if ((error as Error).name === "AbortError") return;
       if (!silent) {
         setContracts([]);
+        setPendingRequests({});
         setSelectedId("");
       }
       setApiConnectionIssue(
@@ -964,6 +1068,7 @@ export function ContractApprovalWorkspace() {
     }
 
     async function connectToDashboardEvents() {
+      let reconnecting = false;
       while (!controller.signal.aborted) {
         try {
           const response = await fetch(apiUrl("/dashboard/events"), {
@@ -1001,18 +1106,24 @@ export function ContractApprovalWorkspace() {
               if (!data) continue;
 
               const event = JSON.parse(data) as { type?: string };
-              if (
-                event.type === "dashboard_ready"
-                || event.type === "run_review"
+              if (event.type === "dashboard_ready") {
+                if (reconnecting) {
+                  reconnecting = false;
+                  void loadContracts({ silent: true, invalidateDetails: true });
+                }
+              } else if (
+                event.type === "run_review"
                 || event.type === "run_finished"
                 || event.type === "decision_updated"
               ) {
-                void loadContracts({ silent: true });
+                void loadContracts({ silent: true, invalidateDetails: true });
               }
             }
           }
+          reconnecting = true;
         } catch (error) {
           if (controller.signal.aborted) return;
+          reconnecting = true;
           console.warn("Dashboard realtime connection interrupted", error);
         }
 
@@ -1026,27 +1137,27 @@ export function ContractApprovalWorkspace() {
 
   useEffect(() => {
     if (!selectedRunId) return;
+    const runId = selectedRunId;
+    const requestedVersion = detailRefreshVersion;
     const controller = new AbortController();
 
     async function loadDecisionDetail() {
       try {
-        const [decisionResponse, runResponse] = await Promise.all([
-          fetch(apiUrl(`/runs/${selectedRunId}/decision`), {
+        let detailPayload = detailCacheRef.current.get(runId);
+        if (!detailPayload) {
+          const response = await fetch(apiUrl(`/runs/${runId}/detail`), {
             signal: controller.signal,
             cache: "no-store",
             headers: API_REQUEST_HEADERS,
-          }),
-          fetch(apiUrl(`/runs/${selectedRunId}`), {
-            signal: controller.signal,
-            cache: "no-store",
-            headers: API_REQUEST_HEADERS,
-          }),
-        ]);
-        if (!decisionResponse.ok || !runResponse.ok) return;
-        const decisionPayload = await decisionResponse.json();
-        const runPayload = await runResponse.json();
-        const decision = (decisionPayload.decisions ?? []).find((item: { contract_id?: string }) => item.contract_id === selectedId);
-        const risk = (runPayload.risk_pack?.packs ?? []).find((item: { contract_id?: string }) => item.contract_id === selectedId);
+          });
+          if (!response.ok) return;
+          detailPayload = await response.json() as RunDetailPayload;
+          if (detailGenerationRef.current !== requestedVersion) return;
+          detailCacheRef.current.set(runId, detailPayload);
+        }
+        if (detailGenerationRef.current !== requestedVersion) return;
+        const decision = (detailPayload.decisions ?? []).find((item) => item.contract_id === selectedId);
+        const risk = (detailPayload.risk_pack?.packs ?? []).find((item) => item.contract_id === selectedId);
 
         setContracts((current) => current.map((item) => {
           if (item.id !== selectedId) return item;
@@ -1060,6 +1171,8 @@ export function ContractApprovalWorkspace() {
               ? {
                   ...item.bankPrecheck,
                   available: true,
+                  requestType: decision.funding_need_type
+                    ?? item.bankPrecheck.requestType,
                   requestedAmount: decision.capital_need ?? item.bankPrecheck.requestedAmount,
                   eligibleScore: decision.eligible_score ?? null,
                   precheckNote: decision.precheck_note ?? null,
@@ -1144,7 +1257,7 @@ export function ContractApprovalWorkspace() {
 
     void loadDecisionDetail();
     return () => controller.abort();
-  }, [selectedId, selectedRunId]);
+  }, [detailRefreshVersion, selectedId, selectedRunId]);
 
   const selected = contracts.find((item) => item.id === selectedId) ?? contracts[0];
   const filteredContracts = useMemo(() => {
@@ -1181,6 +1294,14 @@ export function ContractApprovalWorkspace() {
       : contract));
   };
 
+  const resolvePendingRequest = (contractId: string) => {
+    setPendingRequests((current) => {
+      const next = { ...current };
+      delete next[contractId];
+      return next;
+    });
+  };
+
   const applyDecision = (status: ApprovalStatus) => {
     if (!selected) return;
     setActionState("saving");
@@ -1209,7 +1330,7 @@ export function ContractApprovalWorkspace() {
           {!isRefreshing && (
             <button
               type="button"
-              onClick={() => void loadContracts()}
+              onClick={() => void loadContracts({ invalidateDetails: true })}
               className="mt-6 inline-flex min-h-10 items-center gap-2 rounded-lg border border-emerald-400/25 bg-emerald-400/[0.08] px-4 text-xs font-semibold text-emerald-200"
             >
               <RefreshCw className="size-3.5" aria-hidden="true" /> Thử kết nối lại
@@ -1241,7 +1362,7 @@ export function ContractApprovalWorkspace() {
 
         <button
           type="button"
-          onClick={() => void loadContracts()}
+          onClick={() => void loadContracts({ invalidateDetails: true })}
           disabled={isRefreshing}
           className="inline-flex min-h-10 w-fit items-center gap-2 rounded-lg border border-[var(--fin-soft-border)] bg-[var(--fin-surface)] px-3.5 text-xs font-semibold text-[var(--fin-text)] transition duration-200 hover:border-emerald-400/25 hover:bg-[var(--fin-surface-raised)] active:translate-y-px disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70"
         >
@@ -1574,8 +1695,11 @@ export function ContractApprovalWorkspace() {
 
         <BankPrecheckApprovals
           contracts={contracts}
+          pendingRequests={pendingRequests}
+          isLoadingRequests={isRefreshing}
           onResult={updateBankPrecheckResult}
-          connectionIssue={apiConnectionIssue}
+          onRequestResolved={resolvePendingRequest}
+          connectionIssue={apiConnectionIssue || approvalDataIssue}
         />
       </section>
     </div>

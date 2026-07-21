@@ -48,6 +48,11 @@ customer_id, start_date, end_date, description, contract_value, payment_terms
 recommendation before the run starts. The backend then generates `contract_id`,
 persists the row with `Pending approval`, and starts the pipeline.
 
+`requested_amount` may remain null at submission. For an explicit financing term
+in `payment_terms`, Finance uses its stated percentage/amount or 100% of
+`contract_value` when none is stated. Finance leaves `funding_need_type` null;
+Decision reads the bank catalog and owns the product/type selection.
+
 Precomputed risk fields are intentionally rejected. Risk evidence must come from
 the authoritative portfolio/risk sources or be reported as insufficient.
 

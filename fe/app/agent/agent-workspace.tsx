@@ -91,7 +91,7 @@ const TOOL_LABELS: Record<string, string> = {
   classify_invoice: "Phân loại trạng thái hóa đơn",
   margin_analysis: "Phân tích biên lợi nhuận",
   missing_data: "Xác định dữ liệu tài chính còn thiếu",
-  match_bank_product: "Tìm sản phẩm ngân hàng phù hợp",
+  list_bank_products: "Đọc danh mục dịch vụ ngân hàng",
   precheck_performance_bond: "Kiểm tra điều kiện bảo lãnh thực hiện",
   precheck_trade_finance: "Kiểm tra điều kiện tài trợ thương mại",
 };

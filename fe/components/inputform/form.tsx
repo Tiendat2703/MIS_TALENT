@@ -102,6 +102,7 @@ const paymentTermOptions = [
   "Milestone payment",
   "Performance bond required",
   "Possible LC/trade finance",
+  "Working capital",
 ] as const;
 
 const inputClassName =

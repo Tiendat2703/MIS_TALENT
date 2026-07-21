@@ -290,7 +290,7 @@ def assemble_finance_analysis(
     validation = store["validation"]
     missing = store["missing"]
     # CHỈ số liệu/sự thật cho Risk — KHÔNG phán đoán (readiness/mức áp lực/human-approval
-    # do Risk quyết theo rule R1–R7 / RR-005).
+    # do Risk quyết theo các rule đang hoạt động).
     key_facts = {
         "funding_need": liquidity.funding_need,
         "max_reserve_gap": liquidity.max_reserve_gap,

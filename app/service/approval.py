@@ -23,6 +23,7 @@ from app.Agent.state_store import (
 from app.Agent.hooks import AppContext
 from app.database.context_store import fetch_context_row, load_pipeline_context
 from app.service.credit_profile import load_contract_credit_profiles
+from app.service.decision_guard import apply_mandatory_risk_policy
 from app.service.precheck_approval import ensure_precheck_approval_requests
 from app.tools.DecisionAgent.PrecheckAPI import PRECHECK_TOOL_BY_NAME
 from app.tools.writeLogs import fetch_decision_log
@@ -31,6 +32,9 @@ from app.tools.writeLogs import fetch_decision_log
 IMMUTABLE_TARGET_FIELDS = {
     "contract_id",
     "capital_need",
+    "funding_need_type",
+    "selected_bank_product_id",
+    "selected_bank_product_name",
 }
 
 
@@ -48,6 +52,11 @@ class ApprovalExecutionError(RuntimeError):
         self.contract_id = contract_id
         self.execution_error = error
         super().__init__(f"Bank precheck failed for {contract_id}: {error}")
+
+
+def _is_unapplied_request(request: dict[str, Any]) -> bool:
+    """Return approvals whose human decision has not reached the Decision Card."""
+    return request.get("decision_applied_at") is None
 
 
 def _index_decisions(batch: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -153,7 +162,7 @@ async def get_pending_approvals(run_id: int) -> list[dict[str, Any]]:
         return [
             request
             for request in _approval_requests_from_log(decision_log)
-            if request["status"] == "pending"
+            if _is_unapplied_request(request)
         ]
 
     # Reconcile historical/current completed runs as well as new pipelines. This
@@ -178,7 +187,7 @@ async def get_pending_approvals(run_id: int) -> list[dict[str, Any]]:
         pass
 
     requests = await list_approval_requests(run_id)
-    return [request for request in requests if request["status"] == "pending"]
+    return [request for request in requests if _is_unapplied_request(request)]
 
 
 def _approval_requests_from_log(
@@ -452,7 +461,23 @@ async def decide_approval(
         if result.interruptions:
             raise RuntimeError("Unexpected SDK interruption during continuation")
 
-        new_batch = result.final_output.model_dump(mode="json")
+        corrected_output = result.final_output
+        try:
+            authoritative_context = await asyncio.to_thread(
+                load_pipeline_context,
+                run_id,
+            )
+        except LookupError:
+            # Standalone legacy Decision runs may not have Finance/Risk context.
+            pass
+        else:
+            if authoritative_context.risk_pack is not None:
+                corrected_output = apply_mandatory_risk_policy(
+                    corrected_output,
+                    authoritative_context.risk_pack,
+                    contract_id=request["contract_id"],
+                )
+        new_batch = corrected_output.model_dump(mode="json")
         state_after_tool = await get_approval_state(run_id)
         request_after = _find_request(state_after_tool, approval_id)
         if approved and request_after.get("status") == "failed":
@@ -481,7 +506,7 @@ async def decide_approval(
         try:
             from app.database.context_store import save_decision_pack
 
-            await asyncio.to_thread(save_decision_pack, run_id, result.final_output)
+            await asyncio.to_thread(save_decision_pack, run_id, corrected_output)
         except LookupError:
             # Older standalone runs may not have a persisted Finance/Risk row.
             pass

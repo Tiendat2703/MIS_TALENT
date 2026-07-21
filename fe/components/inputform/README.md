@@ -12,7 +12,7 @@ Form gửi một `ContractUploadPackage` tới `POST /finance/preflight`.
 | Mô tả hợp đồng | `description` | Bắt buộc; Finance Agent dùng để mapping dịch vụ nếu gross margin trống |
 | Giá trị hợp đồng | `contract_value` | Bắt buộc, số VND lớn hơn 0 |
 | Biên lợi nhuận gộp | `gross_margin` | FE hiển thị phần trăm, payload gửi số `0..1`; có thể để trống để nhận recommendation |
-| Điều khoản thanh toán | `payment_terms` | Bắt buộc; chọn một trong bốn giá trị được schema cho phép |
+| Điều khoản thanh toán | `payment_terms` | Bắt buộc; FE cung cấp năm lựa chọn, BE chấp nhận chuỗi không rỗng để Finance/Decision đọc ngữ nghĩa |
 
 `requested_amount`, `funding_need_type` và `tenor` không hiển thị trên form và
 luôn được gửi là `null`. FE không gửi `status`; BE tự đặt trạng thái thành
@@ -33,6 +33,12 @@ pipeline.
 - `Milestone payment`
 - `Performance bond required`
 - `Possible LC/trade finance`
+- `Working capital`
+
+Khi điều khoản nêu nhu cầu tài trợ kèm tỷ lệ, Finance tính
+`requested_amount = contract_value × tỷ lệ`. Nếu không ghi tỷ lệ hoặc số tiền,
+Finance dùng 100% giá trị hợp đồng. Lịch thanh toán mặc định không được dùng để
+ghi đè số tiền này.
 
 ## Payload mẫu
 

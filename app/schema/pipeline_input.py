@@ -10,12 +10,7 @@ from pydantic import Field, field_validator, model_validator
 from app.schema.handoff_packs import StrictModel
 
 
-PaymentTerms = Literal[
-    "Monthly payment",
-    "Milestone payment",
-    "Performance bond required",
-    "Possible LC/trade finance",
-]
+PaymentTerms = str
 
 
 class ContractUploadPackage(StrictModel):
@@ -35,7 +30,7 @@ class ContractUploadPackage(StrictModel):
     description: str | None = Field(default=None, min_length=1)
     contract_value: float | None = Field(default=None, gt=0)
     gross_margin: float | None = Field(default=None, ge=0, le=1)
-    payment_terms: PaymentTerms | None = None
+    payment_terms: PaymentTerms | None = Field(default=None, min_length=1)
     requested_amount: float | None = Field(default=None, gt=0)
     funding_need_type: Literal[
         "PERFORMANCE_BOND",

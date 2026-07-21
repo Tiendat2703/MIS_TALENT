@@ -230,7 +230,7 @@ async def check_finance_preflight(
 async def preflight_and_start_pipeline(
     contract: ContractUploadPackage,
 ) -> FinancePreflightResult:
-    """Persist and start the full pipeline only after every preflight gate passes."""
+    """Persist and start the gated pipeline only after preflight passes."""
     result = await check_finance_preflight(contract)
     if not result.can_start_pipeline:
         return result
@@ -268,9 +268,9 @@ async def preflight_and_start_pipeline(
         }
     )
 
-    from app.service.pipeline_service import start_pipeline_run
+    from app.service.pipeline_service import start_validated_pipeline_run
 
-    started = await start_pipeline_run(
+    started = await start_validated_pipeline_run(
         contract=authoritative_contract.model_dump(mode="json")
     )
     return result.model_copy(
@@ -279,7 +279,7 @@ async def preflight_and_start_pipeline(
             "can_start_pipeline": True,
             "session_id": started["session_id"],
             "contract_id": contract_id,
-            "summary": "Hợp đồng đã được lưu và pipeline đang chạy.",
+            "summary": "Hợp đồng đã được lưu và pipeline có cổng Validator đang chạy.",
         }
     )
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from app import api as api_module
 from app.Agent import financeAgent as finance_agent_module
 from app.Agent.financeAgent import build_finance_preflight_agent
 from app.api import app
@@ -259,7 +260,7 @@ async def test_customer_reference_is_not_checked_before_persistence(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_clean_preflight_persists_then_starts_pipeline_once(monkeypatch) -> None:
+async def test_clean_preflight_persists_then_starts_validated_pipeline_once(monkeypatch) -> None:
     starts: list[dict] = []
     persisted: list[ContractUploadPackage] = []
 
@@ -267,9 +268,9 @@ async def test_clean_preflight_persists_then_starts_pipeline_once(monkeypatch) -
         persisted.append(contract)
         return "CON-006"
 
-    async def fake_start_pipeline_run(*, contract):
+    async def fake_start_validated_pipeline_run(*, contract):
         starts.append(contract)
-        return {"session_id": 321, "status": "running"}
+        return {"session_id": 321, "status": "running", "gated": True}
 
     from app.service import pipeline_service
 
@@ -278,7 +279,11 @@ async def test_clean_preflight_persists_then_starts_pipeline_once(monkeypatch) -
         "create_contract_with_generated_id",
         fake_create,
     )
-    monkeypatch.setattr(pipeline_service, "start_pipeline_run", fake_start_pipeline_run)
+    monkeypatch.setattr(
+        pipeline_service,
+        "start_validated_pipeline_run",
+        fake_start_validated_pipeline_run,
+    )
     result = await finance_preflight_service.preflight_and_start_pipeline(
         ContractUploadPackage.model_validate(_complete_payload(contract_id="CON-PREVIEW"))
     )
@@ -314,7 +319,11 @@ async def test_unknown_customer_blocks_inserted_run(monkeypatch) -> None:
         "create_contract_with_generated_id",
         missing_customer,
     )
-    monkeypatch.setattr(pipeline_service, "start_pipeline_run", unexpected_start)
+    monkeypatch.setattr(
+        pipeline_service,
+        "start_validated_pipeline_run",
+        unexpected_start,
+    )
     result = await finance_preflight_service.preflight_and_start_pipeline(
         ContractUploadPackage.model_validate(
             _complete_payload(customer_id="CUS-UNKNOWN")
@@ -400,3 +409,24 @@ def test_runs_with_contract_body_uses_the_same_preflight_gate(monkeypatch) -> No
     assert response.status_code == 200
     assert response.json()["status"] == "AWAITING_INPUT"
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_runs_without_contract_uses_validated_pipeline(monkeypatch) -> None:
+    calls: list[object] = []
+
+    class PipelineServiceStub:
+        async def start_validated_pipeline_run(self, *, contract):
+            calls.append(contract)
+            return {"session_id": 654, "status": "running", "gated": True}
+
+    monkeypatch.setattr(
+        api_module,
+        "_pipeline_service",
+        lambda: PipelineServiceStub(),
+    )
+
+    result = await api_module.create_run()
+
+    assert result == {"session_id": 654, "status": "running", "gated": True}
+    assert calls == [None]

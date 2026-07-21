@@ -14,8 +14,8 @@ export default function AboutPage() {
               Khởi tạo hồ sơ phân tích hợp đồng
             </h1>
             <p className="mt-4 max-w-2xl text-pretty text-base leading-7 text-[var(--fin-muted)] sm:text-lg">
-              Nhập thông tin hợp đồng và nhu cầu vốn để các Finance, Risk và Decision
-              Agent cùng đánh giá hồ sơ.
+              Nhập thông tin hợp đồng và nhu cầu vốn để Finance, Risk, Decision và
+              Validator Agent cùng đánh giá, kiểm soát hồ sơ.
             </p>
           </article>
         </section>

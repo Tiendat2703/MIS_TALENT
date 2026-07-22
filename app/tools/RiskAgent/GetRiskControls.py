@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from agents import function_tool
 
@@ -108,12 +109,15 @@ def get_contract_orders_impl(contract_id: str) -> list[OrderRecord]:
 
 def load_risk_source_evidence_impl(
     finance_pack: FinanceFeaturePack,
-) -> dict[str, list[BankTransaction] | list[OrderRecord]]:
+) -> dict[str, Any]:
     """Load contract and portfolio evidence with explicit scope boundaries."""
     return {
         "bank_transactions": get_contract_bank_transactions_impl(finance_pack),
         "portfolio_bank_transactions": get_portfolio_bank_transactions_impl(),
         "orders": get_contract_orders_impl(finance_pack.contract_id),
+        # The organizer workbook has due_date/status but no governed as-of date.
+        # Do not substitute the runtime clock or FinanceFeaturePack.generated_at.
+        "reference_date": None,
     }
 
 

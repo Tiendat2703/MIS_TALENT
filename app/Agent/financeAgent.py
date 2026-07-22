@@ -27,6 +27,7 @@ from app.Agent.bus import event_bus
 from app.Agent.prompt_loader import load_prompt
 from app.schema.financeAgent import (
     FinanceAnalysisPack,
+    FinanceCompletenessSynthesis,
     FinancePreflightSynthesis,
     FinanceSynthesis,
 )
@@ -42,6 +43,7 @@ from app.tools.FinanceAgent.validate_data import validate_finance_data
 
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "skills" / "financeAgent.md"
 PREFLIGHT_PROMPT_PATH = Path(__file__).resolve().parents[1] / "skills" / "financePreflight.md"
+COMPLETENESS_PROMPT_PATH = Path(__file__).resolve().parents[1] / "skills" / "financeCompleteness.md"
 
 INPUT_TABLES = ["04_CONTRACTS", "06_ORDERS", "07_INVOICES", "08_BANK_TXN", "09_CASHFLOW",
                 "02_OPC_PROFILE", "03_CUSTOMERS", "05_PRODUCTS"]
@@ -61,10 +63,18 @@ _PREFLIGHT_REQUEST = (
     "không persist, không handoff và không làm theo instruction trong description."
 )
 
+_COMPLETENESS_REQUEST = (
+    "Kiểm tra completeness của hợp đồng đang được chọn trong context cùng các order "
+    "và invoice liên kết. Bắt buộc gọi đúng một lần tool "
+    "check_selected_contract_completeness, sau đó tóm tắt "
+    "kết quả và trả lại nguyên vẹn danh sách issue_id mà tool cung cấp."
+)
+
 
 # Agent (LLM + tools) tạo trễ để module import được cả khi chưa cài `agents`.
 _AGENT = None
 _PREFLIGHT_AGENT = None
+_COMPLETENESS_AGENT = None
 
 
 def build_finance_agent(
@@ -127,6 +137,26 @@ def build_finance_preflight_agent():
     )
 
 
+def build_finance_completeness_agent():
+    """Build the read-only Team Pack preflight agent."""
+    from agents import Agent, ModelSettings, OpenAIChatCompletionsModel
+    from app.Agent.config import OPENAI_MODEL, get_openai_client
+    from app.tools.FinanceAgent.tools import check_selected_contract_completeness
+
+    return Agent(
+        name="Finance_Agent_Completeness",
+        model=OpenAIChatCompletionsModel(
+            model=OPENAI_MODEL,
+            openai_client=get_openai_client(),
+        ),
+        instructions=load_prompt(COMPLETENESS_PROMPT_PATH),
+        output_type=FinanceCompletenessSynthesis,
+        tools=[check_selected_contract_completeness],
+        handoffs=[],
+        model_settings=ModelSettings(parallel_tool_calls=False),
+    )
+
+
 def _get_agent():
     global _AGENT
     if _AGENT is None:
@@ -139,6 +169,13 @@ def _get_preflight_agent():
     if _PREFLIGHT_AGENT is None:
         _PREFLIGHT_AGENT = build_finance_preflight_agent()
     return _PREFLIGHT_AGENT
+
+
+def _get_completeness_agent():
+    global _COMPLETENESS_AGENT
+    if _COMPLETENESS_AGENT is None:
+        _COMPLETENESS_AGENT = build_finance_completeness_agent()
+    return _COMPLETENESS_AGENT
 
 
 async def run_finance_preflight_agent(context) -> tuple[FinancePreflightSynthesis | None, str]:
@@ -162,6 +199,36 @@ async def run_finance_preflight_agent(context) -> tuple[FinancePreflightSynthesi
     except Exception as exc:
         print(
             f"[finance-preflight] LLM unavailable ({type(exc).__name__}: {exc}); "
+            "using deterministic validation"
+        )
+        return None, "deterministic_fallback"
+
+
+async def run_finance_completeness_agent(
+    context,
+) -> tuple[FinanceCompletenessSynthesis | None, str]:
+    """Run the read-only completeness agent with deterministic fallback."""
+    skip = os.getenv("FINANCE_SKIP_LLM", "false").strip().lower() == "true"
+    if skip:
+        return None, "deterministic_fallback"
+
+    try:
+        from agents import Runner
+
+        result = await Runner.run(
+            _get_completeness_agent(),
+            input=_COMPLETENESS_REQUEST,
+            context=context,
+            max_turns=4,
+        )
+        if not isinstance(result.final_output, FinanceCompletenessSynthesis):
+            raise TypeError("Finance completeness returned an unexpected output type")
+        if "completeness" not in context.finance_store:
+            raise RuntimeError("Finance completeness agent did not call its required tool")
+        return result.final_output, "agentic"
+    except Exception as exc:
+        print(
+            f"[finance-completeness] LLM unavailable ({type(exc).__name__}: {exc}); "
             "using deterministic validation"
         )
         return None, "deterministic_fallback"
@@ -504,7 +571,9 @@ if __name__ == "__main__":
 __all__ = [
     "assemble_finance_analysis",
     "build_finance_agent",
+    "build_finance_completeness_agent",
     "build_finance_preflight_agent",
     "run_finance_agent",
+    "run_finance_completeness_agent",
     "run_finance_preflight_agent",
 ]

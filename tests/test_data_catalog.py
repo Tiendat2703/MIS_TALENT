@@ -6,7 +6,11 @@ from fastapi.testclient import TestClient
 from psycopg2 import sql
 
 from app.api import app
-from app.service import data_catalog_service, pipeline_service
+from app.service import (
+    data_catalog_service,
+    finance_completeness_service,
+    pipeline_service,
+)
 
 
 client = TestClient(app)
@@ -108,6 +112,9 @@ def test_contract_options_use_available_customer_name_fields(monkeypatch) -> Non
 def test_validated_run_endpoint_targets_selected_database_contract(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
+    async def clean_preflight(_contract_id: str):
+        return None
+
     async def fake_start_validated_pipeline_run(**kwargs):
         captured.update(kwargs)
         return {
@@ -117,6 +124,11 @@ def test_validated_run_endpoint_targets_selected_database_contract(monkeypatch) 
             "contract_id": kwargs["existing_contract_id"],
         }
 
+    monkeypatch.setattr(
+        finance_completeness_service,
+        "check_existing_finance_completeness",
+        clean_preflight,
+    )
     monkeypatch.setattr(
         pipeline_service,
         "start_validated_pipeline_run",

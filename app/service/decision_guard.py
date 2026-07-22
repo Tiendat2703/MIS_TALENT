@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.schema.decisionAgent import (
+    ACTIVE_ONLY_RECOMMENDED_OPTIONS,
     ACTIVE_RECOMMENDED_OPTIONS,
     DecisionBatchOutput,
     DecisionStatus,
@@ -99,7 +100,7 @@ def validate_decision_finance_consistency(
                 )
         elif (
             decision.assessment_type == "ONGOING_CONTRACT_REVIEW"
-            or decision.recommended_option in ACTIVE_RECOMMENDED_OPTIONS
+            or decision.recommended_option in ACTIVE_ONLY_RECOMMENDED_OPTIONS
         ):
             raise ValueError(
                 f"Decision for {finance.contract_id} cannot use the ACTIVE "
@@ -164,12 +165,12 @@ def validate_decision_finance_consistency(
             )
 
 
-def _temporary_rejection_policy(
+def _contract_hold_policy(
     risk: RiskPack,
 ) -> set[str]:
-    """Return rule ids that independently require temporary rejection."""
+    """Return contract rules that require review, never automatic rejection."""
     triggered = set(risk.triggered_rule_ids)
-    return {"RR-003"} if "RR-003" in triggered else set()
+    return triggered.intersection({"RR-003", "RR-007"})
 
 
 def _is_active_decision(decision: Any) -> bool:
@@ -181,17 +182,61 @@ def _is_active_decision(decision: Any) -> bool:
     )
 
 
+def _has_authoritative_contract_rejection(decision: Any) -> bool:
+    flow = (
+        decision.get("contract_final_action_approval", {})
+        if isinstance(decision, dict)
+        else getattr(decision, "contract_final_action_approval", None)
+    )
+    status = flow.get("status") if isinstance(flow, dict) else getattr(
+        flow, "status", None
+    )
+    return status == "REJECTED"
+
+
+def _replace_unbacked_rejection(decision: dict[str, Any]) -> None:
+    """Turn an AI-only rejection into a reversible human review."""
+    current_option = decision.get("recommended_option")
+    replacement_option = (
+        RecommendedOption.NEED_MORE_DATA.value
+        if current_option == RecommendedOption.REJECT_MISSING_EVIDENCE.value
+        else RecommendedOption.RECOMMEND_HOLD.value
+    )
+    decision.update(
+        accept_opportunity=None,
+        recommended_option=replacement_option,
+        decision_status=DecisionStatus.REVIEW.value,
+        is_preliminary=True,
+        is_final_decision=False,
+        requires_founder_confirmation=True,
+        human_confirmation_status="PENDING",
+    )
+    if not decision.get("required_actions"):
+        decision["required_actions"] = [{
+            "action": (
+                "Rà soát bằng chứng và xin quyết định của người có thẩm quyền "
+                "trước khi kết luận nhận hoặc từ chối hợp đồng."
+            ),
+            "owner": "Founder & Contract Owner",
+        }]
+    if not decision.get("human_confirmation_points"):
+        decision["human_confirmation_points"] = [
+            "Founder xác nhận hành động cuối của hợp đồng sau khi hoàn tất rà soát."
+        ]
+
+
 def apply_mandatory_risk_policy(
     batch: DecisionBatchOutput,
     risk_batch: RiskBatchPack,
     *,
     contract_id: str | None = None,
 ) -> DecisionBatchOutput:
-    """Deterministically preserve mandatory risk rejection after continuation.
+    """Deterministically preserve mandatory risk review after continuation.
 
-    A bank precheck result enriches a Decision Card; it must never override an
-    authoritative RR-003 rejection. This also repairs historical runs
-    created before the mandatory policy was enforced at the initial commit.
+    RR-003 and a conclusively triggered RR-007 require a reversible HOLD. A
+    bank precheck result may enrich the card but must not silently turn that
+    review into approval. Missing evidence remains NEED_MORE_DATA and never
+    becomes a rejection.
     """
     risk_by_contract = {risk.contract_id: risk for risk in risk_batch.packs}
     payload = batch.model_dump(mode="json")
@@ -232,20 +277,17 @@ def apply_mandatory_risk_policy(
                 }
             ),
         )
+        if (
+            decision.get("decision_status") == DecisionStatus.REJECT.value
+            and _has_authoritative_contract_rejection(decision)
+        ):
+            continue
         if risk.risk_assessment_status == "INCOMPLETE":
-            is_active_review = (
-                normalize_contract_lifecycle(decision.get("contract_status")) == "ACTIVE"
-                and decision.get("assessment_type") == "ONGOING_CONTRACT_REVIEW"
-            )
             decision.update(
                 risk_level=None,
                 decision_status=DecisionStatus.REVIEW.value,
-                recommended_option=(
-                    RecommendedOption.NEED_MORE_DATA.value
-                    if is_active_review
-                    else RecommendedOption.REJECT_MISSING_EVIDENCE.value
-                ),
-                accept_opportunity=None if is_active_review else False,
+                recommended_option=RecommendedOption.NEED_MORE_DATA.value,
+                accept_opportunity=None,
                 requires_founder_confirmation=True,
                 human_confirmation_status="PENDING",
                 external_api_submission_approval_status="NOT_REQUESTED",
@@ -255,7 +297,7 @@ def apply_mandatory_risk_policy(
                 is_preliminary=True,
                 is_final_decision=False,
             )
-            if is_active_review and not decision.get("required_actions"):
+            if not decision.get("required_actions"):
                 decision["required_actions"] = [{
                     "action": (
                         "Bổ sung và rà soát evidence còn thiếu trong Risk Pack "
@@ -263,61 +305,64 @@ def apply_mandatory_risk_policy(
                     ),
                     "owner": "Risk & Contract Owner",
                 }]
-            if is_active_review and not decision.get("human_confirmation_points"):
+            if not decision.get("human_confirmation_points"):
                 decision["human_confirmation_points"] = [
                     "Xác nhận evidence bổ sung trước khi chạy lại Risk Assessment."
                 ]
-            # An incomplete assessment cannot be upgraded into a conclusive
-            # RR-003 hold/rejection. Triggered facts remain in Risk Pack and the
-            # card actions, while the recommendation stays NEED_MORE_DATA.
+            # An incomplete assessment cannot become a conclusive hold or
+            # rejection. Triggered facts remain visible while the recommendation
+            # stays NEED_MORE_DATA for every contract lifecycle.
             continue
 
-        required_rule_ids = _temporary_rejection_policy(risk)
+        required_rule_ids = _contract_hold_policy(risk)
         if not required_rule_ids:
+            if (
+                decision.get("decision_status") == DecisionStatus.REJECT.value
+                and not _has_authoritative_contract_rejection(decision)
+            ):
+                _replace_unbacked_rejection(decision)
             continue
 
         is_active_review = (
             normalize_contract_lifecycle(decision.get("contract_status")) == "ACTIVE"
             and decision.get("assessment_type") == "ONGOING_CONTRACT_REVIEW"
         )
-        if is_active_review:
-            # RR-003 is a contract-scoped management signal, not an automatic
-            # hold/reject gate for an existing contract. Preserve Decision's
-            # management option (for example NEED_MORE_DATA when business
-            # evidence is missing) and require an explicit pricing/cost action.
-            decision.update(
-                accept_opportunity=None,
-                decision_status=DecisionStatus.REVIEW.value,
-                is_preliminary=True,
-                is_final_decision=False,
-                requires_founder_confirmation=True,
-            )
-            actions = list(decision.get("required_actions") or [])
-            if not any(
-                "rr-003" in str(item.get("action") or "").casefold()
+        decision.update(
+            accept_opportunity=None,
+            decision_status=DecisionStatus.REVIEW.value,
+            is_preliminary=True,
+            is_final_decision=False,
+            requires_founder_confirmation=True,
+            human_confirmation_status="PENDING",
+        )
+        if not is_active_review:
+            decision["recommended_option"] = RecommendedOption.RECOMMEND_HOLD.value
+
+        actions = list(decision.get("required_actions") or [])
+        action_templates = {
+            "RR-003": (
+                "Rà soát lại giá bán, chi phí ước tính và biên hợp đồng theo RR-003.",
+                "Finance & Contract Owner",
+            ),
+            "RR-007": (
+                "Rà soát kế hoạch vận hành và mức phạt tiến độ theo RR-007.",
+                "Operations & Contract Owner",
+            ),
+        }
+        for rule_id in sorted(required_rule_ids):
+            if any(
+                rule_id.casefold() in str(item.get("action") or "").casefold()
                 for item in actions
             ):
-                actions.append({
-                    "action": (
-                        "Rà soát lại giá bán, chi phí ước tính và biên hợp đồng "
-                        "theo RR-003."
-                    ),
-                    "owner": "Finance & Contract Owner",
-                })
-            decision["required_actions"] = actions
-            if not decision.get("human_confirmation_points"):
-                decision["human_confirmation_points"] = [
-                    "Người có thẩm quyền xác nhận hành động cuối cùng sau khi "
-                    "hoàn tất rà soát RR-003."
-                ]
-        else:
-            decision.update(
-                accept_opportunity=False,
-                recommended_option=RecommendedOption.TEMPORARY_REJECT_RISK.value,
-                decision_status=DecisionStatus.REJECT.value,
-                is_preliminary=True,
-                requires_founder_confirmation=True,
-            )
+                continue
+            action, owner = action_templates[rule_id]
+            actions.append({"action": action, "owner": owner})
+        decision["required_actions"] = actions
+        if not decision.get("human_confirmation_points"):
+            decision["human_confirmation_points"] = [
+                "Người có thẩm quyền xác nhận hành động tiếp theo sau khi hoàn tất "
+                f"rà soát {', '.join(sorted(required_rule_ids))}."
+            ]
 
         cited_rule_ids = sorted(required_rule_ids)
         rationale = " ".join([
@@ -330,14 +375,14 @@ def apply_mandatory_risk_policy(
         policy_note = (
             (
                 "Cảnh báo quản trị theo "
-                f"{', '.join(cited_rule_ids)}; cần hoàn tất rà soát giá/chi phí "
-                "trước hành động cuối cùng, nhưng rule này không tự chọn HOLD."
+                f"{', '.join(cited_rule_ids)}; cần hoàn tất hành động quản trị "
+                "trước bước tiếp theo, nhưng không từ chối hợp đồng đang ACTIVE."
             )
             if is_active_review
             else (
-                "Chính sách rủi ro bắt buộc tạm từ chối theo "
-                f"{', '.join(cited_rule_ids)}; cần hoàn tất hành động khắc phục và "
-                "đánh giá lại rủi ro trước khi tiếp tục hồ sơ."
+                "Chính sách rủi ro yêu cầu HOLD theo "
+                f"{', '.join(cited_rule_ids)}; cần hoàn tất hành động rà soát "
+                "trước khi tiếp tục hồ sơ."
             )
         )
         reasons = list(decision["reasons"])
@@ -354,7 +399,7 @@ def validate_decision_risk_policy(
     batch: DecisionBatchOutput,
     risk_batch: RiskBatchPack,
 ) -> None:
-    """Enforce temporary rejection only for independently blocking rules."""
+    """Enforce evidence holds without converting risk severity into rejection."""
     decisions = {item.contract_id: item for item in batch.decisions}
     if list(decisions) != risk_batch.contract_ids:
         raise ValueError(
@@ -398,6 +443,14 @@ def validate_decision_risk_policy(
                 f"RiskPack {expected_priority}"
             )
         if (
+            decision.decision_status is DecisionStatus.REJECT
+            and not _has_authoritative_contract_rejection(decision)
+        ):
+            raise ValueError(
+                f"Reject decision for {risk.contract_id} requires an authoritative "
+                "contract_final_action_approval status REJECTED"
+            )
+        if (
             decision.portfolio_transaction_approval.required
             != risk.portfolio_transaction_approval_required
             or decision.portfolio_transaction_approval.object_ids
@@ -407,31 +460,33 @@ def validate_decision_risk_policy(
                 f"Decision portfolio transaction approval for {risk.contract_id} "
                 "must match the RR-001 portfolio evidence"
             )
+        if (
+            decision.decision_status is DecisionStatus.REJECT
+            and _has_authoritative_contract_rejection(decision)
+        ):
+            continue
         if risk.risk_assessment_status == "INCOMPLETE":
-            if _is_active_decision(decision):
-                if decision.recommended_option is not RecommendedOption.NEED_MORE_DATA:
-                    raise ValueError(
-                        f"Incomplete ACTIVE risk for {risk.contract_id} requires NEED_MORE_DATA"
-                    )
-            elif decision.recommended_option is not RecommendedOption.REJECT_MISSING_EVIDENCE:
+            if decision.recommended_option is not RecommendedOption.NEED_MORE_DATA:
                 raise ValueError(
-                    f"Incomplete risk for {risk.contract_id} requires REJECT_MISSING_EVIDENCE"
+                    f"Incomplete risk for {risk.contract_id} requires NEED_MORE_DATA"
                 )
             continue
 
-        required_rule_ids = _temporary_rejection_policy(risk)
+        required_rule_ids = _contract_hold_policy(risk)
         if not required_rule_ids:
             continue
         if _is_active_decision(decision):
-            has_rr003_action = any(
-                "rr-003" in action.action.casefold()
-                for action in decision.required_actions
+            action_text = " ".join(
+                action.action.casefold() for action in decision.required_actions
+            )
+            has_required_actions = all(
+                rule_id.casefold() in action_text for rule_id in required_rule_ids
             )
             if (
                 decision.recommended_option not in ACTIVE_RECOMMENDED_OPTIONS
                 or decision.accept_opportunity is not None
                 or decision.decision_status is not DecisionStatus.REVIEW
-                or not has_rr003_action
+                or not has_required_actions
             ):
                 raise ValueError(
                     f"ACTIVE decision for {risk.contract_id} must preserve a management "
@@ -439,12 +494,12 @@ def validate_decision_risk_policy(
                 )
         elif (
             decision.recommended_option
-            is not RecommendedOption.TEMPORARY_REJECT_RISK
-            or decision.accept_opportunity
-            or decision.decision_status is not DecisionStatus.REJECT
+            is not RecommendedOption.RECOMMEND_HOLD
+            or decision.accept_opportunity is not None
+            or decision.decision_status is not DecisionStatus.REVIEW
         ):
             raise ValueError(
-                f"Decision for {risk.contract_id} must be temporarily rejected "
+                f"Decision for {risk.contract_id} must be held for review "
                 f"because risk rules {sorted(required_rule_ids)} require it"
             )
 

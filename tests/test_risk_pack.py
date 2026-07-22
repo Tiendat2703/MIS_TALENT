@@ -6,7 +6,7 @@ get_alerts_impl, get_data_classes_impl) trong BuildRiskReport.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -80,6 +80,7 @@ def _patch(
     bank_transactions=None,
     portfolio_bank_transactions=None,
     orders=None,
+    reference_date=None,
 ) -> None:
     monkeypatch.setattr(BuildRiskReport, "get_risk_rules_impl", lambda: rules)
     monkeypatch.setattr(BuildRiskReport, "get_alerts_impl", lambda: alerts)
@@ -91,6 +92,7 @@ def _patch(
             "bank_transactions": bank_transactions or [],
             "portfolio_bank_transactions": portfolio_bank_transactions or [],
             "orders": orders or [],
+            "reference_date": reference_date,
         },
     )
 
@@ -106,14 +108,13 @@ def test_triggered_rule_without_alert_becomes_proposed(monkeypatch) -> None:
         orders=[OrderRecord(
             order_id="ORD-001",
             contract_id="CON-001",
-            due_date=date.today() - timedelta(days=10),
+            due_date=date(2026, 7, 1),
             status="In progress",
         )],
+        reference_date=date(2026, 7, 11),
     )
 
-    pack = BuildRiskReport.build_risk_pack_impl(
-        _finance_pack(delivery_delay_days=10)
-    )
+    pack = BuildRiskReport.build_risk_pack_impl(_finance_pack())
 
     assert pack.triggered_rule_ids == ["RR-007"]
     assert len(pack.proposed_alerts) == 1
@@ -164,9 +165,10 @@ def test_summary_counts_detected_and_proposed(monkeypatch) -> None:
         orders=[OrderRecord(
             order_id="ORD-001",
             contract_id="CON-001",
-            due_date=date.today() - timedelta(days=10),
+            due_date=date(2026, 7, 1),
             status="In progress",
         )],
+        reference_date=date(2026, 7, 11),
     )
 
     pack = BuildRiskReport.build_risk_pack_impl(
@@ -174,7 +176,6 @@ def test_summary_counts_detected_and_proposed(monkeypatch) -> None:
             projected_closing_cash=100_000_000,
             cash_reserve_minimum=550_000_000,
             requested_amount=400_000_000,
-            delivery_delay_days=10,
             source_record_ids=["CON-002"],
         )
     )
@@ -185,6 +186,47 @@ def test_summary_counts_detected_and_proposed(monkeypatch) -> None:
     assert pack.summary.unmapped_rule_ids == ["RR-007"]
     assert pack.summary.highest_severity == Severity.HIGH
     assert pack.summary.human_review_required is True
+
+
+def test_rr007_does_not_use_generated_at_as_reference_date(monkeypatch) -> None:
+    rule = _rule(
+        "RR-007",
+        "Late delivery penalty",
+        "delivery_delay_days > 7",
+        Severity.HIGH,
+        "Escalate operations plan and penalty exposure",
+    )
+    _patch(
+        monkeypatch,
+        rules=[rule],
+        alerts=[],
+        orders=[OrderRecord(
+            order_id="ORD-002",
+            contract_id="CON-001",
+            due_date=date(2026, 6, 25),
+            status="In progress",
+        )],
+    )
+
+    pack = BuildRiskReport.build_risk_pack_impl(_finance_pack(
+        generated_at=datetime(2026, 7, 22, tzinfo=UTC),
+    ))
+
+    evaluation = pack.rule_evaluations[0]
+    assert evaluation.status == "INSUFFICIENT_EVIDENCE"
+    assert evaluation.observed_value is None
+    assert evaluation.missing_fields == ["reference_date"]
+    assert "Runtime/generated timestamps are not valid business evidence" in (
+        evaluation.message
+    )
+    assert pack.triggered_rule_ids == []
+    assert pack.proposed_alerts == []
+    assert pack.insufficient_evidence == ["RR-007:reference_date"]
+    assert pack.risk_assessment_status == "COMPLETE"
+    assert pack.review_priority == Severity.LOW
+    assert pack.manual_evidence_review_required is False
+    assert pack.summary is not None
+    assert pack.summary.human_review_required is False
 
 
 def test_masking_confidential_value_and_identifiers(monkeypatch) -> None:
@@ -422,7 +464,9 @@ def test_rr006_reads_observed_confidence_from_banking_recommendation(
     ]
 
 
-def test_con002_rules_are_scoped_and_complete_after_applicability(monkeypatch) -> None:
+def test_con002_rules_are_scoped_and_complete_with_nonblocking_rr007_gap(
+    monkeypatch,
+) -> None:
     rules = [
         _rule(
             "RR-001",
@@ -552,7 +596,10 @@ def test_con002_rules_are_scoped_and_complete_after_applicability(monkeypatch) -
     assert evaluations[("RR-004", "CONTRACT")].status == "NOT_APPLICABLE"
     assert evaluations[("RR-005", "CONTRACT")].status == "NOT_APPLICABLE"
     assert evaluations[("RR-006", "CONTRACT")].status == "NOT_APPLICABLE"
-    assert evaluations[("RR-007", "CONTRACT")].status == "NOT_TRIGGERED"
+    assert evaluations[("RR-007", "CONTRACT")].status == "INSUFFICIENT_EVIDENCE"
+    assert evaluations[("RR-007", "CONTRACT")].missing_fields == [
+        "reference_date"
+    ]
     assert all(
         item.findings
         for item in pack.rule_evaluations

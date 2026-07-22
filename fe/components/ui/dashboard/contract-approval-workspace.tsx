@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Check,
-  ChevronRight,
   CircleDollarSign,
   Clock3,
   Eye,
@@ -21,7 +20,8 @@ import { API_BASE_URL, API_REQUEST_HEADERS, apiUrl } from "@/lib/api";
 type ApprovalStatus = "pending" | "approved" | "review" | "rejected";
 type RiskLevel = "low" | "medium" | "high" | "critical";
 type RiskScope = "CONTRACT" | "PORTFOLIO";
-type FilterStatus = "all" | ApprovalStatus;
+type ContractLifecycle = "ACTIVE" | "NON_ACTIVE";
+type FilterStatus = "all" | "active" | ApprovalStatus;
 
 type ContractRisk = {
   title: string;
@@ -101,6 +101,7 @@ type ContractRecord = {
   risks: ContractRisk[];
   safeguards: string[];
   riskLevel: RiskLevel;
+  contractLifecycle: ContractLifecycle;
   status: ApprovalStatus;
   agentRisk: AgentRiskSnapshot;
   bankPrecheck: BankPrecheck;
@@ -298,15 +299,15 @@ type RunDetailPayload = {
 const optionLabels: Record<string, string> = {
   APPROVE: "Nên duyệt",
   APPROVE_WITH_CONDITION: "Duyệt có điều kiện",
-  TEMPORARY_REJECT_RISK: "Tạm từ chối · rủi ro",
-  REJECT_MISSING_EVIDENCE: "Từ chối · thiếu hồ sơ",
+  TEMPORARY_REJECT_RISK: "Hold · chờ rà soát rủi ro",
+  REJECT_MISSING_EVIDENCE: "Hold · chờ bổ sung dữ liệu",
   NO_SUITABLE_PRODUCT: "Chưa có phương án phù hợp",
   CONTINUE_AS_PLANNED: "Tiếp tục theo kế hoạch",
   CONTINUE_WITH_ACTIONS: "Tiếp tục kèm hành động",
   ESCALATE_FOR_REVIEW: "Chuyển cấp xem xét",
   RECOMMEND_RENEGOTIATION: "Đề nghị đàm phán lại",
-  RECOMMEND_HOLD: "Đề nghị tạm giữ",
-  NEED_MORE_DATA: "Cần bổ sung dữ liệu",
+  RECOMMEND_HOLD: "Hold · chờ rà soát",
+  NEED_MORE_DATA: "Hold · chờ bổ sung dữ liệu",
   PENDING_ANALYSIS: "Đang chờ phân tích",
 };
 
@@ -326,6 +327,7 @@ const riskLabels: Record<RiskLevel, string> = {
 
 const filters: { value: FilterStatus; label: string }[] = [
   { value: "all", label: "Tất cả" },
+  { value: "active", label: "Đang hoạt động" },
   { value: "pending", label: "Chờ duyệt" },
   { value: "review", label: "Xem xét" },
   { value: "approved", label: "Đã duyệt" },
@@ -356,11 +358,44 @@ function mapRiskEvaluation(entry: RunRiskEvaluation): ContractRisk {
   };
 }
 
-function normalizeStatus(value?: string | null, approvalStatus?: boolean | null): ApprovalStatus {
-  if (approvalStatus) return "approved";
+function normalizeStatus(
+  value?: string | null,
+  recommendedOption?: string | null,
+  requiresFounderConfirmation?: boolean | null,
+  humanConfirmationStatus?: string | null,
+): ApprovalStatus {
+  if (
+    recommendedOption === "TEMPORARY_REJECT_RISK"
+    || recommendedOption === "REJECT_MISSING_EVIDENCE"
+  ) {
+    return "review";
+  }
+  if (
+    requiresFounderConfirmation
+    && humanConfirmationStatus !== "CONFIRMED"
+  ) {
+    return "review";
+  }
+  if (value === "approve") return "approved";
   if (value === "reject") return "rejected";
   if (value === "review") return "review";
   return "pending";
+}
+
+function normalizeContractLifecycle(...values: Array<string | null | undefined>): ContractLifecycle {
+  return values.some((value) => value?.trim().toUpperCase() === "ACTIVE")
+    ? "ACTIVE"
+    : "NON_ACTIVE";
+}
+
+function isActiveContract(contract: ContractRecord): boolean {
+  return contract.contractLifecycle === "ACTIVE";
+}
+
+function matchesContractFilter(contract: ContractRecord, filter: FilterStatus): boolean {
+  if (filter === "all") return true;
+  if (filter === "active") return isActiveContract(contract);
+  return !isActiveContract(contract) && contract.status === filter;
 }
 
 function normalizeEligibilityScore(value?: number | null): number | null {
@@ -383,6 +418,10 @@ function paymentLabel(type?: string | null): string {
 function mapApiContract(item: ApiContract): ContractRecord {
   const finance = item.finance ?? {};
   const decision = item.decision ?? {};
+  const contractLifecycle = normalizeContractLifecycle(
+    finance.contract_lifecycle,
+    decision.contract_status,
+  );
   const selectedFundingType = decision.funding_need_type ?? finance.funding_need_type;
   const externalApprovalExecuted =
     decision.external_api_submission_approval_status === "EXECUTED"
@@ -444,9 +483,11 @@ function mapApiContract(item: ApiContract): ContractRecord {
       || selectedFundingType?.replaceAll("_", " ")
       || "Hợp đồng thương mại",
     owner: "Chưa có dữ liệu",
-    summary: finance.status
-      ? `Hồ sơ đã hoàn tất bước ${finance.status.toLowerCase()} và đang chờ quyết định cuối.`
-      : "Hồ sơ hợp đồng được nhập vào pipeline phân tích tài chính và rủi ro.",
+    summary: contractLifecycle === "ACTIVE"
+      ? "Hợp đồng đang được thực thi. Dashboard chỉ cung cấp insight tài chính, vận hành và rủi ro; không yêu cầu phê duyệt lại hợp đồng."
+      : finance.status
+        ? `Hồ sơ đã hoàn tất bước ${finance.status.toLowerCase()} và đang chờ quyết định cuối.`
+        : "Hồ sơ hợp đồng được nhập vào pipeline phân tích tài chính và rủi ro.",
     aiOption: decision.recommended_option || "PENDING_ANALYSIS",
     aiConfidence: finance.confidence_score != null
       ? Math.round(finance.confidence_score * 100)
@@ -455,7 +496,13 @@ function mapApiContract(item: ApiContract): ContractRecord {
     risks: contractRisks,
     safeguards: [],
     riskLevel,
-    status: normalizeStatus(decision.decision_status, externalApprovalExecuted),
+    contractLifecycle,
+    status: normalizeStatus(
+      decision.decision_status,
+      decision.recommended_option,
+      decision.requires_founder_confirmation,
+      decision.human_confirmation_status,
+    ),
     agentRisk: {
       available: Boolean(item.risk),
       contractId: item.contract_id,
@@ -593,9 +640,18 @@ function StatusBadge({ status }: { status: ApprovalStatus }) {
   };
 
   return (
-    <span className={`inline-flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[11px] font-semibold ${styles[status]}`}>
-      <span className={`size-1.5 rounded-full ${dots[status]}`} aria-hidden="true" />
-      {statusLabels[status]}
+    <span className={`inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1.5 text-[10px] font-semibold leading-4 ${styles[status]}`}>
+      <span className={`size-1.5 shrink-0 rounded-full ${dots[status]}`} aria-hidden="true" />
+      <span className="min-w-0 break-words">{statusLabels[status]}</span>
+    </span>
+  );
+}
+
+function ActiveContractBadge() {
+  return (
+    <span className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-sky-300/20 bg-sky-300/[0.08] px-2 py-1.5 text-[10px] font-semibold leading-4 text-sky-200">
+      <Eye className="size-3 shrink-0" aria-hidden="true" />
+      <span className="min-w-0 break-words">Active</span>
     </span>
   );
 }
@@ -890,13 +946,16 @@ function BankPrecheckApprovals({
   const rows = useMemo<PrecheckRow[]>(() => {
     return contracts
       .filter((contract) => (
-        contract.bankPrecheck.approvalStatus
-        || contract.bankPrecheck.eligibleScore != null
-        || Boolean(contract.bankPrecheck.precheckNote)
-        || Boolean(pendingRequests[contract.id])
-        || (
-          contract.bankPrecheck.requiresFounderConfirmation
-          && Boolean(contract.bankPrecheck.requestType)
+        !isActiveContract(contract)
+        && (
+          contract.bankPrecheck.approvalStatus
+          || contract.bankPrecheck.eligibleScore != null
+          || Boolean(contract.bankPrecheck.precheckNote)
+          || Boolean(pendingRequests[contract.id])
+          || (
+            contract.bankPrecheck.requiresFounderConfirmation
+            && Boolean(contract.bankPrecheck.requestType)
+          )
         )
       ))
       .map((contract) => ({
@@ -1465,10 +1524,11 @@ export function ContractApprovalWorkspace() {
   }, [detailRefreshVersion, selectedId, selectedRunId]);
 
   const selected = contracts.find((item) => item.id === selectedId) ?? contracts[0];
+  const selectedIsActive = selected ? isActiveContract(selected) : false;
   const filteredContracts = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase("vi");
     return contracts.filter((item) => {
-      const matchesFilter = filter === "all" || item.status === filter;
+      const matchesFilter = matchesContractFilter(item, filter);
       const matchesQuery = !normalizedQuery || [item.id, item.title, item.counterparty, item.owner]
         .some((value) => value.toLocaleLowerCase("vi").includes(normalizedQuery));
       return matchesFilter && matchesQuery;
@@ -1477,7 +1537,10 @@ export function ContractApprovalWorkspace() {
 
   const counts = useMemo(() => ({
     total: contracts.length,
-    awaiting: contracts.filter((item) => item.status === "pending" || item.status === "review").length,
+    awaiting: contracts.filter((item) => (
+      !isActiveContract(item)
+      && (item.status === "pending" || item.status === "review")
+    )).length,
     highRisk: contracts.filter((item) => item.agentRisk.available && (item.riskLevel === "high" || item.riskLevel === "critical")).length,
     value: contracts.reduce((sum, item) => sum + (item.amount ?? 0), 0),
   }), [contracts]);
@@ -1508,7 +1571,7 @@ export function ContractApprovalWorkspace() {
   };
 
   const applyDecision = (status: ApprovalStatus) => {
-    if (!selected) return;
+    if (!selected || isActiveContract(selected)) return;
     setActionState("saving");
     setNotice("");
     setContracts((current) => current.map((item) => item.id === selected.id ? { ...item, status } : item));
@@ -1558,10 +1621,10 @@ export function ContractApprovalWorkspace() {
             <span className="text-xs text-[var(--fin-muted)]">Dữ liệu trực tiếp từ pipeline</span>
           </div>
           <h1 className="mt-4 max-w-3xl text-balance text-3xl font-semibold leading-[1.05] tracking-[-0.055em] text-[var(--fin-text)] sm:text-4xl lg:text-[2.8rem]">
-            Hàng chờ phê duyệt hợp đồng
+            Theo dõi và phê duyệt hợp đồng
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--fin-muted)]">
-            Đối chiếu điều khoản, xem phương án AI và ghi nhận quyết định cuối trên cùng một màn hình.
+            Hợp đồng Active chỉ hiển thị insight; các hồ sơ còn lại tiếp tục theo luồng xem xét và phê duyệt.
           </p>
         </div>
 
@@ -1583,7 +1646,7 @@ export function ContractApprovalWorkspace() {
         <Metric icon={AlertTriangle} label="Rủi ro cao" value={String(counts.highRisk).padStart(2, "0")} note="High hoặc critical" />
       </section>
 
-      <div className="mt-5 grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_29rem] 2xl:grid-cols-[minmax(0,1fr)_34rem]">
+      <div className="mt-5 grid min-w-0 gap-5 2xl:grid-cols-[minmax(0,1fr)_29rem]">
         <section className="min-w-0 overflow-hidden rounded-xl border border-[var(--fin-soft-border)] bg-[var(--fin-surface)]">
           <header className="border-b border-[var(--fin-soft-border)] px-4 py-4 sm:px-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -1606,7 +1669,9 @@ export function ContractApprovalWorkspace() {
 
             <div className="fin-scrollbar mt-4 flex gap-1 overflow-x-auto pb-1" aria-label="Lọc theo trạng thái">
               {filters.map((item) => {
-                const count = item.value === "all" ? contracts.length : contracts.filter((contract) => contract.status === item.value).length;
+                const count = contracts.filter((contract) => (
+                  matchesContractFilter(contract, item.value)
+                )).length;
                 return (
                   <button
                     key={item.value}
@@ -1626,17 +1691,24 @@ export function ContractApprovalWorkspace() {
             </div>
           </header>
 
-          <div className="fin-scrollbar max-w-full overflow-x-auto">
-            <table className="w-full min-w-[1120px] border-collapse text-left">
+          <div className="max-w-full overflow-hidden">
+            <table className="w-full table-fixed border-collapse text-left">
+              <colgroup>
+                <col style={{ width: "31%" }} />
+                <col style={{ width: "12%" }} />
+                <col style={{ width: "13%" }} />
+                <col style={{ width: "15%" }} />
+                <col style={{ width: "18%" }} />
+                <col style={{ width: "11%" }} />
+              </colgroup>
               <thead>
                 <tr className="border-b border-[var(--fin-soft-border)] bg-white/[0.018] text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--fin-muted)]">
-                  <th className="w-[25%] px-5 py-3.5">Hợp đồng</th>
-                  <th className="px-4 py-3.5 text-right">Giá trị</th>
-                  <th className="px-4 py-3.5">Thời hạn</th>
-                  <th className="px-4 py-3.5">Hình thức trả</th>
-                  <th className="px-4 py-3.5">AI đề xuất</th>
-                  <th className="px-4 py-3.5">Quyết định</th>
-                  <th className="w-10 px-3 py-3.5"><span className="sr-only">Mở chi tiết</span></th>
+                  <th className="px-4 py-3.5">Hợp đồng</th>
+                  <th className="px-3 py-3.5 text-right">Giá trị</th>
+                  <th className="px-3 py-3.5">Thời hạn</th>
+                  <th className="px-3 py-3.5">Hình thức trả</th>
+                  <th className="px-3 py-3.5">AI đề xuất</th>
+                  <th className="px-3 py-3.5">Trạng thái</th>
                 </tr>
               </thead>
               <tbody>
@@ -1659,13 +1731,13 @@ export function ContractApprovalWorkspace() {
                         isSelected ? "bg-emerald-400/[0.055]" : "hover:bg-white/[0.025]"
                       }`}
                     >
-                      <td className="px-5 py-4">
-                        <div className="flex items-start gap-3">
+                      <td className="px-4 py-4 align-top">
+                        <div className="flex items-start gap-2.5">
                           <span className={`mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border ${isSelected ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-300" : "border-[var(--fin-soft-border)] bg-white/[0.025] text-[var(--fin-muted)]"}`}>
                             <FileText className="size-3.5" strokeWidth={1.8} aria-hidden="true" />
                           </span>
                           <span className="min-w-0">
-                            <span className="flex items-center gap-2">
+                            <span className="flex flex-wrap items-center gap-1.5">
                               <span className="font-mono text-[11px] font-semibold text-emerald-300">{item.id}</span>
                               {item.agentRisk.available ? (
                                 <RiskBadge level={item.riskLevel} />
@@ -1673,32 +1745,33 @@ export function ContractApprovalWorkspace() {
                                 <span className="rounded border border-[var(--fin-soft-border)] px-2 py-1 text-[9px] font-medium text-[var(--fin-muted)]">Chưa có RiskPack</span>
                               )}
                             </span>
-                            <span className="mt-1 block max-w-[17rem] truncate text-xs font-semibold text-[var(--fin-text)]">{item.title}</span>
-                            <span className="mt-1 block text-[11px] text-[var(--fin-muted)]">{item.counterparty}</span>
+                            <span className="mt-1 block break-words text-xs font-semibold leading-5 text-[var(--fin-text)]">{item.title}</span>
+                            <span className="mt-1 block break-words text-[11px] leading-4 text-[var(--fin-muted)]">{item.counterparty}</span>
                           </span>
                         </div>
                       </td>
-                      <td className="px-4 py-4 text-right align-top">
-                        <span className="font-mono text-xs font-semibold tabular-nums text-[var(--fin-text)]">{formatCompactCurrency(item.amount)}</span>
-                        <span className="mt-1 block text-[10px] text-[var(--fin-muted)]">Nhập {formatSubmittedAt(item.submittedAt)}</span>
+                      <td className="px-3 py-4 text-right align-top">
+                        <span className="break-words font-mono text-xs font-semibold tabular-nums text-[var(--fin-text)]">{formatCompactCurrency(item.amount)}</span>
+                        <span className="mt-1 block break-words text-[10px] leading-4 text-[var(--fin-muted)]">Nhập {formatSubmittedAt(item.submittedAt)}</span>
                       </td>
-                      <td className="px-4 py-4 align-top text-[11px] leading-5 text-[var(--fin-muted)]">
-                        <span className="block text-[var(--fin-text)]">{formatDate(item.startDate)}</span>
-                        <span>đến {formatDate(item.endDate)}</span>
+                      <td className="px-3 py-4 align-top text-[11px] leading-5 text-[var(--fin-muted)]">
+                        <span className="block break-words tabular-nums text-[var(--fin-text)]">{formatDate(item.startDate)}</span>
+                        <span className="block break-words tabular-nums">đến {formatDate(item.endDate)}</span>
                       </td>
-                      <td className="max-w-[12rem] px-4 py-4 align-top text-[11px] leading-5 text-[var(--fin-muted)]">
-                        <span className="line-clamp-2">{item.paymentTerms}</span>
+                      <td className="px-3 py-4 align-top text-[11px] leading-5 text-[var(--fin-muted)]">
+                        <span className="block break-words">{item.paymentTerms}</span>
                       </td>
-                      <td className="px-4 py-4 align-top">
-                        <span className="block max-w-[10rem] text-[11px] font-semibold leading-5 text-[var(--fin-text)]">{optionLabels[item.aiOption] ?? item.aiOption}</span>
-                        <span className="mt-1 flex items-center gap-1.5 text-[10px] text-[var(--fin-muted)]">
-                          <Sparkles className="size-3 text-emerald-300" aria-hidden="true" />
-                          {item.aiConfidence == null ? "Chưa có độ tin cậy dữ liệu" : `Tin cậy dữ liệu ${item.aiConfidence}%`}
+                      <td className="px-3 py-4 align-top">
+                        <span className="block break-words text-[11px] font-semibold leading-5 text-[var(--fin-text)]">{optionLabels[item.aiOption] ?? item.aiOption}</span>
+                        <span className="mt-1 flex items-start gap-1.5 text-[10px] leading-4 text-[var(--fin-muted)]">
+                          <Sparkles className="mt-0.5 size-3 shrink-0 text-emerald-300" aria-hidden="true" />
+                          <span className="min-w-0 break-words">{item.aiConfidence == null ? "Chưa có độ tin cậy dữ liệu" : `Tin cậy dữ liệu ${item.aiConfidence}%`}</span>
                         </span>
                       </td>
-                      <td className="px-4 py-4 align-top"><StatusBadge status={item.status} /></td>
-                      <td className="px-3 py-4 align-middle">
-                        <ChevronRight className={`size-4 transition duration-200 ${isSelected ? "translate-x-0.5 text-emerald-300" : "text-[var(--fin-muted)] group-hover:translate-x-0.5 group-hover:text-[var(--fin-text)]"}`} aria-hidden="true" />
+                      <td className="px-3 py-4 align-top">
+                        {isActiveContract(item)
+                          ? <ActiveContractBadge />
+                          : <StatusBadge status={item.status} />}
                       </td>
                     </tr>
                   );
@@ -1721,7 +1794,7 @@ export function ContractApprovalWorkspace() {
           </footer>
         </section>
 
-        <aside className="min-w-0 self-start overflow-hidden rounded-xl border border-[var(--fin-soft-border)] bg-[var(--fin-surface)] xl:sticky xl:top-5">
+        <aside className="min-w-0 self-start overflow-hidden rounded-xl border border-[var(--fin-soft-border)] bg-[var(--fin-surface)] 2xl:sticky 2xl:top-5">
           <header className="border-b border-[var(--fin-soft-border)] p-5">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
@@ -1764,7 +1837,7 @@ export function ContractApprovalWorkspace() {
               )}
             </section>
 
-            {selected.bankPrecheck.requestType && selected.bankPrecheck.requestedAmount == null && (
+            {!selectedIsActive && selected.bankPrecheck.requestType && selected.bankPrecheck.requestedAmount == null && (
               <section className="mt-5 rounded-lg border border-amber-300/25 bg-amber-300/[0.07] p-3.5">
                 <div className="flex items-start gap-2.5">
                   <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-200" strokeWidth={1.8} aria-hidden="true" />
@@ -1875,34 +1948,48 @@ export function ContractApprovalWorkspace() {
           </div>
 
           <footer className="border-t border-[var(--fin-soft-border)] bg-[var(--fin-bg)]/70 p-4">
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => void applyDecision("rejected")}
-                disabled={actionState === "saving"}
-                className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-rose-300/15 bg-rose-300/[0.04] px-2 text-[11px] font-semibold text-rose-200 transition duration-200 hover:bg-rose-300/[0.09] active:translate-y-px disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300/60"
-              >
-                <X className="size-3.5" aria-hidden="true" /> Từ chối
-              </button>
-              <button
-                type="button"
-                onClick={() => void applyDecision("review")}
-                disabled={actionState === "saving"}
-                className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-amber-300/15 bg-amber-300/[0.04] px-2 text-[11px] font-semibold text-amber-100 transition duration-200 hover:bg-amber-300/[0.09] active:translate-y-px disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/60"
-              >
-                <Eye className="size-3.5" aria-hidden="true" /> Xem xét
-              </button>
-              <button
-                type="button"
-                onClick={() => void applyDecision("approved")}
-                disabled={actionState === "saving"}
-                className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-emerald-300 px-2 text-[11px] font-bold text-[#07110c] transition duration-200 hover:bg-emerald-200 active:translate-y-px disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--fin-bg)]"
-              >
-                <Check className="size-3.5" aria-hidden="true" /> Phê duyệt
-              </button>
-            </div>
-            <div className="mt-3 flex items-center justify-between gap-3 text-[10px] text-[var(--fin-muted)]" aria-live="polite">
-              <span className="line-clamp-2">{notice || `Trạng thái hiện tại: ${statusLabels[selected.status]}`}</span>
+            {selectedIsActive ? (
+              <div className="flex items-start gap-3 rounded-lg border border-sky-300/20 bg-sky-300/[0.07] p-3">
+                <Eye className="mt-0.5 size-4 shrink-0 text-sky-200" aria-hidden="true" />
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold text-sky-100">Hợp đồng đang hoạt động · không cần phê duyệt lại</p>
+                  <p className="mt-1 text-[10px] leading-4 text-[var(--fin-muted)]">Khu vực này chỉ cung cấp insight tài chính, vận hành, AI và rủi ro lấy từ dữ liệu hợp đồng.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => void applyDecision("rejected")}
+                  disabled={actionState === "saving"}
+                  className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-rose-300/15 bg-rose-300/[0.04] px-2 text-[11px] font-semibold text-rose-200 transition duration-200 hover:bg-rose-300/[0.09] active:translate-y-px disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300/60"
+                >
+                  <X className="size-3.5" aria-hidden="true" /> Từ chối
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void applyDecision("review")}
+                  disabled={actionState === "saving"}
+                  className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-amber-300/15 bg-amber-300/[0.04] px-2 text-[11px] font-semibold text-amber-100 transition duration-200 hover:bg-amber-300/[0.09] active:translate-y-px disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/60"
+                >
+                  <Eye className="size-3.5" aria-hidden="true" /> Xem xét
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void applyDecision("approved")}
+                  disabled={actionState === "saving"}
+                  className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-emerald-300 px-2 text-[11px] font-bold text-[#07110c] transition duration-200 hover:bg-emerald-200 active:translate-y-px disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--fin-bg)]"
+                >
+                  <Check className="size-3.5" aria-hidden="true" /> Phê duyệt
+                </button>
+              </div>
+            )}
+            <div className={`${selectedIsActive ? "mt-2" : "mt-3"} flex items-center justify-between gap-3 text-[10px] text-[var(--fin-muted)]`} aria-live="polite">
+              <span className="line-clamp-2">
+                {selectedIsActive
+                  ? "Insight only · không phát sinh quyết định phê duyệt"
+                  : notice || `Trạng thái hiện tại: ${statusLabels[selected.status]}`}
+              </span>
               <a href={`/agent?contract=${selected.id}`} className="inline-flex shrink-0 items-center gap-1 font-semibold text-emerald-300 transition hover:text-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/60">
                 Mở pipeline <ArrowUpRight className="size-3" aria-hidden="true" />
               </a>

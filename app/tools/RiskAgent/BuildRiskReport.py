@@ -275,7 +275,7 @@ def _transaction_risk_metric(
 
 def _delivery_delay_metric(
     orders: list[OrderRecord],
-    reference_date: date,
+    reference_date: date | None,
 ) -> _MetricEvidence:
     unfinished = {
         "planned",
@@ -284,13 +284,6 @@ def _delivery_delay_metric(
         "in progress",
         "at risk",
     }
-    delayed = [
-        (item, (reference_date - item.due_date).days)
-        for item in orders
-        if item.due_date is not None
-        and str(item.status or "").strip().casefold() in unfinished
-        and item.due_date < reference_date
-    ]
     if not orders:
         return _MetricEvidence(
             sources=["06_ORDERS"],
@@ -299,6 +292,27 @@ def _delivery_delay_metric(
             missing_fields=["contract_orders"],
             message="No order/progress row exists for this contract in 06_ORDERS.",
         )
+    if reference_date is None:
+        return _MetricEvidence(
+            sources=["06_ORDERS"],
+            paths=["06_ORDERS.due_date", "06_ORDERS.status"],
+            scope="CONTRACT_ORDERS",
+            record_ids=[item.order_id for item in orders],
+            missing_fields=["reference_date"],
+            message=(
+                "06_ORDERS provides due_date and status, but the governed data "
+                "does not provide a reference_date for calculating "
+                "delivery_delay_days. Runtime/generated timestamps are not "
+                "valid business evidence."
+            ),
+        )
+    delayed = [
+        (item, (reference_date - item.due_date).days)
+        for item in orders
+        if item.due_date is not None
+        and str(item.status or "").strip().casefold() in unfinished
+        and item.due_date < reference_date
+    ]
     if delayed:
         order, days = max(delayed, key=lambda item: item[1])
         return _MetricEvidence(
@@ -399,7 +413,7 @@ def _resolve_metric(
     if metric == "delivery_delay_days":
         return _delivery_delay_metric(
             source_evidence.get("orders", []),
-            finance_pack.generated_at.date(),
+            source_evidence.get("reference_date"),
         )
     details = finance_pack.finance_details or {}
     contract_finance = details.get("contract_finance") or {}
@@ -780,6 +794,21 @@ def _requires_human_approval(evaluation: RuleEvaluation) -> bool:
     )
 
 
+def _is_non_blocking_evidence_gap(evaluation: RuleEvaluation) -> bool:
+    """Return gaps that the organizer workbook cannot supply by design.
+
+    RR-007 needs a governed business reference date to calculate delay. The
+    baseline workbook intentionally contains due dates but no such as-of date.
+    Keeping the evaluation visible is important, but this optional observation
+    must not make every contract ineligible for a decision.
+    """
+    return (
+        evaluation.rule_id == "RR-007"
+        and evaluation.status == "INSUFFICIENT_EVIDENCE"
+        and set(evaluation.missing_fields) == {"reference_date"}
+    )
+
+
 def build_risk_pack_impl(
     finance_pack: FinanceFeaturePack,
     source_evidence: dict[str, Any] | None = None,
@@ -805,10 +834,13 @@ def build_risk_pack_impl(
     insufficient = [
         item for item in evaluations if item.status == "INSUFFICIENT_EVIDENCE"
     ]
+    blocking_insufficient = [
+        item for item in insufficient if not _is_non_blocking_evidence_gap(item)
+    ]
     configuration_errors = [
         item for item in evaluations if item.status == "RULE_CONFIGURATION_ERROR"
     ]
-    unresolved = [*insufficient, *configuration_errors]
+    unresolved = [*blocking_insufficient, *configuration_errors]
     risk_assessment_status = "INCOMPLETE" if unresolved else "COMPLETE"
     contract_triggered = [item for item in triggered if item.scope == "CONTRACT"]
     portfolio_triggered = [item for item in triggered if item.scope == "PORTFOLIO"]
@@ -885,7 +917,9 @@ def build_risk_pack_impl(
         for item in portfolio_transaction_approval_evaluations
         for record_id in item.evidence_record_ids
     ))
-    manual_evidence_review_required = bool(insufficient) or bool(proposed_alerts)
+    manual_evidence_review_required = bool(blocking_insufficient) or bool(
+        proposed_alerts
+    )
 
     triggered_rule_ids = list(dict.fromkeys(item.rule_id for item in triggered))
     contract_triggered_rule_ids = list(dict.fromkeys(
@@ -958,7 +992,8 @@ def build_risk_pack_impl(
             f"{highest_portfolio_severity.value if highest_portfolio_severity else 'NONE'}; "
             f"review priority {review_priority.value}; "
             f"{len(triggered)} rules triggered; "
-            f"{len(insufficient_evidence)} evidence gaps; "
+            f"{len(insufficient_evidence)} evidence gaps "
+            f"({len(blocking_insufficient)} blocking); "
             f"human review {'required' if summary.human_review_required else 'not required'}."
         ),
         decision_made_by_risk_agent=False,

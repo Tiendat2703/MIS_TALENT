@@ -78,6 +78,18 @@ document_sent_to_partner = false
 - `confidence_score`
 - `delivery_delay_days`
 
+`delivery_delay_days` chỉ được tính khi nguồn dữ liệu được quản trị cung cấp rõ
+`reference_date`. `generated_at` là metadata thời điểm chạy và tuyệt đối không được
+dùng làm ngày nghiệp vụ. Nếu workbook chỉ có `due_date`/`status` nhưng không có
+`reference_date`, RR-007 phải trả `INSUFFICIENT_EVIDENCE` với
+`missing_fields=["reference_date"]`.
+
+Gap `RR-007:reference_date` được giữ lại để minh bạch giới hạn dữ liệu nhưng là
+gap **không chặn**: nó không làm `risk_assessment_status` thành `INCOMPLETE`, không
+tự yêu cầu manual review và không ngăn Decision đưa ra khuyến nghị. Chỉ khi có
+`reference_date` có thẩm quyền và tính được `delivery_delay_days > 7`, RR-007 mới
+`TRIGGERED` và yêu cầu review/escalation vận hành.
+
 ## Các hàm trong module
 
 ### `_related_records(value)`
@@ -279,7 +291,6 @@ finance_pack = FinanceFeaturePack(
     document_sent_to_partner=False,
     requested_amount=300_000_000,
     confidence_score=0.86,
-    delivery_delay_days=3,
     source_record_ids=["CON-001", "TXN-001"],
 )
 

@@ -41,10 +41,53 @@ type ApiError = {
   detail?: string;
 };
 
+type FinanceCompletenessIssue = {
+  issue_id: string;
+  table: string;
+  table_label: string;
+  record_id: string;
+  column: string;
+  data_type: "text" | "number" | "date" | "boolean";
+  reason: string;
+};
+
+type RunStartResponse = {
+  status?: string;
+  can_start_pipeline?: boolean;
+  session_id?: number | null;
+  contract_id?: string;
+  execution_mode?: "agentic" | "deterministic_fallback";
+  summary?: string;
+  missing_fields?: FinanceCompletenessIssue[];
+};
+
+type FinanceCompletenessReport = RunStartResponse & {
+  status: "AWAITING_INPUT";
+  can_start_pipeline: false;
+  session_id: null;
+  contract_id: string;
+  execution_mode: "agentic" | "deterministic_fallback";
+  summary: string;
+  missing_fields: FinanceCompletenessIssue[];
+};
+
 const CONTRACT_TABLE_NAME = "contract";
+const TABLE_PRIMARY_KEYS: Record<string, string> = {
+  contract: "contract_id",
+  orders: "order_id",
+  invoice: "invoice_id",
+  bank_txn: "txn_id",
+  cashflow: "month",
+};
+
+function isBlankValue(value: unknown): boolean {
+  return value === null
+    || value === undefined
+    || (typeof value === "string" && value.trim() === "");
+}
 
 function formatValue(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "Trống";
+  if (isBlankValue(value)) return "Trống";
   if (typeof value === "boolean") return value ? "Có" : "Không";
   if (typeof value === "number") return new Intl.NumberFormat("vi-VN").format(value);
   if (typeof value === "object") return JSON.stringify(value, null, 2);
@@ -97,6 +140,7 @@ export function TeamPackWorkspace() {
   const [tableError, setTableError] = useState("");
   const [startError, setStartError] = useState("");
   const [isStarting, setIsStarting] = useState(false);
+  const [completenessReport, setCompletenessReport] = useState<FinanceCompletenessReport | null>(null);
   const selectedRowRef = useRef<HTMLTableRowElement | null>(null);
 
   const selectedContract = useMemo(
@@ -187,10 +231,13 @@ export function TeamPackWorkspace() {
   const handleContractChange = (contractId: string) => {
     setSelectedContractId(contractId);
     setStartError("");
+    setCompletenessReport(null);
     if (contractId) setSelectedTable(CONTRACT_TABLE_NAME);
   };
 
   const handleRefresh = () => {
+    setCompletenessReport(null);
+    setStartError("");
     setRefreshVersion((version) => version + 1);
     if (selectedTable === CONTRACT_TABLE_NAME) {
       setCatalogLoading(true);
@@ -204,6 +251,7 @@ export function TeamPackWorkspace() {
     if (!selectedContractId || isStarting) return;
     setIsStarting(true);
     setStartError("");
+    setCompletenessReport(null);
 
     try {
       const response = await fetch(
@@ -213,7 +261,23 @@ export function TeamPackWorkspace() {
           headers: { Accept: "application/json", ...API_REQUEST_HEADERS },
         },
       );
-      const payload = await readJson<{ session_id?: number }>(response);
+      const payload = await readJson<RunStartResponse>(response);
+      if (
+        payload.status === "AWAITING_INPUT"
+        && payload.can_start_pipeline === false
+        && payload.session_id === null
+        && typeof payload.contract_id === "string"
+        && (payload.execution_mode === "agentic" || payload.execution_mode === "deterministic_fallback")
+        && typeof payload.summary === "string"
+        && Array.isArray(payload.missing_fields)
+      ) {
+        const report = payload as FinanceCompletenessReport;
+        setCompletenessReport(report);
+        const firstIssue = report.missing_fields[0];
+        if (firstIssue) setSelectedTable(firstIssue.table);
+        setIsStarting(false);
+        return;
+      }
       if (typeof payload.session_id !== "number") {
         throw new Error("API không trả về session_id hợp lệ.");
       }
@@ -378,6 +442,8 @@ export function TeamPackWorkspace() {
                     {tableData.rows.map((row, rowIndex) => {
                       const isSelected = selectedTable === CONTRACT_TABLE_NAME
                         && row.contract_id === selectedContractId;
+                      const primaryKey = TABLE_PRIMARY_KEYS[selectedTable];
+                      const recordId = primaryKey ? String(row[primaryKey] ?? "") : "";
                       return (
                         <tr
                           key={`${String(row[tableData.columns[0]] ?? "row")}-${rowIndex}`}
@@ -389,9 +455,18 @@ export function TeamPackWorkspace() {
                         >
                           {tableData.columns.map((column) => {
                             const value = formatValue(row[column]);
+                            const issue = completenessReport?.missing_fields.find(
+                              (item) => item.table === selectedTable
+                                && item.record_id === recordId
+                                && item.column === column,
+                            );
                             return (
-                              <td key={column} className={`max-w-80 border-b border-r border-[var(--fin-soft-border)] px-4 py-3 align-top leading-5 last:border-r-0 ${isSelected ? "border-b-emerald-400/20" : ""}`}>
-                                <span className={`block whitespace-pre-wrap break-words ${row[column] === null || row[column] === undefined || row[column] === "" ? "italic text-[var(--fin-muted)]" : ""}`} title={value}>
+                              <td
+                                key={column}
+                                className={`max-w-80 border-b border-r px-4 py-3 align-top leading-5 last:border-r-0 ${issue ? "border-rose-400/60 bg-rose-400/[0.16] ring-1 ring-inset ring-rose-400/70" : "border-[var(--fin-soft-border)]"} ${isSelected && !issue ? "border-b-emerald-400/20" : ""}`}
+                                aria-invalid={issue ? true : undefined}
+                              >
+                                <span className={`block whitespace-pre-wrap break-words ${isBlankValue(row[column]) ? `italic ${issue ? "font-semibold text-rose-200" : "text-[var(--fin-muted)]"}` : ""}`} title={issue?.reason ?? value}>
                                   {value}
                                 </span>
                               </td>
@@ -402,6 +477,46 @@ export function TeamPackWorkspace() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {completenessReport && (
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="mt-4 rounded-lg border border-rose-400/40 bg-rose-400/[0.08] p-4 sm:p-5"
+              >
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-rose-200">Finance Agent yêu cầu bổ sung dữ liệu</p>
+                    <p className="mt-1 text-sm leading-6 text-rose-100/85">{completenessReport.summary}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2 text-xs">
+                    <span className="rounded-full border border-rose-300/25 bg-rose-950/25 px-2.5 py-1 font-medium text-rose-200">
+                      {completenessReport.missing_fields.length} trường thiếu
+                    </span>
+                    <span className="rounded-full border border-rose-300/20 px-2.5 py-1 text-rose-200/75">
+                      {completenessReport.execution_mode === "agentic" ? "Agentic" : "Fallback"}
+                    </span>
+                  </div>
+                </div>
+
+                <ul className="mt-4 grid max-h-64 gap-2 overflow-y-auto sm:grid-cols-2">
+                  {completenessReport.missing_fields.map((issue) => (
+                    <li key={issue.issue_id}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTable(issue.table)}
+                        className="h-full w-full rounded-md border border-rose-300/20 bg-rose-950/20 p-3 text-left transition hover:border-rose-300/45 hover:bg-rose-400/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
+                      >
+                        <span className="block font-mono text-xs font-semibold text-rose-200">
+                          {issue.table_label} · {issue.record_id} · {issue.column}
+                        </span>
+                        <span className="mt-1 block text-xs leading-5 text-rose-100/75">{issue.reason}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </div>

@@ -493,37 +493,149 @@ def _risk_batch(*triggered_rule_ids: str) -> RiskBatchPack:
     )
 
 
-def _temporary_risk_rejection(*rule_ids: str) -> DecisionBatchOutput:
+def _risk_hold(*rule_ids: str) -> DecisionBatchOutput:
     payload = _decision_batch().model_dump(mode="json")
     payload["decisions"][0].update(
         {
-            "accept_opportunity": False,
-            "recommended_option": "TEMPORARY_REJECT_RISK",
-            "decision_status": "reject",
+            "accept_opportunity": None,
+            "recommended_option": "RECOMMEND_HOLD",
+            "decision_status": "review",
             "protective_condition": (
-                f"Khắc phục các rule {', '.join(rule_ids)} trước khi chạy lại hồ sơ."
+                f"HOLD để rà soát các rule {', '.join(rule_ids)} trước khi tiếp tục."
             ),
             "reasons": [
                 "Finance reason",
-                f"Tạm từ chối do các rule {', '.join(rule_ids)}.",
+                f"HOLD do các rule {', '.join(rule_ids)}.",
                 "Product reason",
+            ],
+            "required_actions": [
+                {
+                    "action": f"Rà soát {rule_id} trước khi tiếp tục hồ sơ.",
+                    "owner": "Contract Owner",
+                }
+                for rule_id in rule_ids
+            ],
+            "human_confirmation_points": [
+                "Người có thẩm quyền xác nhận sau khi hoàn tất rà soát."
             ],
         }
     )
     return DecisionBatchOutput.model_validate(payload)
 
 
-def test_rr003_requires_temporary_risk_rejection() -> None:
-    with pytest.raises(ValueError, match="must be temporarily rejected"):
+def test_rr003_requires_hold_for_review() -> None:
+    with pytest.raises(ValueError, match="must be held for review"):
         validate_decision_risk_policy(_decision_batch(), _risk_batch("RR-003"))
 
     validate_decision_risk_policy(
-        _temporary_risk_rejection("RR-003"),
+        _risk_hold("RR-003"),
         _risk_batch("RR-003"),
     )
 
 
-def test_approval_continuation_cannot_override_rr003_rejection() -> None:
+def test_triggered_rr007_requires_hold_for_review() -> None:
+    corrected = apply_mandatory_risk_policy(
+        _decision_batch(),
+        _risk_batch("RR-007"),
+    )
+
+    decision = corrected.decisions[0]
+    assert decision.recommended_option.value == "RECOMMEND_HOLD"
+    assert decision.decision_status.value == "review"
+    assert decision.accept_opportunity is None
+    assert any("rr-007" in item.action.casefold() for item in decision.required_actions)
+    validate_decision_risk_policy(corrected, _risk_batch("RR-007"))
+
+
+def test_rr007_reference_date_gap_does_not_override_approval() -> None:
+    risk_batch = RiskBatchPack.model_validate({
+        "contract_ids": ["CON-004"],
+        "packs": [{
+            "case_id": "CASE-CON-004",
+            "contract_id": "CON-004",
+            "generated_at": datetime.now(UTC),
+            "risk_assessment_status": "COMPLETE",
+            "overall_risk_level": None,
+            "review_priority": "LOW",
+            "rule_evaluations": [{
+                "rule_id": "RR-007",
+                "status": "INSUFFICIENT_EVIDENCE",
+                "severity": "HIGH",
+                "missing_fields": ["reference_date"],
+                "message": "No governed business reference date.",
+            }],
+            "triggered_rule_ids": [],
+            "insufficient_evidence": ["RR-007:reference_date"],
+            "manual_evidence_review_required": False,
+            "handoff_summary": "RR-007 reference date gap is non-blocking.",
+        }],
+    })
+    payload = _decision_batch().model_dump(mode="json")
+    payload["decisions"][0].update({
+        "accept_opportunity": True,
+        "recommended_option": "APPROVE",
+        "decision_status": "approve",
+    })
+
+    corrected = apply_mandatory_risk_policy(
+        DecisionBatchOutput.model_validate(payload),
+        risk_batch,
+    )
+
+    decision = corrected.decisions[0]
+    assert decision.recommended_option.value == "APPROVE"
+    assert decision.decision_status.value == "approve"
+    assert decision.accept_opportunity is True
+    validate_decision_risk_policy(corrected, risk_batch)
+
+
+def test_ai_rejection_without_authoritative_approval_becomes_hold() -> None:
+    payload = _decision_batch().model_dump(mode="json")
+    payload["decisions"][0].update({
+        "accept_opportunity": False,
+        "recommended_option": "TEMPORARY_REJECT_RISK",
+        "decision_status": "reject",
+    })
+
+    corrected = apply_mandatory_risk_policy(
+        DecisionBatchOutput.model_validate(payload),
+        _risk_batch(),
+    )
+
+    decision = corrected.decisions[0]
+    assert decision.recommended_option.value == "RECOMMEND_HOLD"
+    assert decision.decision_status.value == "review"
+    assert decision.accept_opportunity is None
+    validate_decision_risk_policy(corrected, _risk_batch())
+
+
+def test_authoritative_contract_rejection_remains_reject() -> None:
+    payload = _decision_batch().model_dump(mode="json")
+    payload["decisions"][0].update({
+        "accept_opportunity": False,
+        "recommended_option": "TEMPORARY_REJECT_RISK",
+        "decision_status": "reject",
+        "contract_final_action_approval": {
+            "required": True,
+            "source": "CONTRACT_VALUE_POLICY",
+            "status": "REJECTED",
+            "object_ids": ["CON-004"],
+        },
+    })
+
+    corrected = apply_mandatory_risk_policy(
+        DecisionBatchOutput.model_validate(payload),
+        _risk_batch(),
+    )
+
+    decision = corrected.decisions[0]
+    assert decision.recommended_option.value == "TEMPORARY_REJECT_RISK"
+    assert decision.decision_status.value == "reject"
+    assert decision.accept_opportunity is False
+    validate_decision_risk_policy(corrected, _risk_batch())
+
+
+def test_approval_continuation_cannot_override_rr003_hold() -> None:
     payload = _decision_batch().model_dump(mode="json")
     payload["decisions"][0].update(
         approval_status=True,
@@ -542,9 +654,9 @@ def test_approval_continuation_cannot_override_rr003_rejection() -> None:
     )
 
     decision = corrected.decisions[0]
-    assert decision.accept_opportunity is False
-    assert decision.recommended_option.value == "TEMPORARY_REJECT_RISK"
-    assert decision.decision_status.value == "reject"
+    assert decision.accept_opportunity is None
+    assert decision.recommended_option.value == "RECOMMEND_HOLD"
+    assert decision.decision_status.value == "review"
     assert decision.external_api_submission_approval_status == "EXECUTED"
     assert decision.eligibility_score == 85
     assert "rr-003" in " ".join([
@@ -621,7 +733,10 @@ def test_incomplete_nonactive_risk_still_creates_precheck_request() -> None:
         _incomplete_risk_batch(),
     )
 
-    assert corrected.decisions[0].recommended_option.value == "REJECT_MISSING_EVIDENCE"
+    decision = corrected.decisions[0]
+    assert decision.recommended_option.value == "NEED_MORE_DATA"
+    assert decision.accept_opportunity is None
+    assert decision.decision_status.value == "review"
     assert build_precheck_approval_specs(
         corrected,
         FinanceBatchPack(contract_ids=["CON-004"], packs=[_finance_pack()]),
@@ -734,7 +849,7 @@ def test_continuation_restores_executed_state_after_incomplete_risk_policy() -> 
     )
     decision = reconciled.decisions[0]
 
-    assert decision.recommended_option.value == "REJECT_MISSING_EVIDENCE"
+    assert decision.recommended_option.value == "NEED_MORE_DATA"
     assert decision.risk_assessment_status == "INCOMPLETE"
     assert decision.external_api_submission_approval_status == "EXECUTED"
     assert decision.bank_precheck_status == "COMPLETED"
@@ -795,8 +910,8 @@ async def test_incomplete_nonactive_risk_registers_pending_request(
     }
 
 
-def test_nonactive_temporary_risk_rejection_still_creates_precheck_request() -> None:
-    decision = _temporary_risk_rejection("RR-003")
+def test_nonactive_risk_hold_still_creates_precheck_request() -> None:
+    decision = _risk_hold("RR-003")
     finance_batch = FinanceBatchPack(
         contract_ids=["CON-004"],
         packs=[_finance_pack()],
@@ -812,8 +927,8 @@ def test_nonactive_temporary_risk_rejection_still_creates_precheck_request() -> 
     }]
 
 
-def test_pending_precheck_preserves_preliminary_nonactive_risk_rejection() -> None:
-    decision = _temporary_risk_rejection("RR-003")
+def test_pending_precheck_preserves_nonactive_risk_hold() -> None:
+    decision = _risk_hold("RR-003")
     approval_state = {
         "approval_requests": [{
             "contract_id": "CON-004",
@@ -825,8 +940,8 @@ def test_pending_precheck_preserves_preliminary_nonactive_risk_rejection() -> No
     projected = apply_authoritative_precheck_state(decision, approval_state)
     card = projected.decisions[0]
 
-    assert card.recommended_option.value == "TEMPORARY_REJECT_RISK"
-    assert card.decision_status.value == "reject"
+    assert card.recommended_option.value == "RECOMMEND_HOLD"
+    assert card.decision_status.value == "review"
     assert card.external_api_submission_approval_status == "PENDING"
     assert card.bank_precheck_status == "ELIGIBLE_AWAITING_APPROVAL"
     validate_decision_prechecks(projected, approval_state)

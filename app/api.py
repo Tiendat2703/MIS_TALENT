@@ -33,6 +33,13 @@ def _finance_preflight_service():
     return finance_preflight_service
 
 
+def _finance_completeness_service():
+    """Load the read-only Finance gate for existing Team Pack contracts."""
+    from app.service import finance_completeness_service
+
+    return finance_completeness_service
+
+
 def _contract_service():
     """Load contract persistence helpers without coupling list endpoints to them."""
     from app.service import contract_service
@@ -159,6 +166,13 @@ async def create_validated_run(
             status_code=400,
             detail="Choose either an uploaded contract body or contract_id",
         )
+    if contract_id is not None:
+        try:
+            return await _finance_completeness_service().preflight_and_start_existing_contract(
+                contract_id
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
     payload = contract.model_dump(mode="json") if contract is not None else None
     return await _pipeline_service().start_validated_pipeline_run(
         contract=payload,

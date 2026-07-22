@@ -38,13 +38,23 @@ class RecommendedOption(str, Enum):
     NEED_MORE_DATA = "NEED_MORE_DATA"
 
 
-ACTIVE_RECOMMENDED_OPTIONS = frozenset({
+SHARED_REVIEW_OPTIONS = frozenset({
+    RecommendedOption.RECOMMEND_HOLD,
+    RecommendedOption.NEED_MORE_DATA,
+})
+
+
+ACTIVE_ONLY_RECOMMENDED_OPTIONS = frozenset({
     RecommendedOption.CONTINUE_AS_PLANNED,
     RecommendedOption.CONTINUE_WITH_ACTIONS,
     RecommendedOption.ESCALATE_FOR_REVIEW,
     RecommendedOption.RECOMMEND_RENEGOTIATION,
-    RecommendedOption.RECOMMEND_HOLD,
-    RecommendedOption.NEED_MORE_DATA,
+})
+
+
+ACTIVE_RECOMMENDED_OPTIONS = frozenset({
+    *ACTIVE_ONLY_RECOMMENDED_OPTIONS,
+    *SHARED_REVIEW_OPTIONS,
 })
 
 
@@ -225,6 +235,27 @@ class DecisionCardOutput(StrictModel):
             normalized_status == "active"
             or self.assessment_type == "ONGOING_CONTRACT_REVIEW"
         )
+        if self.recommended_option in SHARED_REVIEW_OPTIONS:
+            if self.decision_status is not DecisionStatus.REVIEW:
+                raise ValueError(
+                    "Hold/data recommendations require decision_status=review"
+                )
+            if self.accept_opportunity is not None:
+                raise ValueError(
+                    "Hold/data recommendations must not accept or reject the opportunity"
+                )
+            if not self.is_preliminary or not self.requires_founder_confirmation:
+                raise ValueError(
+                    "Hold/data recommendations must remain preliminary and human-gated"
+                )
+            if not self.required_actions:
+                raise ValueError(
+                    "Hold/data recommendations require at least one management action"
+                )
+            if not self.human_confirmation_points:
+                raise ValueError(
+                    "Hold/data recommendations require a human confirmation point"
+                )
         if is_active_review:
             if normalized_status != "active":
                 raise ValueError(
@@ -268,7 +299,7 @@ class DecisionCardOutput(StrictModel):
                 raise ValueError(
                     "This ACTIVE recommendation requires at least one management action"
                 )
-        elif self.recommended_option in ACTIVE_RECOMMENDED_OPTIONS:
+        elif self.recommended_option in ACTIVE_ONLY_RECOMMENDED_OPTIONS:
             raise ValueError(
                 "Ongoing-contract recommendation requires an ACTIVE contract review"
             )
@@ -337,7 +368,9 @@ __all__ = [
     "DecisionCardOutput",
     "DecisionStatus",
     "ACTIVE_RECOMMENDED_OPTIONS",
+    "ACTIVE_ONLY_RECOMMENDED_OPTIONS",
     "ManagementAction",
     "RecommendedOption",
     "RiskLevel",
+    "SHARED_REVIEW_OPTIONS",
 ]

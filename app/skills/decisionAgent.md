@@ -110,8 +110,8 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    `product_name` của row đã chọn vào Decision Card; không tự tạo tên hoặc ID.
 
    Nếu nhận diện được loại hình nhưng không row nào đạt điều kiện, vẫn ghi
-   `funding_need_type`, để hai trường sản phẩm null và chọn `NO_SUITABLE_PRODUCT`
-   trừ khi policy rủi ro bắt buộc yêu cầu tạm từ chối. Trong lý do phải nói chính
+   `funding_need_type`, để hai trường sản phẩm null và chọn `NO_SUITABLE_PRODUCT`.
+   Trong lý do phải nói chính
    xác row nào đã xem và điều kiện nào không đạt. Nếu không đủ căn cứ nhận diện loại
    hình thì để cả loại hình và sản phẩm null. Tuyệt đối KHÔNG lấy
    `portfolio_finance.liquidity_brief.funding_need` hoặc `contract_value` điền thay
@@ -123,34 +123,40 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    tự suy diễn, không tạo lại trường `missing_information`, và không dừng toàn bộ
    batch để hỏi giữa chừng. Danh sách evidence gốc thuộc Finance Pack/Risk Pack.
 
-   **Policy RR-003 bắt buộc, áp dụng riêng từng hợp đồng trước khi pre-check:**
+   **Policy HOLD/evidence, áp dụng riêng từng hợp đồng trước khi pre-check:**
    - Trước hết đọc `risk_assessment_status`. Nếu là `INCOMPLETE`, tuyệt đối không
      biến `overall_risk_level=null` thành high/low. Chép đúng:
      `risk_level=null`, `review_priority` từ Risk Pack và
-     `human_confirmation_status=PENDING`. Với ACTIVE chọn `NEED_MORE_DATA`, đặt
+     `human_confirmation_status=PENDING`. Với mọi lifecycle chọn `NEED_MORE_DATA`,
+     đặt `accept_opportunity=null`, `decision_status=review`. Với ACTIVE đặt
      approval `NOT_REQUESTED`, bank precheck `NOT_ELIGIBLE_TO_RUN`; chưa được tạo
      approval request cho đến khi Risk Assessment hoàn thành. Với case KHÔNG
      ACTIVE, Risk `INCOMPLETE` chỉ là cảnh báo phải nêu trong Decision Card, KHÔNG
      được dùng để chặn tạo pre-check request khi amount, loại hình và sản phẩm đã
      đầy đủ. Trạng thái approval/precheck của case không ACTIVE phải phản ánh đúng
      kết quả tool/StateStore (`PENDING` khi request đã được tạo), score/note vẫn null.
-   - Nếu `contract_triggered_rule_ids` chứa `RR-003`: với case không ACTIVE, PHẢI
-     tạm từ chối cơ hội để review lại giá bán/chi phí. Với case ACTIVE, RR-003 bắt
-     buộc tạo action rà soát pricing/cost nhưng KHÔNG tự động ép `RECOMMEND_HOLD`;
-     giữ management option phù hợp, ví dụ `NEED_MORE_DATA` khi còn thiếu bằng chứng
-     kinh doanh hoặc `CONTINUE_WITH_ACTIONS` khi đã đủ dữ liệu.
+   - `RR-007:reference_date` trong `insufficient_evidence` là giới hạn không chặn
+     của Team Pack. Không được dùng gap này để hạ recommendation, chuyển trạng thái
+     sang `INCOMPLETE`, HOLD hay REJECT. Chỉ nêu insight “chưa đủ cơ sở đánh giá
+     trễ tiến độ”. Nếu RR-007 thực sự nằm trong `contract_triggered_rule_ids` thì
+     phải HOLD/escalate kế hoạch vận hành và penalty exposure.
+   - Nếu `contract_triggered_rule_ids` chứa `RR-003` hoặc RR-007 đã TRIGGERED: với
+     case không ACTIVE, chọn `RECOMMEND_HOLD`, `accept_opportunity=null`,
+     `decision_status=review`; tạo action tương ứng để review pricing/cost hoặc kế
+     hoạch vận hành. Với case ACTIVE, giữ management option phù hợp nhưng bắt buộc
+     tạo action quản trị; không dùng option từ chối cơ hội mới.
    - RR-005 chỉ tạo approval gate cho hành động tài chính trên threshold; không tự
      APPROVE/REJECT và không thay thế amount của Finance.
-   - Khi tạm từ chối: đặt `accept_opportunity=false`,
-     `recommended_option=TEMPORARY_REJECT_RISK`, `decision_status=reject`,
-     `is_preliminary=true`, `requires_founder_confirmation=true`. Với ACTIVE, không
-     tạo pre-check request. Với case KHÔNG ACTIVE, khuyến nghị rủi ro này KHÔNG
-     chặn việc tạo request để thu thập kết quả pre-check có cổng người duyệt; việc
-     tạo request không đồng nghĩa chấp thuận hợp đồng. Khi request pending, giữ
-     `eligibility_score=null`, `precheck_note=null`.
-   - Lý do rủi ro và `protective_condition` phải nêu rõ ID rule gây tạm từ chối,
-     dữ kiện kinh doanh tương ứng và hành động cần hoàn tất trước khi chạy lại hồ
-     sơ. Đây là tạm từ chối có thể xem xét lại, không phải từ chối vĩnh viễn.
+   - HOLD của case không ACTIVE không chặn việc tạo request để thu thập kết quả
+     pre-check có cổng người duyệt; việc tạo request không đồng nghĩa chấp thuận
+     hợp đồng. Khi request pending, giữ `eligibility_score=null`,
+     `precheck_note=null`.
+   - Lý do rủi ro và `protective_condition` phải nêu rõ ID rule gây HOLD, dữ kiện
+     kinh doanh tương ứng và hành động cần hoàn tất trước khi chạy lại hồ sơ.
+   - Không dùng `TEMPORARY_REJECT_RISK` hoặc `REJECT_MISSING_EVIDENCE` cho output
+     mới. `decision_status=reject` chỉ hợp lệ khi nguồn có thẩm quyền ghi nhận việc
+     từ chối hành động cuối của chính hợp đồng; severity, thiếu dữ liệu, bank
+     pre-check hoặc không có sản phẩm phù hợp không tự tạo quyết định Reject.
 
 4. **Tạo pre-check có cổng người duyệt khi đã đủ thông tin**: nếu đã có đủ tham số
    bắt buộc, chọn đúng tool
@@ -202,7 +208,7 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
      Nếu pre-check cần thiết nhưng đang chờ duyệt thì dùng `review`. Case ACTIVE
      luôn dùng `review` vì output chỉ là khuyến nghị quản trị cần người xác nhận.
    - **Phương án đề xuất** (option): case không ACTIVE dùng APPROVE /
-     APPROVE_WITH_CONDITION / TEMPORARY_REJECT_RISK / REJECT_MISSING_EVIDENCE /
+     APPROVE_WITH_CONDITION / RECOMMEND_HOLD / NEED_MORE_DATA /
      NO_SUITABLE_PRODUCT; case ACTIVE chỉ dùng sáu option trong nhánh ưu tiên.
    - **Ba lý do**, mỗi lý do phải là một LẬP LUẬN có kết luận, KHÔNG phải liệt kê số.
      Mỗi lý do bắt buộc kết thúc bằng mệnh đề nhân quả "→ do đó [ảnh hưởng tới quyết

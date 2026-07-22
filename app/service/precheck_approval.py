@@ -25,7 +25,7 @@ _RISK_BLOCKING_OPTIONS = {
     RecommendedOption.REJECT_MISSING_EVIDENCE,
 }
 
-_NON_ACTIONABLE_OPTIONS = {
+_ACTIVE_NON_ACTIONABLE_OPTIONS = {
     RecommendedOption.NO_SUITABLE_PRODUCT,
     RecommendedOption.ESCALATE_FOR_REVIEW,
     RecommendedOption.RECOMMEND_RENEGOTIATION,
@@ -52,13 +52,17 @@ def build_precheck_approval_specs(
         is_active_contract = (
             normalize_contract_lifecycle(decision.contract_status) == "ACTIVE"
         )
-        if decision.recommended_option in _NON_ACTIONABLE_OPTIONS:
+        if decision.recommended_option is RecommendedOption.NO_SUITABLE_PRODUCT:
+            continue
+        if (
+            is_active_contract
+            and decision.recommended_option in _ACTIVE_NON_ACTIONABLE_OPTIONS
+        ):
             continue
         # Risk remains visible in the Decision Card, but for a contract that is
         # not ACTIVE it is advisory for bank-precheck collection. A complete,
-        # human-gated request may proceed even when Risk is INCOMPLETE or gives a
-        # temporary/missing-evidence rejection. ACTIVE contracts retain the
-        # stricter ongoing-contract gate.
+        # human-gated request may proceed while a contract is on HOLD or awaiting
+        # evidence. ACTIVE contracts retain the stricter ongoing-contract gate.
         if is_active_contract and (
             decision.risk_assessment_status == "INCOMPLETE"
             or decision.recommended_option in _RISK_BLOCKING_OPTIONS

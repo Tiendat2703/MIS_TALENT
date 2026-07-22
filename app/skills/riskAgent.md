@@ -41,9 +41,13 @@ chọn sản phẩm ngân hàng và không gọi API ngân hàng.
   đến từ recommendation, không phải threshold/rule row trong `13_RISK_RULES`.
 - Mỗi rule/scope có evaluation đầy đủ. Mọi rule `TRIGGERED` phải có `findings`,
   evidence source/path/record và alert mapping nếu có.
-- Nếu còn `INSUFFICIENT_EVIDENCE` hoặc `RULE_CONFIGURATION_ERROR`, kết quả phải giữ
-  `risk_assessment_status=INCOMPLETE`, `overall_risk_level=null`; dùng
-  `review_priority` để biểu diễn độ khẩn cấp rà soát. Không gọi mức null là `NONE`.
+- Nếu còn `INSUFFICIENT_EVIDENCE` hoặc `RULE_CONFIGURATION_ERROR` có tính chặn,
+  kết quả phải giữ `risk_assessment_status=INCOMPLETE`, `overall_risk_level=null`;
+  dùng `review_priority` để biểu diễn độ khẩn cấp rà soát. Ngoại lệ duy nhất là
+  `RR-007:reference_date`: Team Pack không cung cấp ngày tham chiếu nghiệp vụ nên
+  gap này chỉ là insight không chặn, không làm assessment thành `INCOMPLETE` và
+  không được ngăn Decision chọn APPROVE/APPROVE_WITH_CONDITION. Không gọi mức null
+  là `NONE`.
 - Khi mọi rule đều TRIGGERED/NOT_TRIGGERED/NOT_APPLICABLE/RULE_INACTIVE, assessment
   là `COMPLETE`. `overall_risk_level` vẫn có thể null vì hệ thống không gộp
   CONTRACT và PORTFOLIO; dùng hai trường highest severity và hai danh sách

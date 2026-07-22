@@ -18,6 +18,9 @@ from datetime import date
 from agents import RunContextWrapper, function_tool
 
 from app.Agent.hooks import AppContext
+from app.tools.FinanceAgent.completeness import (
+    check_selected_contract_completeness as find_completeness_issues,
+)
 from app.tools.FinanceAgent.finance_data import get_services, load_all
 from app.tools.FinanceAgent.invoices import classify_invoices
 from app.tools.FinanceAgent.liquidity import analyze_liquidity
@@ -42,6 +45,35 @@ async def _data(ctx: RunContextWrapper[AppContext]) -> dict:
 
 def _today(ctx: RunContextWrapper[AppContext]) -> date:
     return parse_date(ctx.context.reference_date) or date.today()
+
+
+@function_tool
+async def check_selected_contract_completeness(
+    ctx: RunContextWrapper[AppContext],
+) -> dict:
+    """Read-only preflight for one contract and its linked orders and invoices.
+
+    This tool never writes data, persists a pack, creates a workflow session, or
+    hands off to another agent. The complete structured result is retained in
+    the private run context so application code remains the source of truth.
+    """
+    data = await _data(ctx)
+    contract_id = str(ctx.context.contract_id or "").strip()
+    if not contract_id:
+        raise ValueError("Selected contract_id is required for completeness preflight")
+    issues = await asyncio.to_thread(
+        find_completeness_issues,
+        data,
+        contract_id,
+    )
+    ctx.context.finance_store["completeness"] = issues
+    return {
+        "contract_id": contract_id,
+        "checked_tables": ["contract", "orders", "invoice"],
+        "skipped_tables": ["bank_txn", "cashflow"],
+        "issue_count": len(issues),
+        "issues": [issue.model_dump(mode="json") for issue in issues],
+    }
 
 
 @function_tool

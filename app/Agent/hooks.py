@@ -47,6 +47,7 @@ TOOL_LABELS = {
     "precheck_trade_finance": "Prepare trade-finance precheck",
     "precheck_micro_credit": "Prepare working-capital precheck",
     "load_service_catalog": "Read service catalog",
+    "check_selected_contract_completeness": "Check selected contract completeness",
     "load_and_validate": "Load and validate Finance data",
     "reconcile_bank": "Reconcile invoices and bank transactions",
     "liquidity_funding": "Analyze liquidity and funding need",
@@ -122,6 +123,7 @@ APPROVAL_STATE_SOURCE = ToolDataSource(
 
 TOOL_DATA_SOURCES: dict[str, tuple[ToolDataSource, ...]] = {
     # Finance tools consume the immutable run snapshot preloaded from Supabase.
+    "check_selected_contract_completeness": FINANCE_INPUT_SOURCES[:3],
     "load_service_catalog": (_table("05_PRODUCTS", "service"),),
     "load_and_validate": FINANCE_INPUT_SOURCES,
     "reconcile_bank": (

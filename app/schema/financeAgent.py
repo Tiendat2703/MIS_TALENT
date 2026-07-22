@@ -144,6 +144,35 @@ class FinancePreflightSynthesis(StrictModel):
     reasoning: str | None = None
 
 
+class FinanceCompletenessIssue(StrictModel):
+    """One deterministic missing-cell finding from a Finance baseline table."""
+
+    issue_id: str
+    table: str
+    table_label: str
+    record_id: str
+    column: str
+    data_type: Literal["text", "number", "date", "boolean"]
+    reason: str
+
+
+class FinanceCompletenessSynthesis(StrictModel):
+    """LLM wording only; issue identity remains owned by deterministic code."""
+
+    summary: str
+    detected_issue_ids: list[str] = Field(default_factory=list)
+
+
+class FinanceCompletenessResult(StrictModel):
+    status: Literal["AWAITING_INPUT"] = "AWAITING_INPUT"
+    can_start_pipeline: Literal[False] = False
+    session_id: None = None
+    contract_id: str
+    execution_mode: Literal["agentic", "deterministic_fallback"]
+    summary: str
+    missing_fields: list[FinanceCompletenessIssue] = Field(default_factory=list)
+
+
 class FinanceServiceMatch(StrictModel):
     service_id: str
     service_name: str
@@ -203,6 +232,9 @@ class FinanceAnalysisPack(StrictModel):
 __all__ = [
     "BankReconciliationSummary",
     "FinanceAnalysisPack",
+    "FinanceCompletenessIssue",
+    "FinanceCompletenessResult",
+    "FinanceCompletenessSynthesis",
     "FinancePreflightDataIssue",
     "FinancePreflightMissingField",
     "FinancePreflightResult",

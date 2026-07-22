@@ -87,7 +87,7 @@ def evaluate_risk_acceptability(risk: dict) -> str:
 def render_decision_card(case: dict, match: dict, risk_verdict: str) -> dict:
     """Giai đoạn 3: xuất Decision Card theo format cố định."""
     if risk_verdict == "BLOCKED":
-        option = "REJECT_MISSING_EVIDENCE"
+        option = "NEED_MORE_DATA"
     elif risk_verdict == "NEEDS_CONFIRMATION" or match["match_status"] == "PARTIAL":
         option = "APPROVE_WITH_CONDITION"
     elif match["match_status"] == "MATCHED":

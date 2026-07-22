@@ -412,6 +412,21 @@ def _summarize_context(
                             "manual_evidence_review_required", False
                         ),
                         "triggered_rule_ids": risk.get("triggered_rule_ids", []),
+                        "contract_triggered_rule_ids": risk.get(
+                            "contract_triggered_rule_ids", []
+                        ),
+                        "portfolio_triggered_rule_ids": risk.get(
+                            "portfolio_triggered_rule_ids", []
+                        ),
+                        "highest_contract_triggered_severity": risk.get(
+                            "highest_contract_triggered_severity"
+                        ),
+                        "highest_portfolio_triggered_severity": risk.get(
+                            "highest_portfolio_triggered_severity"
+                        ),
+                        "portfolio_transaction_approval_required": risk.get(
+                            "portfolio_transaction_approval_required", False
+                        ),
                         "total_rules_triggered": risk_summary.get(
                             "total_rules_triggered",
                             len(risk.get("triggered_rule_ids", [])),
@@ -446,12 +461,24 @@ def _summarize_context(
                         "triggered_rules": [
                             {
                                 "rule_id": item.get("rule_id"),
+                                "scope": item.get("scope", "CONTRACT"),
                                 "severity": item.get("severity"),
                                 "required_action": item.get("required_action"),
                                 "message": item.get("message"),
                             }
                             for item in risk_evaluations
                             if item.get("status") == "TRIGGERED"
+                        ],
+                        "rule_evaluations": [
+                            {
+                                "rule_id": item.get("rule_id"),
+                                "scope": item.get("scope", "CONTRACT"),
+                                "status": item.get("status"),
+                                "severity": item.get("severity"),
+                                "required_action": item.get("required_action"),
+                                "message": item.get("message"),
+                            }
+                            for item in risk_evaluations
                         ],
                         # Alerts in RiskPack are already masked by Risk Agent.
                         "alerts": risk_alerts,

@@ -20,6 +20,7 @@ import { API_BASE_URL, API_REQUEST_HEADERS, apiUrl } from "@/lib/api";
 
 type ApprovalStatus = "pending" | "approved" | "review" | "rejected";
 type RiskLevel = "low" | "medium" | "high" | "critical";
+type RiskScope = "CONTRACT" | "PORTFOLIO";
 type FilterStatus = "all" | ApprovalStatus;
 
 type ContractRisk = {
@@ -27,10 +28,12 @@ type ContractRisk = {
   description: string;
   severity: RiskLevel;
   status: string;
+  scope: RiskScope;
 };
 
 type AgentTriggeredRule = {
   ruleId: string;
+  scope: RiskScope;
   severity: RiskLevel;
   requiredAction: string;
   message: string;
@@ -43,6 +46,7 @@ type AgentAlert = {
   riskScore: number | null;
   description: string;
   recommendedAction: string;
+  matchedRuleIds: string[];
 };
 
 type AgentRiskSnapshot = {
@@ -62,6 +66,10 @@ type AgentRiskSnapshot = {
   alerts: AgentAlert[];
   evidenceGaps: string[];
   requiredActions: string[];
+  portfolioRisks: ContractRisk[];
+  portfolioAlerts: AgentAlert[];
+  highestPortfolioRiskLevel: RiskLevel | null;
+  portfolioApprovalRequired: boolean;
 };
 
 type BankPrecheck = {
@@ -126,6 +134,11 @@ type ApiContract = {
     manual_evidence_review_required?: boolean | null;
     human_approval_required?: boolean | null;
     triggered_rule_ids?: string[];
+    contract_triggered_rule_ids?: string[];
+    portfolio_triggered_rule_ids?: string[];
+    highest_contract_triggered_severity?: string | null;
+    highest_portfolio_triggered_severity?: string | null;
+    portfolio_transaction_approval_required?: boolean;
     total_rules_triggered?: number;
     total_alerts_detected?: number;
     total_proposed_alerts?: number;
@@ -137,11 +150,21 @@ type ApiContract = {
     insufficient_evidence_rule_count?: number;
     triggered_rules?: Array<{
       rule_id?: string | null;
+      scope?: string | null;
+      severity?: string | null;
+      required_action?: string | null;
+      message?: string | null;
+    }>;
+    rule_evaluations?: Array<{
+      rule_id?: string | null;
+      scope?: string | null;
+      status?: string | null;
       severity?: string | null;
       required_action?: string | null;
       message?: string | null;
     }>;
     alerts?: Array<{
+      matched_rule_ids?: string[];
       alert?: {
         alert_id?: string | null;
         alert_type?: string | null;
@@ -223,6 +246,7 @@ type RunDecisionDetail = {
 type RunRiskEvaluation = {
   status?: string;
   rule_id?: string;
+  scope?: string;
   risk_type?: string;
   severity?: string;
   message?: string;
@@ -238,6 +262,11 @@ type RunRiskDetail = {
   triggered_rule_approval_required?: boolean;
   manual_evidence_review_required?: boolean;
   triggered_rule_ids?: string[];
+  contract_triggered_rule_ids?: string[];
+  portfolio_triggered_rule_ids?: string[];
+  highest_contract_triggered_severity?: string | null;
+  highest_portfolio_triggered_severity?: string | null;
+  portfolio_transaction_approval_required?: boolean;
   summary?: {
     total_rules_triggered?: number;
     total_alerts_detected?: number;
@@ -246,6 +275,7 @@ type RunRiskDetail = {
   };
   rule_evaluations?: RunRiskEvaluation[];
   alerts?: Array<{
+    matched_rule_ids?: string[];
     alert?: {
       alert_id?: string;
       alert_type?: string;
@@ -308,11 +338,39 @@ function normalizeRiskLevel(value?: string | null): RiskLevel {
   return "low";
 }
 
+function normalizeRiskScope(value?: string | null): RiskScope {
+  return value?.toUpperCase() === "PORTFOLIO" ? "PORTFOLIO" : "CONTRACT";
+}
+
+function mapRiskEvaluation(entry: RunRiskEvaluation): ContractRisk {
+  return {
+    title: entry.risk_type || entry.rule_id || "Cảnh báo rủi ro",
+    description: [
+      entry.message || `Giá trị quan sát: ${entry.observed_value || "cần xác minh thêm"}.`,
+      entry.missing_fields?.length ? `Thiếu: ${entry.missing_fields.join(", ")}.` : "",
+      entry.required_action ? `Hành động: ${entry.required_action}.` : "",
+    ].filter(Boolean).join(" "),
+    severity: normalizeRiskLevel(entry.severity),
+    status: entry.status || "INSUFFICIENT_EVIDENCE",
+    scope: normalizeRiskScope(entry.scope),
+  };
+}
+
 function normalizeStatus(value?: string | null, approvalStatus?: boolean | null): ApprovalStatus {
   if (approvalStatus) return "approved";
   if (value === "reject") return "rejected";
   if (value === "review") return "review";
   return "pending";
+}
+
+function normalizeEligibilityScore(value?: number | null): number | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  const normalized = value > 1 ? value / 100 : value;
+  return Math.min(1, Math.max(0, normalized));
+}
+
+function formatEligibilityScore(value: number): string {
+  return value.toFixed(2);
 }
 
 function paymentLabel(type?: string | null): string {
@@ -326,11 +384,50 @@ function mapApiContract(item: ApiContract): ContractRecord {
   const finance = item.finance ?? {};
   const decision = item.decision ?? {};
   const selectedFundingType = decision.funding_need_type ?? finance.funding_need_type;
-  const riskLevel = normalizeRiskLevel(decision.risk_level ?? item.risk?.overall_risk_level);
   const externalApprovalExecuted =
     decision.external_api_submission_approval_status === "EXECUTED"
     || decision.approval_status === true;
-  const triggeredRules = item.risk?.triggered_rule_ids ?? [];
+  const rawEvaluations: RunRiskEvaluation[] = item.risk?.rule_evaluations?.map((rule) => ({
+    rule_id: rule.rule_id ?? undefined,
+    scope: rule.scope ?? undefined,
+    status: rule.status ?? undefined,
+    severity: rule.severity ?? undefined,
+    required_action: rule.required_action ?? undefined,
+    message: rule.message ?? undefined,
+  })) ?? (item.risk?.triggered_rules ?? []).map((rule) => ({
+    rule_id: rule.rule_id ?? undefined,
+    scope: rule.scope ?? undefined,
+    status: "TRIGGERED",
+    severity: rule.severity ?? undefined,
+    required_action: rule.required_action ?? undefined,
+    message: rule.message ?? undefined,
+  }));
+  const evaluations = rawEvaluations.map(mapRiskEvaluation);
+  const contractRisks = evaluations.filter((risk) => risk.scope === "CONTRACT");
+  const portfolioRisks = evaluations.filter((risk) => risk.scope === "PORTFOLIO");
+  const contractTriggeredRuleIds = item.risk?.contract_triggered_rule_ids
+    ?? contractRisks.filter((risk) => risk.status === "TRIGGERED").map((risk) => risk.title);
+  const portfolioTriggeredRuleIds = item.risk?.portfolio_triggered_rule_ids
+    ?? portfolioRisks.filter((risk) => risk.status === "TRIGGERED").map((risk) => risk.title);
+  const portfolioRuleIdSet = new Set(portfolioTriggeredRuleIds);
+  const mappedAlerts: AgentAlert[] = (item.risk?.alerts ?? []).flatMap((match) => match.alert ? [{
+    alertId: match.alert.alert_id || "UNKNOWN_ALERT",
+    alertType: match.alert.alert_type || "Risk alert",
+    severity: normalizeRiskLevel(match.alert.severity),
+    riskScore: match.alert.risk_score ?? null,
+    description: match.alert.description || "",
+    recommendedAction: match.alert.recommended_action || "",
+    matchedRuleIds: match.matched_rule_ids ?? [],
+  }] : []);
+  const portfolioAlerts = mappedAlerts.filter((alert) => (
+    alert.matchedRuleIds.some((ruleId) => portfolioRuleIdSet.has(ruleId))
+  ));
+  const contractAlerts = mappedAlerts.filter((alert) => (
+    !alert.matchedRuleIds.some((ruleId) => portfolioRuleIdSet.has(ruleId))
+  ));
+  const riskLevel = normalizeRiskLevel(
+    decision.risk_level ?? item.risk?.highest_contract_triggered_severity,
+  );
   const contractValue = finance.contract_value ?? null;
 
   return {
@@ -355,24 +452,19 @@ function mapApiContract(item: ApiContract): ContractRecord {
       ? Math.round(finance.confidence_score * 100)
       : null,
     reasons: [],
-    risks: (item.risk?.triggered_rules ?? []).map((rule) => ({
-      title: rule.rule_id || "Quy tắc rủi ro",
-      description: [rule.message, rule.required_action].filter(Boolean).join(" · "),
-      severity: normalizeRiskLevel(rule.severity),
-      status: "TRIGGERED",
-    })),
+    risks: contractRisks,
     safeguards: [],
     riskLevel,
     status: normalizeStatus(decision.decision_status, externalApprovalExecuted),
     agentRisk: {
       available: Boolean(item.risk),
       contractId: item.contract_id,
-      overallRiskLevel: item.risk?.overall_risk_level
-        ? normalizeRiskLevel(item.risk.overall_risk_level)
+      overallRiskLevel: item.risk?.highest_contract_triggered_severity
+        ? normalizeRiskLevel(item.risk.highest_contract_triggered_severity)
         : null,
-      totalRulesTriggered: item.risk?.total_rules_triggered ?? triggeredRules.length,
-      triggeredRuleIds: triggeredRules,
-      totalAlertsDetected: item.risk?.total_alerts_detected ?? 0,
+      totalRulesTriggered: contractTriggeredRuleIds.length,
+      triggeredRuleIds: contractTriggeredRuleIds,
+      totalAlertsDetected: contractAlerts.length,
       totalProposedAlerts: item.risk?.total_proposed_alerts ?? 0,
       insufficientEvidenceCount: item.risk?.insufficient_evidence_count ?? 0,
       humanReviewRequired: item.risk?.human_review_required
@@ -385,26 +477,28 @@ function mapApiContract(item: ApiContract): ContractRecord {
       insufficientEvidenceRuleCount: item.risk?.insufficient_evidence_rule_count ?? 0,
       triggeredRules: (item.risk?.triggered_rules ?? []).map((rule) => ({
         ruleId: rule.rule_id || "UNKNOWN_RULE",
+        scope: normalizeRiskScope(rule.scope),
         severity: normalizeRiskLevel(rule.severity),
         requiredAction: rule.required_action || "",
         message: rule.message || "",
       })),
-      alerts: (item.risk?.alerts ?? []).flatMap((match) => match.alert ? [{
-        alertId: match.alert.alert_id || "UNKNOWN_ALERT",
-        alertType: match.alert.alert_type || "Risk alert",
-        severity: normalizeRiskLevel(match.alert.severity),
-        riskScore: match.alert.risk_score ?? null,
-        description: match.alert.description || "",
-        recommendedAction: match.alert.recommended_action || "",
-      }] : []),
+      alerts: contractAlerts,
       evidenceGaps: item.risk?.evidence_gaps ?? [],
       requiredActions: item.risk?.required_actions ?? [],
+      portfolioRisks,
+      portfolioAlerts,
+      highestPortfolioRiskLevel: item.risk?.highest_portfolio_triggered_severity
+        ? normalizeRiskLevel(item.risk.highest_portfolio_triggered_severity)
+        : null,
+      portfolioApprovalRequired: item.risk?.portfolio_transaction_approval_required ?? false,
     },
     bankPrecheck: {
       available: Boolean(item.decision || selectedFundingType),
       requestType: selectedFundingType ?? null,
       requestedAmount: decision.capital_need ?? finance.requested_amount ?? null,
-      eligibleScore: decision.eligibility_score ?? decision.eligible_score ?? null,
+      eligibleScore: normalizeEligibilityScore(
+        decision.eligibility_score ?? decision.eligible_score,
+      ),
       precheckNote: decision.precheck_note ?? null,
       approvalStatus: externalApprovalExecuted,
       requiresFounderConfirmation: decision.requires_founder_confirmation ?? false,
@@ -433,7 +527,7 @@ async function fetchDashboard(signal?: AbortSignal): Promise<DashboardBootstrap>
       runId: request.session_id,
       status: request.status || "pending",
       result: request.result ? {
-        eligibleScore: request.result.eligible_score ?? null,
+        eligibleScore: normalizeEligibilityScore(request.result.eligible_score),
         precheckNote: request.result.precheck_note ?? null,
       } : null,
       tool: request.tool || "bank_precheck",
@@ -580,28 +674,37 @@ const severityLabels: Record<RiskLevel | "none", string> = {
   none: "Không kích hoạt",
 };
 function EnterpriseRiskChart({ contracts }: { contracts: ContractRecord[] }) {
-  const snapshots = useMemo(
-    () => contracts.map((contract) => contract.agentRisk).filter((risk) => risk.available),
+  const portfolioSource = useMemo(
+    () => contracts
+      .filter((contract) => (
+        contract.agentRisk.available
+        && (
+          contract.agentRisk.portfolioRisks.length > 0
+          || contract.agentRisk.portfolioAlerts.length > 0
+        )
+      ))
+      .sort((left, right) => (right.runId ?? 0) - (left.runId ?? 0))[0] ?? null,
     [contracts],
   );
-
-  const totalRulesEvaluated = snapshots.reduce((total, risk) => total + risk.totalRulesEvaluated, 0);
-  const totalRulesTriggered = snapshots.reduce((total, risk) => total + risk.totalRulesTriggered, 0);
-  const insufficientEvidenceRuleCount = snapshots.reduce((total, risk) => total + risk.insufficientEvidenceRuleCount, 0);
-  const notTriggeredCount = snapshots.reduce((total, risk) => total + risk.notTriggeredCount, 0);
-  const totalAlertsDetected = snapshots.reduce((total, risk) => total + risk.totalAlertsDetected, 0);
-  const totalProposedAlerts = snapshots.reduce((total, risk) => total + risk.totalProposedAlerts, 0);
-  const evidenceGapCount = snapshots.reduce((total, risk) => total + risk.insufficientEvidenceCount, 0);
-  const humanReviewCount = snapshots.filter((risk) => risk.humanReviewRequired).length;
-  const triggeredRules = snapshots.flatMap((risk) => risk.triggeredRules.map((rule) => ({
-    ...rule,
-    contractId: risk.contractId,
-  }))).slice(0, 3);
-  const activeAlerts = snapshots.flatMap((risk) => risk.alerts.map((alert) => ({
-    ...alert,
-    contractId: risk.contractId,
-  }))).slice(0, 2);
-  const highestSeverity = severityOrder.find((level) => snapshots.some((risk) => (risk.overallRiskLevel ?? "none") === level)) ?? "none";
+  const portfolioRisk = portfolioSource?.agentRisk;
+  const portfolioEvaluations = portfolioRisk?.portfolioRisks ?? [];
+  const totalRulesEvaluated = portfolioEvaluations.length;
+  const triggeredRules = portfolioEvaluations.filter((risk) => risk.status === "TRIGGERED");
+  const totalRulesTriggered = triggeredRules.length;
+  const insufficientEvidenceRuleCount = portfolioEvaluations.filter((risk) => (
+    risk.status === "INSUFFICIENT_EVIDENCE" || risk.status === "RULE_CONFIGURATION_ERROR"
+  )).length;
+  const notTriggeredCount = portfolioEvaluations.filter((risk) => (
+    risk.status === "NOT_TRIGGERED"
+    || risk.status === "NOT_APPLICABLE"
+    || risk.status === "RULE_INACTIVE"
+  )).length;
+  const activeAlerts = (portfolioRisk?.portfolioAlerts ?? []).slice(0, 3);
+  const totalAlertsDetected = portfolioRisk?.portfolioAlerts.length ?? 0;
+  const evidenceGapCount = insufficientEvidenceRuleCount;
+  const highestSeverity = portfolioRisk?.highestPortfolioRiskLevel
+    ?? severityOrder.find((level) => level !== "none" && triggeredRules.some((risk) => risk.severity === level))
+    ?? "none";
   const evaluationStatuses = [
     { label: "Triggered", value: totalRulesTriggered, color: "bg-red-400" },
     { label: "Thiếu bằng chứng", value: insufficientEvidenceRuleCount, color: "bg-amber-200" },
@@ -612,9 +715,9 @@ function EnterpriseRiskChart({ contracts }: { contracts: ContractRecord[] }) {
     <section className="h-full overflow-hidden rounded-xl border border-[var(--fin-soft-border)] bg-[var(--fin-surface)]">
       <header className="flex items-start justify-between gap-4 border-b border-[var(--fin-soft-border)] px-5 py-5">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-300">Risk Agent output</p>
-          <h3 className="mt-2 text-base font-semibold tracking-[-0.025em] text-[var(--fin-text)]">Báo cáo rủi ro hiện tại</h3>
-          <p className="mt-1 max-w-sm text-xs leading-5 text-[var(--fin-muted)]">Rule evaluations, alerts và hành động do Risk Agent trả về.</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-300">Portfolio scope</p>
+          <h3 className="mt-2 text-base font-semibold tracking-[-0.025em] text-[var(--fin-text)]">Rủi ro toàn hệ thống</h3>
+          <p className="mt-1 max-w-sm text-xs leading-5 text-[var(--fin-muted)]">Chỉ hiển thị rủi ro cấp doanh nghiệp, không quy trách nhiệm cho hợp đồng đang chọn.</p>
         </div>
         <div className="shrink-0 text-right">
           <p className="text-[10px] text-[var(--fin-muted)]">Highest severity</p>
@@ -628,24 +731,24 @@ function EnterpriseRiskChart({ contracts }: { contracts: ContractRecord[] }) {
       </header>
 
       <div className="p-5">
-        {snapshots.length === 0 ? (
+        {!portfolioSource ? (
           <div className="flex min-h-72 flex-col items-center justify-center rounded-lg border border-dashed border-[var(--fin-soft-border)] px-5 text-center">
             <AlertTriangle className="size-5 text-[var(--fin-muted)]" strokeWidth={1.6} aria-hidden="true" />
-            <p className="mt-4 text-xs font-semibold text-[var(--fin-text)]">Risk Agent chưa trả RiskPack</p>
-            <p className="mt-1 max-w-xs text-[11px] leading-5 text-[var(--fin-muted)]">Chart sẽ xuất hiện khi pipeline có ít nhất một hợp đồng hoàn tất bước Risk.</p>
+            <p className="mt-4 text-xs font-semibold text-[var(--fin-text)]">Chưa có rủi ro cấp doanh nghiệp</p>
+            <p className="mt-1 max-w-xs text-[11px] leading-5 text-[var(--fin-muted)]">Business health sẽ cập nhật khi Risk Agent trả rule hoặc alert có scope PORTFOLIO.</p>
           </div>
         ) : (
           <>
-            {humanReviewCount > 0 && (
+            {portfolioRisk?.portfolioApprovalRequired && (
               <div className="flex items-center justify-between gap-3 rounded-lg border border-red-400/25 bg-red-400/[0.075] px-3.5 py-3 shadow-[inset_3px_0_0_rgba(248,113,113,.8)]">
                 <div className="flex items-center gap-2.5">
                   <AlertTriangle className="size-3.5 text-red-300" strokeWidth={1.8} aria-hidden="true" />
                   <div>
-                    <p className="text-[10px] font-semibold text-red-200">Cần human review</p>
-                    <p className="mt-0.5 text-[10px] text-[var(--fin-muted)]">{humanReviewCount}/{snapshots.length} RiskPack yêu cầu người có thẩm quyền xem xét.</p>
+                    <p className="text-[10px] font-semibold text-red-200">Cần phê duyệt cấp doanh nghiệp</p>
+                    <p className="mt-0.5 text-[10px] text-[var(--fin-muted)]">Có giao dịch portfolio cần người có thẩm quyền xem xét.</p>
                   </div>
                 </div>
-                <span className="font-mono text-sm font-semibold text-red-200">{humanReviewCount}</span>
+                <span className="font-mono text-[10px] font-semibold text-red-200">PORTFOLIO</span>
               </div>
             )}
 
@@ -682,7 +785,7 @@ function EnterpriseRiskChart({ contracts }: { contracts: ContractRecord[] }) {
               {activeAlerts.length > 0 ? (
                 <div className="mt-3 space-y-2">
                   {activeAlerts.map((alert) => (
-                    <article key={`${alert.contractId}:${alert.alertId}`} className="rounded-lg border border-red-400/20 bg-red-400/[0.045] p-3.5 shadow-[inset_3px_0_0_rgba(248,113,113,.72)]">
+                    <article key={alert.alertId} className="rounded-lg border border-red-400/20 bg-red-400/[0.045] p-3.5 shadow-[inset_3px_0_0_rgba(248,113,113,.72)]">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="font-mono text-[9px] font-semibold text-red-300">{alert.alertId}</p>
@@ -709,19 +812,18 @@ function EnterpriseRiskChart({ contracts }: { contracts: ContractRecord[] }) {
                 <span className="font-mono text-[10px] text-[var(--fin-muted)]">{totalRulesTriggered}</span>
               </div>
               {triggeredRules.map((rule) => (
-                <div key={`${rule.contractId}:${rule.ruleId}`} className="mt-3 grid grid-cols-[auto_1fr] gap-3">
-                  <span className="h-fit rounded-md border border-red-400/25 bg-red-400/[0.08] px-2 py-1 font-mono text-[9px] font-semibold text-red-300">{rule.ruleId}</span>
+                <div key={rule.title} className="mt-3 grid grid-cols-[auto_1fr] gap-3">
+                  <span className="h-fit rounded-md border border-red-400/25 bg-red-400/[0.08] px-2 py-1 font-mono text-[9px] font-semibold text-red-300">{rule.title}</span>
                   <div>
-                    <p className="text-[10px] leading-4 text-[var(--fin-muted)]">{rule.message}</p>
-                    {rule.requiredAction && <p className="mt-1 text-[10px] font-medium leading-4 text-[var(--fin-text)]">Action: {rule.requiredAction}</p>}
+                    <p className="text-[10px] leading-4 text-[var(--fin-muted)]">{rule.description}</p>
                   </div>
                 </div>
               ))}
             </section>
 
             <footer className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--fin-soft-border)] pt-4 text-[9px] text-[var(--fin-muted)]">
-              <span>{evidenceGapCount} evidence fields · {totalProposedAlerts} proposed alerts</span>
-              <span>Nguồn: RiskPack</span>
+              <span>{evidenceGapCount} evidence gaps</span>
+              <span>Nguồn: RiskPack portfolio{portfolioSource.runId ? `, run ${portfolioSource.runId}` : ""}</span>
             </footer>
           </>
         )}
@@ -816,7 +918,7 @@ function BankPrecheckApprovals({
 
   const pendingCount = rows.filter((row) => row.request && !row.approvalStatus && !resolutions[row.contractId]).length;
   const completedCount = rows.filter((row) => row.approvalStatus || resolutions[row.contractId] === "approved").length;
-  const eligibleCount = rows.filter((row) => row.eligibleScore != null && row.eligibleScore >= 70).length;
+  const eligibleCount = rows.filter((row) => row.eligibleScore != null && row.eligibleScore >= 0.7).length;
   const missingAmountCount = rows.filter((row) => (
     row.requestedAmount == null
     && !row.request
@@ -846,7 +948,9 @@ function BankPrecheckApprovals({
         (item: { contract_id?: string }) => item.contract_id === row.contractId,
       );
       if (!decision) throw new Error("Updated Decision Card is missing");
-      const score = decision.eligibility_score ?? decision.eligible_score;
+      const score = normalizeEligibilityScore(
+        decision.eligibility_score ?? decision.eligible_score,
+      );
       const approvalExecuted =
         decision.external_api_submission_approval_status === "EXECUTED"
         || decision.approval_status === true;
@@ -923,7 +1027,7 @@ function BankPrecheckApprovals({
                   && !isCompleted;
                 const scoreTone = row.eligibleScore == null
                   ? "bg-white/[0.06]"
-                  : row.eligibleScore >= 70 ? "bg-emerald-300" : "bg-red-400";
+                  : row.eligibleScore >= 0.7 ? "bg-emerald-300" : "bg-red-400";
 
                 return (
                   <tr key={row.contractId} className="border-b border-[var(--fin-soft-border)]/70 align-top last:border-b-0">
@@ -947,11 +1051,11 @@ function BankPrecheckApprovals({
                       {row.eligibleScore != null ? (
                         <div className="w-32">
                           <div className="flex items-baseline justify-between gap-2">
-                            <span className={`font-mono text-lg font-semibold ${row.eligibleScore >= 70 ? "text-emerald-300" : "text-red-300"}`}>{row.eligibleScore}</span>
-                            <span className="text-[9px] text-[var(--fin-muted)]">/ 100</span>
+                            <span className={`font-mono text-lg font-semibold ${row.eligibleScore >= 0.7 ? "text-emerald-300" : "text-red-300"}`}>{formatEligibilityScore(row.eligibleScore)}</span>
+                            <span className="text-[9px] text-[var(--fin-muted)]">/ 1</span>
                           </div>
                           <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
-                            <div className={`h-full rounded-full ${scoreTone}`} style={{ width: `${row.eligibleScore}%` }} />
+                            <div className={`h-full rounded-full ${scoreTone}`} style={{ width: `${row.eligibleScore * 100}%` }} />
                           </div>
                         </div>
                       ) : (
@@ -1236,6 +1340,33 @@ export function ContractApprovalWorkspace() {
         setContracts((current) => current.map((item) => {
           if (item.id !== selectedId) return item;
           const evaluations = risk?.rule_evaluations ?? [];
+          const mappedEvaluations = evaluations.map(mapRiskEvaluation);
+          const contractEvaluations = mappedEvaluations.filter((entry) => entry.scope === "CONTRACT");
+          const portfolioEvaluations = mappedEvaluations.filter((entry) => entry.scope === "PORTFOLIO");
+          const contractTriggeredRuleIds = risk?.contract_triggered_rule_ids
+            ?? evaluations
+              .filter((entry) => normalizeRiskScope(entry.scope) === "CONTRACT" && entry.status === "TRIGGERED")
+              .map((entry) => entry.rule_id || "UNKNOWN_RULE");
+          const portfolioTriggeredRuleIds = risk?.portfolio_triggered_rule_ids
+            ?? evaluations
+              .filter((entry) => normalizeRiskScope(entry.scope) === "PORTFOLIO" && entry.status === "TRIGGERED")
+              .map((entry) => entry.rule_id || "UNKNOWN_RULE");
+          const portfolioRuleIdSet = new Set(portfolioTriggeredRuleIds);
+          const mappedAlerts: AgentAlert[] = (risk?.alerts ?? []).flatMap((match) => match.alert ? [{
+            alertId: match.alert.alert_id || "UNKNOWN_ALERT",
+            alertType: match.alert.alert_type || "Risk alert",
+            severity: normalizeRiskLevel(match.alert.severity),
+            riskScore: match.alert.risk_score ?? null,
+            description: match.alert.description || "",
+            recommendedAction: match.alert.recommended_action || "",
+            matchedRuleIds: match.matched_rule_ids ?? [],
+          }] : []);
+          const portfolioAlerts = mappedAlerts.filter((alert) => (
+            alert.matchedRuleIds.some((ruleId) => portfolioRuleIdSet.has(ruleId))
+          ));
+          const contractAlerts = mappedAlerts.filter((alert) => (
+            !alert.matchedRuleIds.some((ruleId) => portfolioRuleIdSet.has(ruleId))
+          ));
           return {
             ...item,
             aiOption: decision?.recommended_option ?? item.aiOption,
@@ -1260,7 +1391,9 @@ export function ContractApprovalWorkspace() {
                   requestType: decision.funding_need_type
                     ?? item.bankPrecheck.requestType,
                   requestedAmount: decision.capital_need ?? item.bankPrecheck.requestedAmount,
-                  eligibleScore: decision.eligibility_score ?? decision.eligible_score ?? null,
+                  eligibleScore: normalizeEligibilityScore(
+                    decision.eligibility_score ?? decision.eligible_score,
+                  ),
                   precheckNote: decision.precheck_note ?? null,
                   approvalStatus:
                     decision.external_api_submission_approval_status === "EXECUTED"
@@ -1268,15 +1401,19 @@ export function ContractApprovalWorkspace() {
                   requiresFounderConfirmation: decision.requires_founder_confirmation ?? false,
                 }
               : item.bankPrecheck,
-            riskLevel: risk?.overall_risk_level ? normalizeRiskLevel(risk.overall_risk_level) : item.riskLevel,
+            riskLevel: risk
+              ? normalizeRiskLevel(risk.highest_contract_triggered_severity)
+              : item.riskLevel,
             agentRisk: risk
               ? {
                   available: true,
                   contractId: item.id,
-                  overallRiskLevel: risk.overall_risk_level ? normalizeRiskLevel(risk.overall_risk_level) : null,
-                  totalRulesTriggered: risk.summary?.total_rules_triggered ?? risk.triggered_rule_ids?.length ?? 0,
-                  triggeredRuleIds: risk.triggered_rule_ids ?? [],
-                  totalAlertsDetected: risk.summary?.total_alerts_detected ?? risk.alerts?.length ?? 0,
+                  overallRiskLevel: risk.highest_contract_triggered_severity
+                    ? normalizeRiskLevel(risk.highest_contract_triggered_severity)
+                    : null,
+                  totalRulesTriggered: contractTriggeredRuleIds.length,
+                  triggeredRuleIds: contractTriggeredRuleIds,
+                  totalAlertsDetected: contractAlerts.length,
                   totalProposedAlerts: risk.summary?.total_proposed_alerts ?? risk.proposed_alerts?.length ?? 0,
                   insufficientEvidenceCount: risk.insufficient_evidence?.length ?? 0,
                   humanReviewRequired: risk.summary?.human_review_required
@@ -1284,63 +1421,37 @@ export function ContractApprovalWorkspace() {
                     ?? risk.triggered_rule_approval_required
                     ?? risk.human_approval_required
                     ?? false,
-                  totalRulesEvaluated: risk.rule_evaluations?.length ?? 0,
-                  notTriggeredCount: risk.rule_evaluations?.filter((entry: { status?: string }) => entry.status === "NOT_TRIGGERED").length ?? 0,
-                  insufficientEvidenceRuleCount: risk.rule_evaluations?.filter((entry: { status?: string }) => entry.status === "INSUFFICIENT_EVIDENCE").length ?? 0,
+                  totalRulesEvaluated: contractEvaluations.length,
+                  notTriggeredCount: contractEvaluations.filter((entry) => entry.status === "NOT_TRIGGERED").length,
+                  insufficientEvidenceRuleCount: contractEvaluations.filter((entry) => entry.status === "INSUFFICIENT_EVIDENCE").length,
                   triggeredRules: (risk.rule_evaluations ?? [])
                     .filter((entry: { status?: string }) => entry.status === "TRIGGERED")
                     .map((entry: {
                       rule_id?: string;
+                      scope?: string;
                       severity?: string;
                       required_action?: string;
                       message?: string;
                     }) => ({
                       ruleId: entry.rule_id || "UNKNOWN_RULE",
+                      scope: normalizeRiskScope(entry.scope),
                       severity: normalizeRiskLevel(entry.severity),
                       requiredAction: entry.required_action || "",
                       message: entry.message || "",
                     })),
-                  alerts: (risk.alerts ?? []).flatMap((match: {
-                    alert?: {
-                      alert_id?: string;
-                      alert_type?: string;
-                      severity?: string;
-                      risk_score?: number | null;
-                      description?: string;
-                      recommended_action?: string;
-                    };
-                  }) => match.alert ? [{
-                    alertId: match.alert.alert_id || "UNKNOWN_ALERT",
-                    alertType: match.alert.alert_type || "Risk alert",
-                    severity: normalizeRiskLevel(match.alert.severity),
-                    riskScore: match.alert.risk_score ?? null,
-                    description: match.alert.description || "",
-                    recommendedAction: match.alert.recommended_action || "",
-                  }] : []),
+                  alerts: contractAlerts,
                   evidenceGaps: risk.insufficient_evidence ?? [],
                   requiredActions: risk.required_actions ?? [],
+                  portfolioRisks: portfolioEvaluations,
+                  portfolioAlerts,
+                  highestPortfolioRiskLevel: risk.highest_portfolio_triggered_severity
+                    ? normalizeRiskLevel(risk.highest_portfolio_triggered_severity)
+                    : null,
+                  portfolioApprovalRequired: risk.portfolio_transaction_approval_required ?? false,
                 }
               : item.agentRisk,
-            risks: evaluations.length
-              ? evaluations.map((entry: {
-                  rule_id?: string;
-                  risk_type?: string;
-                  status?: string;
-                  severity?: string;
-                  message?: string;
-                  observed_value?: string;
-                  required_action?: string;
-                  missing_fields?: string[];
-                }) => ({
-                  title: entry.risk_type || entry.rule_id || "Cảnh báo rủi ro",
-                  description: [
-                    entry.message || `Giá trị quan sát: ${entry.observed_value || "cần xác minh thêm"}.`,
-                    entry.missing_fields?.length ? `Thiếu: ${entry.missing_fields.join(", ")}.` : "",
-                    entry.required_action ? `Hành động: ${entry.required_action}.` : "",
-                  ].filter(Boolean).join(" "),
-                  severity: normalizeRiskLevel(entry.severity),
-                  status: entry.status || "INSUFFICIENT_EVIDENCE",
-                }))
+            risks: contractEvaluations.length
+              ? contractEvaluations
               : item.risks,
           };
         }));
@@ -1684,7 +1795,7 @@ export function ContractApprovalWorkspace() {
 
             <section className="mt-6 border-t border-[var(--fin-soft-border)] pt-5">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--fin-muted)]">Trạng thái các rule rủi ro</p>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--fin-muted)]">Rule rủi ro của hợp đồng</p>
                 <span className="font-mono text-[10px] text-[var(--fin-muted)]">{selected.agentRisk.available ? `${selected.risks.length} items` : "NO RISK PACK"}</span>
               </div>
               {selected.agentRisk.available ? (
@@ -1720,8 +1831,8 @@ export function ContractApprovalWorkspace() {
                     <div className="flex items-start gap-3 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.055] p-4">
                       <Check className="mt-0.5 size-4 shrink-0 text-emerald-300" strokeWidth={2} aria-hidden="true" />
                       <div>
-                        <p className="text-sm font-semibold text-emerald-100">Không có rule rủi ro bị kích hoạt</p>
-                        <p className="mt-1 text-xs leading-5 text-[var(--fin-muted)]">RiskPack hiện tại không ghi nhận RR nào ở trạng thái TRIGGERED cho hợp đồng này.</p>
+                        <p className="text-sm font-semibold text-emerald-100">Không có rủi ro gắn với hợp đồng</p>
+                        <p className="mt-1 text-xs leading-5 text-[var(--fin-muted)]">Các rule scope CONTRACT không ghi nhận rủi ro cho hợp đồng này. Rủi ro doanh nghiệp được đặt tại Business health.</p>
                       </div>
                     </div>
                   )}
@@ -1804,8 +1915,8 @@ export function ContractApprovalWorkspace() {
         <header className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-emerald-300">Business health</p>
-            <h2 className="mt-2 text-xl font-semibold tracking-[-0.035em] text-[var(--fin-text)]">Tài chính & rủi ro doanh nghiệp</h2>
-            <p className="mt-1.5 max-w-xl text-xs leading-5 text-[var(--fin-muted)]">Bối cảnh vận hành hỗ trợ người phê duyệt trước khi ra quyết định với từng hợp đồng.</p>
+            <h2 className="mt-2 text-xl font-semibold tracking-[-0.035em] text-[var(--fin-text)]">Tài chính và rủi ro doanh nghiệp</h2>
+            <p className="mt-1.5 max-w-xl text-xs leading-5 text-[var(--fin-muted)]">Bối cảnh toàn hệ thống để theo dõi sức khỏe doanh nghiệp. Các tín hiệu tại đây không được xem là rủi ro của hợp đồng đang chọn.</p>
           </div>
           <p className="font-mono text-[10px] text-[var(--fin-muted)]">CẬP NHẬT TỪ DANH MỤC HIỆN TẠI</p>
         </header>

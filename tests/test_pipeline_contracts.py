@@ -165,6 +165,76 @@ async def test_run_detail_reads_decision_and_risk_in_one_snapshot(monkeypatch) -
     }
 
 
+def test_dashboard_summary_preserves_contract_and_portfolio_risk_scopes() -> None:
+    summarized = pipeline_service._summarize_context(
+        {
+            "session_id": 82,
+            "finance_pack": {
+                "packs": [{
+                    "contract_id": "CON-005",
+                    "contract_name": "Trade documentation",
+                    "finance_details": {"funding_need": {"source": "none"}},
+                }],
+            },
+            "risk_pack": {
+                "packs": [{
+                    "contract_id": "CON-005",
+                    "contract_triggered_rule_ids": [],
+                    "portfolio_triggered_rule_ids": ["RR-001", "RR-002"],
+                    "highest_contract_triggered_severity": None,
+                    "highest_portfolio_triggered_severity": "CRITICAL",
+                    "portfolio_transaction_approval_required": True,
+                    "rule_evaluations": [
+                        {
+                            "rule_id": "RR-001",
+                            "scope": "CONTRACT",
+                            "status": "NOT_APPLICABLE",
+                            "severity": "CRITICAL",
+                            "required_action": "Review linked transaction",
+                            "message": "No contract-linked transaction exists.",
+                        },
+                        {
+                            "rule_id": "RR-001",
+                            "scope": "PORTFOLIO",
+                            "status": "TRIGGERED",
+                            "severity": "CRITICAL",
+                            "required_action": "Hold portfolio transaction",
+                            "message": "Portfolio anomaly detected.",
+                        },
+                        {
+                            "rule_id": "RR-002",
+                            "scope": "PORTFOLIO",
+                            "status": "TRIGGERED",
+                            "severity": "HIGH",
+                            "required_action": "Review working capital",
+                            "message": "Portfolio reserve breach detected.",
+                        },
+                    ],
+                    "triggered_rule_ids": ["RR-001", "RR-002"],
+                    "alerts": [],
+                }],
+            },
+            "decision_pack": None,
+        },
+        {},
+    )[0]["risk"]
+
+    assert summarized["contract_triggered_rule_ids"] == []
+    assert summarized["portfolio_triggered_rule_ids"] == ["RR-001", "RR-002"]
+    assert summarized["highest_contract_triggered_severity"] is None
+    assert summarized["highest_portfolio_triggered_severity"] == "CRITICAL"
+    assert summarized["portfolio_transaction_approval_required"] is True
+    assert [rule["scope"] for rule in summarized["triggered_rules"]] == [
+        "PORTFOLIO",
+        "PORTFOLIO",
+    ]
+    assert [rule["scope"] for rule in summarized["rule_evaluations"]] == [
+        "CONTRACT",
+        "PORTFOLIO",
+        "PORTFOLIO",
+    ]
+
+
 def test_dashboard_and_detail_http_routes(monkeypatch) -> None:
     async def fake_dashboard(limit: int, offset: int, latest_only: bool):
         return {

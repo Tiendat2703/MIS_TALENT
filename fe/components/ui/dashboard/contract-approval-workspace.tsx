@@ -26,6 +26,7 @@ type ContractRisk = {
   title: string;
   description: string;
   severity: RiskLevel;
+  status: string;
 };
 
 type AgentTriggeredRule = {
@@ -102,6 +103,9 @@ type ApiContract = {
   contract_id: string;
   generated_at?: string | null;
   finance?: {
+    contract_lifecycle?: string | null;
+    assessment_type?: string | null;
+    finance_status?: string | null;
     contract_name?: string | null;
     start_date?: string | null;
     end_date?: string | null;
@@ -116,6 +120,10 @@ type ApiContract = {
   } | null;
   risk?: {
     overall_risk_level?: string | null;
+    risk_assessment_status?: "COMPLETE" | "INCOMPLETE" | null;
+    review_priority?: string | null;
+    triggered_rule_approval_required?: boolean | null;
+    manual_evidence_review_required?: boolean | null;
     human_approval_required?: boolean | null;
     triggered_rule_ids?: string[];
     total_rules_triggered?: number;
@@ -150,6 +158,8 @@ type ApiContract = {
     recommended_option?: string | null;
     decision_status?: string | null;
     risk_level?: string | null;
+    risk_assessment_status?: "COMPLETE" | "INCOMPLETE" | null;
+    review_priority?: string | null;
     capital_need?: number | null;
     funding_need_type?: string | null;
     selected_bank_product_id?: string | null;
@@ -157,8 +167,17 @@ type ApiContract = {
     requires_founder_confirmation?: boolean | null;
     approval_status?: boolean | null;
     eligible_score?: number | null;
+    human_confirmation_status?: string | null;
+    external_api_submission_approval_status?: string | null;
+    bank_precheck_status?: string | null;
+    eligibility_score?: number | null;
     precheck_note?: string | null;
     is_preliminary?: boolean | null;
+    contract_status?: string | null;
+    assessment_type?: string | null;
+    required_actions?: Array<{ action?: string; owner?: string }>;
+    human_confirmation_points?: string[];
+    is_final_decision?: boolean;
   } | null;
 };
 
@@ -191,9 +210,14 @@ type RunDecisionDetail = {
   selected_bank_product_id?: string | null;
   selected_bank_product_name?: string | null;
   eligible_score?: number | null;
+  eligibility_score?: number | null;
   precheck_note?: string | null;
   approval_status?: boolean;
+  external_api_submission_approval_status?: string;
+  bank_precheck_status?: string;
   requires_founder_confirmation?: boolean;
+  required_actions?: Array<{ action?: string; owner?: string }>;
+  human_confirmation_points?: string[];
 };
 
 type RunRiskEvaluation = {
@@ -211,6 +235,8 @@ type RunRiskDetail = {
   contract_id?: string;
   overall_risk_level?: string;
   human_approval_required?: boolean;
+  triggered_rule_approval_required?: boolean;
+  manual_evidence_review_required?: boolean;
   triggered_rule_ids?: string[];
   summary?: {
     total_rules_triggered?: number;
@@ -245,6 +271,12 @@ const optionLabels: Record<string, string> = {
   TEMPORARY_REJECT_RISK: "Tạm từ chối · rủi ro",
   REJECT_MISSING_EVIDENCE: "Từ chối · thiếu hồ sơ",
   NO_SUITABLE_PRODUCT: "Chưa có phương án phù hợp",
+  CONTINUE_AS_PLANNED: "Tiếp tục theo kế hoạch",
+  CONTINUE_WITH_ACTIONS: "Tiếp tục kèm hành động",
+  ESCALATE_FOR_REVIEW: "Chuyển cấp xem xét",
+  RECOMMEND_RENEGOTIATION: "Đề nghị đàm phán lại",
+  RECOMMEND_HOLD: "Đề nghị tạm giữ",
+  NEED_MORE_DATA: "Cần bổ sung dữ liệu",
   PENDING_ANALYSIS: "Đang chờ phân tích",
 };
 
@@ -295,6 +327,9 @@ function mapApiContract(item: ApiContract): ContractRecord {
   const decision = item.decision ?? {};
   const selectedFundingType = decision.funding_need_type ?? finance.funding_need_type;
   const riskLevel = normalizeRiskLevel(decision.risk_level ?? item.risk?.overall_risk_level);
+  const externalApprovalExecuted =
+    decision.external_api_submission_approval_status === "EXECUTED"
+    || decision.approval_status === true;
   const triggeredRules = item.risk?.triggered_rule_ids ?? [];
   const contractValue = finance.contract_value ?? null;
 
@@ -324,10 +359,11 @@ function mapApiContract(item: ApiContract): ContractRecord {
       title: rule.rule_id || "Quy tắc rủi ro",
       description: [rule.message, rule.required_action].filter(Boolean).join(" · "),
       severity: normalizeRiskLevel(rule.severity),
+      status: "TRIGGERED",
     })),
     safeguards: [],
     riskLevel,
-    status: normalizeStatus(decision.decision_status, decision.approval_status),
+    status: normalizeStatus(decision.decision_status, externalApprovalExecuted),
     agentRisk: {
       available: Boolean(item.risk),
       contractId: item.contract_id,
@@ -340,6 +376,8 @@ function mapApiContract(item: ApiContract): ContractRecord {
       totalProposedAlerts: item.risk?.total_proposed_alerts ?? 0,
       insufficientEvidenceCount: item.risk?.insufficient_evidence_count ?? 0,
       humanReviewRequired: item.risk?.human_review_required
+        ?? item.risk?.manual_evidence_review_required
+        ?? item.risk?.triggered_rule_approval_required
         ?? item.risk?.human_approval_required
         ?? false,
       totalRulesEvaluated: item.risk?.total_rules_evaluated ?? 0,
@@ -366,9 +404,9 @@ function mapApiContract(item: ApiContract): ContractRecord {
       available: Boolean(item.decision || selectedFundingType),
       requestType: selectedFundingType ?? null,
       requestedAmount: decision.capital_need ?? finance.requested_amount ?? null,
-      eligibleScore: decision.eligible_score ?? null,
+      eligibleScore: decision.eligibility_score ?? decision.eligible_score ?? null,
       precheckNote: decision.precheck_note ?? null,
-      approvalStatus: decision.approval_status ?? false,
+      approvalStatus: externalApprovalExecuted,
       requiresFounderConfirmation: decision.requires_founder_confirmation ?? false,
     },
   };
@@ -476,6 +514,38 @@ function RiskBadge({ level }: { level: RiskLevel }) {
     critical: "border-red-500/45 bg-red-500/20 text-red-200",
   };
   return <span className={`rounded border px-2 py-1 text-[10px] font-semibold ${styles[level]}`}>{riskLabels[level]}</span>;
+}
+
+function RuleStatusBadge({ status }: { status: string }) {
+  const normalized = status.toUpperCase();
+  const isTriggered = normalized === "TRIGGERED";
+  const needsEvidence = normalized === "INSUFFICIENT_EVIDENCE";
+  const label = isTriggered
+    ? "Có rủi ro"
+    : needsEvidence
+      ? "Cần thêm dữ liệu"
+      : "Không dính rule";
+  const styles = isTriggered
+    ? "border-red-400/30 bg-red-400/[0.12] text-red-200"
+    : needsEvidence
+      ? "border-amber-300/25 bg-amber-300/[0.09] text-amber-100"
+      : "border-emerald-400/25 bg-emerald-400/[0.09] text-emerald-200";
+
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-semibold ${styles}`}>
+      <span
+        className={`size-1.5 rounded-full ${
+          isTriggered
+            ? "bg-red-300"
+            : needsEvidence
+              ? "bg-amber-200"
+              : "bg-emerald-300"
+        }`}
+        aria-hidden="true"
+      />
+      {label}
+    </span>
+  );
 }
 
 function Metric({
@@ -776,14 +846,18 @@ function BankPrecheckApprovals({
         (item: { contract_id?: string }) => item.contract_id === row.contractId,
       );
       if (!decision) throw new Error("Updated Decision Card is missing");
-      if (approved && (decision.eligible_score == null || !decision.precheck_note)) {
+      const score = decision.eligibility_score ?? decision.eligible_score;
+      const approvalExecuted =
+        decision.external_api_submission_approval_status === "EXECUTED"
+        || decision.approval_status === true;
+      if (approved && (score == null || !decision.precheck_note)) {
         throw new Error("Bank precheck did not return score and note");
       }
 
       onResult(row.contractId, {
-        eligibleScore: decision.eligible_score ?? null,
+        eligibleScore: score ?? null,
         precheckNote: decision.precheck_note ?? null,
-        approvalStatus: decision.approval_status ?? false,
+        approvalStatus: approvalExecuted,
       });
       setResolutions((current) => ({ ...current, [row.contractId]: approved ? "approved" : "rejected" }));
       onRequestResolved(row.contractId);
@@ -1161,12 +1235,24 @@ export function ContractApprovalWorkspace() {
 
         setContracts((current) => current.map((item) => {
           if (item.id !== selectedId) return item;
-          const evaluations = (risk?.rule_evaluations ?? []).filter((entry: { status?: string }) => entry.status !== "NOT_TRIGGERED");
+          const evaluations = risk?.rule_evaluations ?? [];
           return {
             ...item,
             aiOption: decision?.recommended_option ?? item.aiOption,
             reasons: decision?.reasons?.length ? decision.reasons : item.reasons,
-            safeguards: decision?.protective_condition ? [decision.protective_condition] : item.safeguards,
+            safeguards: decision
+              ? [
+                  decision.protective_condition,
+                  ...(decision.required_actions ?? []).map((entry) => (
+                    [entry.action, entry.owner ? `Phụ trách: ${entry.owner}` : ""]
+                      .filter(Boolean)
+                      .join(" · ")
+                  )),
+                  ...(decision.human_confirmation_points ?? []).map((entry) => (
+                    `Cần xác nhận: ${entry}`
+                  )),
+                ].filter((entry): entry is string => Boolean(entry))
+              : item.safeguards,
             bankPrecheck: decision
               ? {
                   ...item.bankPrecheck,
@@ -1174,9 +1260,11 @@ export function ContractApprovalWorkspace() {
                   requestType: decision.funding_need_type
                     ?? item.bankPrecheck.requestType,
                   requestedAmount: decision.capital_need ?? item.bankPrecheck.requestedAmount,
-                  eligibleScore: decision.eligible_score ?? null,
+                  eligibleScore: decision.eligibility_score ?? decision.eligible_score ?? null,
                   precheckNote: decision.precheck_note ?? null,
-                  approvalStatus: decision.approval_status ?? false,
+                  approvalStatus:
+                    decision.external_api_submission_approval_status === "EXECUTED"
+                    || decision.approval_status === true,
                   requiresFounderConfirmation: decision.requires_founder_confirmation ?? false,
                 }
               : item.bankPrecheck,
@@ -1191,7 +1279,11 @@ export function ContractApprovalWorkspace() {
                   totalAlertsDetected: risk.summary?.total_alerts_detected ?? risk.alerts?.length ?? 0,
                   totalProposedAlerts: risk.summary?.total_proposed_alerts ?? risk.proposed_alerts?.length ?? 0,
                   insufficientEvidenceCount: risk.insufficient_evidence?.length ?? 0,
-                  humanReviewRequired: risk.summary?.human_review_required ?? risk.human_approval_required ?? false,
+                  humanReviewRequired: risk.summary?.human_review_required
+                    ?? risk.manual_evidence_review_required
+                    ?? risk.triggered_rule_approval_required
+                    ?? risk.human_approval_required
+                    ?? false,
                   totalRulesEvaluated: risk.rule_evaluations?.length ?? 0,
                   notTriggeredCount: risk.rule_evaluations?.filter((entry: { status?: string }) => entry.status === "NOT_TRIGGERED").length ?? 0,
                   insufficientEvidenceRuleCount: risk.rule_evaluations?.filter((entry: { status?: string }) => entry.status === "INSUFFICIENT_EVIDENCE").length ?? 0,
@@ -1230,9 +1322,10 @@ export function ContractApprovalWorkspace() {
                 }
               : item.agentRisk,
             risks: evaluations.length
-              ? evaluations.slice(0, 4).map((entry: {
+              ? evaluations.map((entry: {
                   rule_id?: string;
                   risk_type?: string;
+                  status?: string;
                   severity?: string;
                   message?: string;
                   observed_value?: string;
@@ -1246,6 +1339,7 @@ export function ContractApprovalWorkspace() {
                     entry.required_action ? `Hành động: ${entry.required_action}.` : "",
                   ].filter(Boolean).join(" "),
                   severity: normalizeRiskLevel(entry.severity),
+                  status: entry.status || "INSUFFICIENT_EVIDENCE",
                 }))
               : item.risks,
           };
@@ -1378,7 +1472,7 @@ export function ContractApprovalWorkspace() {
         <Metric icon={AlertTriangle} label="Rủi ro cao" value={String(counts.highRisk).padStart(2, "0")} note="High hoặc critical" />
       </section>
 
-      <div className="mt-5 grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_23rem]">
+      <div className="mt-5 grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_29rem] 2xl:grid-cols-[minmax(0,1fr)_34rem]">
         <section className="min-w-0 overflow-hidden rounded-xl border border-[var(--fin-soft-border)] bg-[var(--fin-surface)]">
           <header className="border-b border-[var(--fin-soft-border)] px-4 py-4 sm:px-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -1573,37 +1667,64 @@ export function ContractApprovalWorkspace() {
               </section>
             )}
 
-            <section className="mt-6">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--fin-muted)]">Vì sao AI đưa ra phương án này</p>
-              <ol className="mt-3 space-y-3">
+            <section className="mt-6 rounded-xl border border-[var(--fin-soft-border)] bg-[var(--fin-bg)]/70 p-4 sm:p-5">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.11em] text-emerald-300">Vì sao AI đưa ra phương án này</p>
+              <ol className="mt-4 space-y-3">
                 {selected.reasons.map((reason, index) => (
-                  <li key={`${selected.id}-reason-${index}`} className="flex gap-3 text-xs leading-5 text-[var(--fin-muted)]">
-                    <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-white/[0.05] font-mono text-[9px] font-semibold text-[var(--fin-text)]">{String(index + 1).padStart(2, "0")}</span>
-                    <span>{reason}</span>
+                  <li key={`${selected.id}-reason-${index}`} className="grid grid-cols-[1.75rem_minmax(0,1fr)] gap-3 rounded-lg bg-white/[0.035] px-3.5 py-3.5 ring-1 ring-inset ring-white/[0.055]">
+                    <span className="flex size-7 items-center justify-center rounded-md bg-emerald-400/[0.09] font-mono text-[10px] font-semibold text-emerald-200">{String(index + 1).padStart(2, "0")}</span>
+                    <span className="text-pretty text-sm font-medium leading-6 text-[var(--fin-text)]">{reason}</span>
                   </li>
                 ))}
                 {selected.reasons.length === 0 && (
-                  <li className="text-xs leading-5 text-[var(--fin-muted)]">Decision Agent chưa trả lý do cho hợp đồng này.</li>
+                  <li className="rounded-lg border border-dashed border-[var(--fin-soft-border)] px-4 py-5 text-sm leading-6 text-[var(--fin-muted)]">Decision Agent chưa trả lý do cho hợp đồng này.</li>
                 )}
               </ol>
             </section>
 
             <section className="mt-6 border-t border-[var(--fin-soft-border)] pt-5">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--fin-muted)]">Rule evaluations cần chú ý</p>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--fin-muted)]">Trạng thái các rule rủi ro</p>
                 <span className="font-mono text-[10px] text-[var(--fin-muted)]">{selected.agentRisk.available ? `${selected.risks.length} items` : "NO RISK PACK"}</span>
               </div>
               {selected.agentRisk.available ? (
                 <div className="mt-3 space-y-2">
                   {selected.risks.map((risk, index) => (
-                    <article key={`${selected.id}-risk-${index}`} className="rounded-lg bg-white/[0.028] p-3.5 ring-1 ring-inset ring-white/[0.055]">
+                    <article
+                      key={`${selected.id}-risk-${index}`}
+                      className={`rounded-lg border p-3.5 ${
+                        risk.status === "TRIGGERED"
+                          ? "border-red-400/25 bg-red-400/[0.07]"
+                          : risk.status === "INSUFFICIENT_EVIDENCE"
+                            ? "border-amber-300/20 bg-amber-300/[0.055]"
+                            : "border-emerald-400/20 bg-emerald-400/[0.055]"
+                      }`}
+                    >
                       <div className="flex items-start justify-between gap-3">
-                        <h3 className="text-xs font-semibold text-[var(--fin-text)]">{risk.title}</h3>
-                        <RiskBadge level={risk.severity} />
+                        <div className="min-w-0">
+                          <h3 className={`text-sm font-semibold ${
+                            risk.status === "TRIGGERED"
+                              ? "text-red-100"
+                              : risk.status === "INSUFFICIENT_EVIDENCE"
+                                ? "text-amber-100"
+                                : "text-emerald-100"
+                          }`}>{risk.title}</h3>
+                          <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.08em] text-[var(--fin-muted)]">{risk.status.replaceAll("_", " ")}</p>
+                        </div>
+                        <RuleStatusBadge status={risk.status} />
                       </div>
-                      <p className="mt-2 text-[11px] leading-5 text-[var(--fin-muted)]">{risk.description}</p>
+                      <p className="mt-3 text-xs leading-5 text-[var(--fin-muted)]">{risk.description}</p>
                     </article>
                   ))}
+                  {selected.risks.length === 0 && (
+                    <div className="flex items-start gap-3 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.055] p-4">
+                      <Check className="mt-0.5 size-4 shrink-0 text-emerald-300" strokeWidth={2} aria-hidden="true" />
+                      <div>
+                        <p className="text-sm font-semibold text-emerald-100">Không có rule rủi ro bị kích hoạt</p>
+                        <p className="mt-1 text-xs leading-5 text-[var(--fin-muted)]">RiskPack hiện tại không ghi nhận RR nào ở trạng thái TRIGGERED cho hợp đồng này.</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="mt-3 rounded-lg border border-dashed border-[var(--fin-soft-border)] px-3.5 py-4">

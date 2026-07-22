@@ -22,8 +22,13 @@ from app.Agent.state_store import (
 )
 from app.Agent.hooks import AppContext
 from app.database.context_store import fetch_context_row, load_pipeline_context
+from app.schema.decisionAgent import DecisionBatchOutput
+from app.schema.handoff_packs import RiskBatchPack
 from app.service.credit_profile import load_contract_credit_profiles
-from app.service.decision_guard import apply_mandatory_risk_policy
+from app.service.decision_guard import (
+    apply_authoritative_precheck_state,
+    apply_mandatory_risk_policy,
+)
 from app.service.precheck_approval import ensure_precheck_approval_requests
 from app.tools.DecisionAgent.PrecheckAPI import PRECHECK_TOOL_BY_NAME
 from app.tools.writeLogs import fetch_decision_log
@@ -35,6 +40,8 @@ IMMUTABLE_TARGET_FIELDS = {
     "funding_need_type",
     "selected_bank_product_id",
     "selected_bank_product_name",
+    "portfolio_transaction_approval",
+    "contract_final_action_approval",
 }
 
 
@@ -137,21 +144,47 @@ def _guard_continuation_result(
         tool_result = approval_request.get("result")
         if not isinstance(tool_result, dict):
             raise ValueError("Executed precheck does not contain a result")
-        if target_after.get("approval_status") is not True:
-            raise ValueError("Agent did not set approval_status=true")
-        if target_after.get("eligible_score") != tool_result.get("eligible_score"):
-            raise ValueError("eligible_score does not match the precheck result")
+        if target_after.get("external_api_submission_approval_status") != "EXECUTED":
+            raise ValueError("Agent did not set external API approval status to EXECUTED")
+        if target_after.get("bank_precheck_status") != "COMPLETED":
+            raise ValueError("Agent did not set bank_precheck_status=COMPLETED")
+        if target_after.get("eligibility_score") != tool_result.get("eligible_score"):
+            raise ValueError("eligibility_score does not match the precheck result")
         if target_after.get("precheck_note") != tool_result.get("precheck_note"):
             raise ValueError("precheck_note does not match the precheck result")
     else:
         if approval_request.get("status") != "rejected":
             raise ValueError("Rejected approval has an invalid StateStore status")
-        if target_after.get("approval_status") is not False:
-            raise ValueError("Rejected precheck must keep approval_status=false")
-        if target_after.get("eligible_score") is not None:
-            raise ValueError("Rejected precheck must keep eligible_score=null")
+        if target_after.get("external_api_submission_approval_status") != "REJECTED":
+            raise ValueError("Rejected precheck must expose approval status REJECTED")
+        if target_after.get("bank_precheck_status") != "NOT_ELIGIBLE_TO_RUN":
+            raise ValueError("Rejected precheck must not be eligible to run")
+        if target_after.get("eligibility_score") is not None:
+            raise ValueError("Rejected precheck must keep eligibility_score=null")
         if target_after.get("precheck_note") is not None:
             raise ValueError("Rejected precheck must keep precheck_note=null")
+
+
+def _reconcile_continuation_output(
+    output: DecisionBatchOutput,
+    *,
+    risk_batch: RiskBatchPack | None,
+    contract_id: str,
+    approval_state: dict[str, Any],
+) -> DecisionBatchOutput:
+    """Apply governed Risk policy, then restore authoritative HITL state.
+
+    Risk may constrain the recommendation, but it must not erase a bank-precheck
+    state already recorded by StateStore after exact human approval.
+    """
+    corrected = output
+    if risk_batch is not None:
+        corrected = apply_mandatory_risk_policy(
+            corrected,
+            risk_batch,
+            contract_id=contract_id,
+        )
+    return apply_authoritative_precheck_state(corrected, approval_state)
 
 
 async def get_pending_approvals(run_id: int) -> list[dict[str, Any]]:
@@ -372,13 +405,17 @@ def _followup_message(
             "arguments bên dưới. Sau khi nhận kết quả thật, hãy đánh giá lại "
             "approve/review/reject và chỉ cập nhật Decision Card của contract này. "
             "Mọi Decision Card khác phải được trả lại nguyên vẹn. Sau khi cập nhật "
+            "đặt external_api_submission_approval_status=EXECUTED, "
+            "bank_precheck_status=COMPLETED và eligibility_score bằng score thật. "
             "batch. Tầng ứng dụng sẽ tự lưu log."
         )
     else:
         instruction = (
             "Người duyệt đã từ chối precheck. Không gọi bất kỳ precheck tool nào. Chỉ cập "
-            "nhật Decision Card của contract này với approval_status=false, "
-            "eligible_score=null, precheck_note=null; giữ nguyên mọi card khác. "
+            "nhật Decision Card của contract này với "
+            "external_api_submission_approval_status=REJECTED, "
+            "bank_precheck_status=NOT_ELIGIBLE_TO_RUN, eligibility_score=null, "
+            "precheck_note=null; giữ nguyên mọi card khác. "
             "Tầng ứng dụng sẽ tự lưu log sau khi batch được kiểm tra."
         )
 
@@ -462,6 +499,7 @@ async def decide_approval(
             raise RuntimeError("Unexpected SDK interruption during continuation")
 
         corrected_output = result.final_output
+        risk_batch: RiskBatchPack | None = None
         try:
             authoritative_context = await asyncio.to_thread(
                 load_pipeline_context,
@@ -471,13 +509,7 @@ async def decide_approval(
             # Standalone legacy Decision runs may not have Finance/Risk context.
             pass
         else:
-            if authoritative_context.risk_pack is not None:
-                corrected_output = apply_mandatory_risk_policy(
-                    corrected_output,
-                    authoritative_context.risk_pack,
-                    contract_id=request["contract_id"],
-                )
-        new_batch = corrected_output.model_dump(mode="json")
+            risk_batch = authoritative_context.risk_pack
         state_after_tool = await get_approval_state(run_id)
         request_after = _find_request(state_after_tool, approval_id)
         if approved and request_after.get("status") == "failed":
@@ -488,6 +520,13 @@ async def decide_approval(
                     request_after.get("error") or "Unknown bank precheck error"
                 ),
             )
+        corrected_output = _reconcile_continuation_output(
+            corrected_output,
+            risk_batch=risk_batch,
+            contract_id=request["contract_id"],
+            approval_state=state_after_tool,
+        )
+        new_batch = corrected_output.model_dump(mode="json")
         request_ids_after = {
             item["approval_id"]
             for item in state_after_tool["approval_requests"]

@@ -64,7 +64,8 @@ STAGE_POLICY: dict[str, dict[str, Any]] = {
     },
     "risk": {
         "allowed_input_tables": [
-            "13_RISK_RULES", "08_BANK_TXN", "20_DATA_CLASS", "FinanceBatchPack",
+            "13_RISK_RULES", "14_ALERTS", "08_BANK_TXN", "06_ORDERS",
+            "20_DATA_CLASS", "FinanceBatchPack",
         ],
         "allowed_tools": ["process_risk_context"],
         "forbidden_tools": [
@@ -78,13 +79,22 @@ STAGE_POLICY: dict[str, dict[str, Any]] = {
         "evaluation_note": (
             "QC ở đây là QC TOOL + SCHEMA + KHÔNG VƯỢT QUYỀN. Không phạt Risk vì "
             "không tìm ra rủi ro: rule_evaluations rỗng finding, status "
-            "NOT_TRIGGERED / INSUFFICIENT_EVIDENCE, hay alerts rỗng đều là kết quả "
-            "HỢP LỆ khi hợp đồng không vi phạm. run_log rỗng process_step cũng bình "
-            "thường vì Risk chạy tất định trong một tool."
+            "NOT_TRIGGERED / NOT_APPLICABLE / INSUFFICIENT_EVIDENCE, hay alerts "
+            "rỗng đều là kết quả HỢP LỆ theo applicability. RR-005 là rule hoạt "
+            "động: khi không có funding request thì phải là NOT_APPLICABLE, không "
+            "được ép thành RULE_INACTIVE. run_log rỗng process_step cũng bình thường "
+            "vì Risk chạy tất định trong một tool."
         ),
+        "rule_status_policy": {
+            "RR-005": (
+                "ACTIVE rule. NOT_APPLICABLE when no contract-specific funding "
+                "request exists; otherwise evaluate to TRIGGERED/NOT_TRIGGERED. "
+                "RULE_INACTIVE is valid only when the database rule is inactive."
+            ),
+        },
         "expected_output": (
-            "RiskBatchPack (rule_evaluations, triggered_rule_ids, risk score, "
-            "alerts, human_review_required)"
+            "RiskBatchPack (all rule_evaluations including RR-005, assessment "
+            "status, concluded risk level, review priority, alerts, split review flags)"
         ),
         "forbidden_output": [
             "Final Decision Card", "chọn sản phẩm ngân hàng cuối cùng",
@@ -109,15 +119,24 @@ STAGE_POLICY: dict[str, dict[str, Any]] = {
             "precheck_micro_credit",
         ],
         "required_process_steps": [
-            "load_decision_context", "bank_product_catalog_review",
-            "precheck_evaluation", "decision_card_generation",
+            "load_decision_context", "decision_card_generation",
         ],
+        "conditional_process_steps": {
+            "bank_product_catalog_review": (
+                "required when at least one case has a concrete authoritative "
+                "funding need"
+            ),
+            "precheck_evaluation": (
+                "required only for an actionable funding option with complete "
+                "tool arguments; pending human approval is a valid outcome"
+            ),
+        },
         "expected_output": (
             "DecisionBatchOutput (Decision Card: option, đúng 3 reasons, "
             "human confirmation point, recommended partner service)"
         ),
         "forbidden_output": [
-            "tự phê duyệt (approval_status=true khi chưa có human approval)",
+            "tự đặt external approval EXECUTED khi chưa có human approval",
             "tự gửi hồ sơ ngân hàng",
         ],
     },

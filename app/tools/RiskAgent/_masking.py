@@ -16,20 +16,25 @@ from app.schema.handoff_packs import MaskedField, RiskAlert
 from app.schema.risk_db_models import DataClassRule, MaskingExample
 
 # Token định danh dạng PREFIX-XXXX trong chuỗi tự do (vd "TXN-006, CON-004").
-_IDENTIFIER = re.compile(r"\b(?:TXN|CON|CR|ORD|CUS|ACC|OPC|SUP|UNK)[-_][A-Z0-9]+\b", re.I)
+_IDENTIFIER = re.compile(
+    r"\b(?:TXN|CON|CR|ORD|INV|CUS|ACC|OPC|SUP|UNK)[-_][A-Z0-9]+\b",
+    re.I,
+)
 
 # Prefix định danh -> classification (khớp tinh thần 20_DATA_CLASS).
 _PREFIX_CLASSIFICATION = {
     "CUS": "restricted", "ACC": "restricted", "OPC": "restricted",
     "TXN": "restricted", "SUP": "restricted", "UNK": "restricted",
-    "CON": "internal", "ORD": "internal", "CR": "internal",
+    "CON": "internal", "ORD": "internal", "INV": "internal", "CR": "internal",
 }
 
 # Field tài chính nhạy cảm (business confidential) — tên metric trong pack khác với
 # example_field của 20_DATA_CLASS nên map bổ sung ở đây.
 _CONFIDENTIAL_FIELDS = {
     "projected_closing_cash", "closing_cash", "cash_reserve_minimum",
-    "gross_margin", "requested_amount", "contract_value", "cashflow",
+    "gross_margin", "expected_gross_margin_rate",
+    "allocated_order_estimated_margin_rate", "actual_margin_rate",
+    "requested_amount", "contract_value", "cashflow",
     "eligibility_score",
 }
 
@@ -43,6 +48,7 @@ _FIELD_TOKEN_PREFIX = {
     "company_id": "ORG",
     "contract_id": "CON",
     "order_id": "ORD",
+    "invoice_id": "INV",
     "txn_id": "TXN",
     "transaction_id": "TXN",
     "credit_case_id": "CR",

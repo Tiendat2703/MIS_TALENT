@@ -302,6 +302,11 @@ def test_contract_risk_pack_matches_and_masks_transaction_alert(
     monkeypatch.setattr(BuildRiskReport, "get_risk_rules_impl", lambda: [rule])
     monkeypatch.setattr(BuildRiskReport, "get_alerts_impl", lambda: [alert])
     monkeypatch.setattr(BuildRiskReport, "get_data_classes_impl", lambda: [])
+    monkeypatch.setattr(
+        BuildRiskReport,
+        "load_risk_source_evidence_impl",
+        lambda _pack: {"bank_transactions": [transaction], "orders": []},
+    )
 
     risk_pack = BuildRiskReport.build_risk_pack_impl(finance_pack)
 

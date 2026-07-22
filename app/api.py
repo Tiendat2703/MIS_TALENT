@@ -40,6 +40,13 @@ def _contract_service():
     return contract_service
 
 
+def _data_catalog_service():
+    """Load the read-only Supabase catalog helpers lazily."""
+    from app.service import data_catalog_service
+
+    return data_catalog_service
+
+
 async def _preflight_and_start(
     contract: ContractUploadPackage,
 ) -> FinancePreflightResult:
@@ -90,6 +97,28 @@ async def dashboard_data(limit: int = 100, offset: int = 0, latest_only: bool = 
         latest_only=latest_only,
     )
 
+
+@app.get("/data-catalog/tables")
+async def data_catalog_tables():
+    return await asyncio.to_thread(_data_catalog_service().list_catalog_tables)
+
+
+@app.get("/data-catalog/contracts")
+async def data_catalog_contracts():
+    return await asyncio.to_thread(_data_catalog_service().list_contract_options)
+
+
+@app.get("/data-catalog/tables/{table_name}")
+async def data_catalog_table(table_name: str):
+    try:
+        return await asyncio.to_thread(
+            _data_catalog_service().read_catalog_table,
+            table_name,
+        )
+    except (KeyError, LookupError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.post("/contracts/validate")
 async def validate_contract(contract: ContractUploadPackage):
     """Validate and echo a form payload without starting or persisting a run."""
@@ -119,11 +148,22 @@ async def create_run(contract: ContractUploadPackage | None = None):
     return await _pipeline_service().start_validated_pipeline_run(contract=None)
 
 @app.post("/runs/validated")                               # chạy pipeline CÓ CỔNG QC
-async def create_validated_run(contract: ContractUploadPackage | None = None):
+async def create_validated_run(
+    contract: ContractUploadPackage | None = None,
+    contract_id: str | None = None,
+):
     # Finance → Validate → Risk → Validate → Decision → Validate. Dừng tại cổng đầu
     # tiên không PASS. Validation event phát trên cùng session_id (xem qua SSE).
+    if contract is not None and contract_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Choose either an uploaded contract body or contract_id",
+        )
     payload = contract.model_dump(mode="json") if contract is not None else None
-    return await _pipeline_service().start_validated_pipeline_run(contract=payload)
+    return await _pipeline_service().start_validated_pipeline_run(
+        contract=payload,
+        existing_contract_id=contract_id,
+    )
 
 @app.get("/runs/{session_id}/events")                      # SSE cho dashboard
 async def run_events(session_id: int):

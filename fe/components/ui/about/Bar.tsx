@@ -15,6 +15,7 @@ const navItems = [
   { href: "/", label: "Home" },
   { href: "/about", label: "About us" },
   { href: "/agent", label: "AI Agent" },
+  { href: "/teamPack", label: "Kho dữ liệu" },
   { href: "/dashboard", label: "Dashboard" },
 ] as const;
 

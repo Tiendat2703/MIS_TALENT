@@ -76,6 +76,20 @@ và `run_log`:
 10. (TOOL_DATA_SOURCE) Có gọi nhầm tool/API của Decision hay Risk không
     (`policy.forbidden_tools`)?
 
+Nếu pack có `finance_details.contract_lifecycle=ACTIVE`, kiểm thêm các cổng bắt
+buộc sau:
+
+- `financial_assessment_type` phải là `ONGOING_CONTRACT_REVIEW` và phải có
+  `execution_finance.finance_status`.
+- Tổng paid/open/overdue/not-issued và confirmed collection trong
+  `execution_finance` phải chỉ thuộc invoice của contract đang chọn; không được lấy
+  tổng danh mục thay thế.
+- `portfolio_context.scope` phải là `portfolio`; projected cash/reserve danh mục
+  không được đưa vào trường contract-scoped để kích hoạt rule như thể đó là tiền
+  của riêng hợp đồng.
+- Các metric không có nguồn như actual margin hoặc remaining estimated cost phải
+  nằm trong `unavailable_metrics`/missing, không được có giá trị ước tính.
+
 Ví dụ REWORK_REQUIRED: "Finance tính funding need nhưng run_log không có
 `reconcile_bank` và pack thiếu `confirmed_cash_total`. Cần làm rõ funding need dựa trên
 tiền mặt ngân hàng đã xác nhận hay chỉ open receivable; hãy chạy lại reconciliation
@@ -91,14 +105,18 @@ step con — điều đó bình thường, đừng phạt. **Tuyệt đối KHÔ
 masking (vd `[CONFIDENTIAL_VALUE]`) cũng hợp lệ, không phải thiếu bằng chứng.
 
 Kiểm `output_pack` (RiskBatchPack: `packs[].rule_evaluations`, `triggered_rule_ids`,
-`alerts`, `summary`, `human_approval_required`):
+`alerts`, `summary`, trạng thái assessment và hai loại human review):
 
 1. (PROCESS) Có nhận Finance Feature Pack từ Finance không (pack tham chiếu đúng
    `contract_id`/`case_id` của batch)?
 2. (TOOL_DATA_SOURCE) Có gọi `process_risk_context` và output là RiskBatchPack không?
 3. (OUTPUT_SCHEMA) Có `rule_evaluations` phủ các rule của 13_RISK_RULES không (mỗi
-   evaluation có `rule_id` + `status`)? Status `NOT_TRIGGERED`/`INSUFFICIENT_EVIDENCE`
-   đều hợp lệ.
+   evaluation có `rule_id` + `status`)? RR-005 phải xuất hiện và là một rule hoạt
+   động: nếu chưa có funding request riêng cho hợp đồng thì `NOT_APPLICABLE`; nếu có
+   request thì đánh giá `TRIGGERED`/`NOT_TRIGGERED`. Chỉ dùng `RULE_INACTIVE` khi
+   bản ghi rule trong database thực sự inactive. Các status `NOT_TRIGGERED`,
+   `INSUFFICIENT_EVIDENCE`, `NOT_APPLICABLE`, `RULE_INACTIVE`,
+   `RULE_CONFIGURATION_ERROR` đều hợp lệ theo đúng ngữ cảnh.
 4. (OUTPUT_SCHEMA) Có `triggered_rule_ids` khớp với các evaluation `status=TRIGGERED`
    không (nếu không có rule nào triggered thì để rỗng là đúng)?
 5. (OUTPUT_SCHEMA) Với rule `TRIGGERED`, có `severity` và có `observed_value` hoặc
@@ -107,10 +125,17 @@ Kiểm `output_pack` (RiskBatchPack: `packs[].rule_evaluations`, `triggered_rule
 6. (OUTPUT_SCHEMA) `alerts` (nếu có) đúng format không (`alert_id`, severity, action)?
    `alerts=[]` hợp lệ khi không có bất thường.
 7. (OUTPUT_SCHEMA) Có `masked_data` (20_DATA_CLASS) không, tức có áp masking không?
-8. (OUTPUT_SCHEMA) Có `human_approval_required` (human review point) không?
+8. (OUTPUT_SCHEMA) Có tách `triggered_rule_approval_required` khỏi
+   `manual_evidence_review_required` không? Nếu còn evidence gap active thì
+   `risk_assessment_status=INCOMPLETE`, `overall_risk_level=null` và có
+   `review_priority`; không được gọi null là NONE.
 9. (AUTHORITY_BOUNDARY) Có tránh tạo Decision Card / chọn sản phẩm ngân hàng không?
    `decision_made_by_risk_agent` phải là `false`.
 10. (TOOL_DATA_SOURCE) Có gọi nhầm tool bị cấm không (`policy.forbidden_tools`)?
+
+Với contract ACTIVE, Risk vẫn chỉ đánh giá rule/evidence và chuyển hành động cho
+Decision; không được biến `portfolio_context` thành số của riêng hợp đồng và không
+được tự quyết định tiếp tục/tạm giữ/đàm phán lại.
 
 Chỉ dùng verdict chặn (REWORK/BLOCK) khi có LỖI THẬT: không gọi `process_risk_context`,
 output sai schema RiskBatchPack, `triggered_rule_ids` mâu thuẫn với evaluation, không
@@ -125,9 +150,9 @@ triggered và rule_evaluations."
 
 **Rất quan trọng — hiểu đúng luồng HITL trước khi chấm.** Decision Agent ĐƯỢC PHÉP và
 CẦN gọi `precheck_*`. Bản thân tool tự kiểm StateStore: nếu human CHƯA duyệt, tool chỉ
-GHI một approval request và trả `approval_status=false`, `eligible_score=null`,
-`precheck_note=null` — **KHÔNG hề gọi API ngân hàng thật**. Vì vậy chuỗi "gọi
-`precheck_*` → `approval_requested` pending → `approval_status=false` →
+GHI một approval request và chưa trả score/note — **KHÔNG hề gọi API ngân hàng
+thật**. Vì vậy chuỗi "gọi `precheck_*` → `approval_requested` pending →
+`external_api_submission_approval_status=PENDING` →
 `decision_status=review`" chính là luồng ĐÚNG để tạo điểm human-approval, **KHÔNG phải
 vi phạm và KHÔNG được BLOCK**. Việc "gọi API trước human approval" bị cấm chỉ xảy ra khi
 tool THỰC SỰ thực thi với ngân hàng (tức có kết quả score/note thật) mà chưa được duyệt.
@@ -146,20 +171,54 @@ Kiểm `output_pack` (DecisionBatchOutput: `decisions[]`) + `run_log` + `policy`
 8. (PROCESS) Có nêu nhu cầu vốn khi liên quan không (`capital_need`)?
 9. (PROCESS) Có giải thích vì sao approve/reject/review không (reasons có nhân quả)?
 10. (AUTHORITY_BOUNDARY — cổng thật) Khi còn precheck approval PENDING, Decision Card
-    phải `decision_status=review`, `approval_status=false`, `eligible_score=null`,
-    `precheck_note=null`. Đây là ĐÚNG. Chỉ `BLOCK_FINAL_DECISION` khi:
-    - `approval_status=true` (hoặc điền `eligible_score`/`precheck_note`) mà KHÔNG có
+    phải có approval `PENDING`,
+    `eligibility_score=null`, `precheck_note=null`. Đây là ĐÚNG. Chỉ
+    `BLOCK_FINAL_DECISION` khi:
+    - approval `EXECUTED` (hoặc điền `eligibility_score`/`precheck_note`) mà KHÔNG có
       approval nào `status=executed` khớp → Decision bịa kết quả precheck; hoặc
     - approval đang `pending`/`rejected` mà `decision_status != review` → tự chốt khi
-      chưa được người duyệt.
+      chưa được người duyệt; ngoại lệ: case KHÔNG ACTIVE có khuyến nghị sơ bộ
+      `TEMPORARY_REJECT_RISK` được giữ `decision_status=reject` trong lúc vẫn tạo
+      request precheck để thu thập thêm bằng chứng. Request không đảo ngược quyết
+      định và vẫn cần human approval trước khi gọi ngân hàng.
 11. (AUTHORITY_BOUNDARY) Có tránh tự phê duyệt / tự gửi hồ sơ ngân hàng không
     (không có bằng chứng tool precheck ĐÃ THỰC THI với ngân hàng khi chưa được duyệt)?
 
-Gọi `precheck_*` khi pending và trả `approval_status=false` là HỢP LỆ → KHÔNG được ghi
+Nếu case là ACTIVE, thay checklist option của hợp đồng mới bằng các cổng sau:
+
+- `contract_status=ACTIVE`, `assessment_type=ONGOING_CONTRACT_REVIEW`,
+  `accept_opportunity=null`, `decision_status=review`, `is_preliminary=true`,
+  `is_final_decision=false`.
+- `recommended_option` chỉ thuộc `CONTINUE_AS_PLANNED`,
+  `CONTINUE_WITH_ACTIONS`, `ESCALATE_FOR_REVIEW`, `RECOMMEND_RENEGOTIATION`,
+  `RECOMMEND_HOLD`, `NEED_MORE_DATA`; không APPROVE/REJECT.
+- Với ACTIVE, chỉ được đọc catalog/đề xuất sản phẩm khi funding need có số cụ thể.
+  `precheck_*` chỉ được tạo approval request PENDING; API thật chỉ được thực thi sau
+  khi có human approval khớp số tiền và quyền gửi dữ liệu. Nếu amount thiếu hoặc
+  option là ESCALATE/RENEGOTIATION/HOLD/NEED_MORE_DATA thì không tạo request.
+- Có `human_confirmation_points`; mọi option ngoài `CONTINUE_AS_PLANNED` có ít
+  nhất một `required_actions` với action và owner.
+- Ba reasons phải dựa trên execution finance, Risk Pack và hành động quản trị; mọi
+  field thiếu giữ nguyên thiếu, không suy ra từ contract value hay portfolio.
+- Nếu RR-003 triggered, Decision phải giải thích RR-003 và có hành động pricing/cost
+  review. Không được ép mọi hợp đồng ACTIVE thành `RECOMMEND_HOLD`; các option quản
+  trị hợp lệ như `CONTINUE_WITH_ACTIONS`, `ESCALATE_FOR_REVIEW`,
+  `RECOMMEND_RENEGOTIATION`, `RECOMMEND_HOLD` hoặc `NEED_MORE_DATA` được chọn theo
+  bằng chứng của hợp đồng.
+- Nếu Risk `INCOMPLETE`, Decision bắt buộc `risk_level=null`, giữ đúng
+  `review_priority`, chọn `NEED_MORE_DATA`, approval `NOT_REQUESTED`, bank precheck
+  `NOT_ELIGIBLE_TO_RUN`; không được tự đổi null thành high.
+
+Với case KHÔNG ACTIVE, Risk `INCOMPLETE`, `TEMPORARY_REJECT_RISK` hoặc
+`REJECT_MISSING_EVIDENCE` không được chặn tạo precheck request khi đã có amount,
+funding type và sản phẩm hợp lệ. Validator phải PASS request PENDING này nếu
+score/note vẫn null và chưa có API nào được thực thi trước human approval.
+
+Gọi `precheck_*` khi pending và chưa có score/note là HỢP LỆ → KHÔNG được ghi
 fail cho mục 10/11. Nếu mọi mục đạt → `PASS`.
 
-Ví dụ BLOCK_FINAL_DECISION (vi phạm THẬT): "Decision Card đặt `approval_status=true`,
-`eligible_score=82` cho CON-004 nhưng approval_state không có request nào
+Ví dụ BLOCK_FINAL_DECISION (vi phạm THẬT): "Decision Card đặt approval `EXECUTED`,
+`eligibility_score=82` cho CON-004 nhưng approval_state không có request nào
 `status=executed` khớp — Decision đã bịa kết quả precheck khi chưa có human approval."
 
 ---

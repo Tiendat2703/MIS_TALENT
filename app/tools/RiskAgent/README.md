@@ -115,14 +115,17 @@ Các metric được mask gồm `closing_cash`, `projected_closing_cash`,
 
 ### `_evaluate_finance_rule(rule, finance_pack)`
 
-Đánh giá một `RiskRule` trên một `FinanceFeaturePack` và trả về
-`RuleEvaluation`. Kết quả có một trong ba trạng thái:
+Đánh giá một `RiskRule` theo scope trên một `FinanceFeaturePack` và trả về
+`RuleEvaluation`. Applicability luôn được kiểm tra trước metric:
 
 | Trạng thái | Điều kiện |
 | --- | --- |
 | `TRIGGERED` | Dữ liệu đầy đủ và điều kiện của rule đúng |
 | `NOT_TRIGGERED` | Dữ liệu đầy đủ nhưng điều kiện của rule sai |
-| `INSUFFICIENT_EVIDENCE` | Không parse được rule, thiếu metric hoặc hai giá trị không thể so sánh |
+| `NOT_APPLICABLE` | Rule chưa áp dụng cho object/bước hiện tại |
+| `INSUFFICIENT_EVIDENCE` | Rule áp dụng nhưng thiếu dữ liệu nghiệp vụ |
+| `RULE_CONFIGURATION_ERROR` | Condition hoặc source mapping không hợp lệ |
+| `RULE_INACTIVE` | Rule master thật cấu hình không hoạt động |
 
 Thiếu dữ liệu không được xem là `NOT_TRIGGERED`. Tên các field còn thiếu được
 ghi vào `missing_fields`.
@@ -144,21 +147,17 @@ Ghép các alert hiện có với hợp đồng và những rule đã `TRIGGERED
 
 ### `_requires_human_approval(evaluation)`
 
-Trả `True` khi rule đang `TRIGGERED` và thỏa ít nhất một điều kiện:
-
-- severity là `HIGH` hoặc `CRITICAL`;
-- `required_action` chứa `approval`, `founder` hoặc `human`.
+Trả `True` khi rule đang `TRIGGERED` và `required_action` chứa `approval`,
+`founder` hoặc `human`. Severity cao tự nó không tạo approval.
 
 ### `build_risk_pack_impl(finance_pack)`
 
 Đây là implementation chính:
 
-1. Đọc toàn bộ rule đang hoạt động bằng `get_risk_rules_impl()`; `RR-005` bị loại
-   theo policy vì quy mô số tiền không phải lý do từ chối.
-2. Gọi `_evaluate_finance_rule()` cho từng rule.
-3. Chọn `overall_risk_level` cao nhất theo thứ tự
-   `LOW < MEDIUM < HIGH < CRITICAL`.
-4. Tạo `triggered_rule_ids`.
+1. Đọc toàn bộ rule bằng `get_risk_rules_impl()`; không hard-disable RR-005.
+2. Gọi `_evaluate_finance_rule()` theo scope; RR-001 có CONTRACT và PORTFOLIO.
+3. Giữ `overall_risk_level=null`; tính highest severity riêng theo hai scope.
+4. Tạo union `triggered_rule_ids` và hai danh sách triggered theo scope.
 5. Gom và loại bỏ action trùng lặp trong `required_actions`.
 6. Gom dữ liệu thiếu theo dạng `<rule_id>:<field>`.
 7. Ghép alert bằng `_match_finance_pack_alerts()`.
@@ -247,9 +246,9 @@ Acknowledgement trả về gồm:
 Kết quả bao gồm:
 
 - `case_id`, `contract_id` và `generated_at`;
-- `overall_risk_level`;
+- `overall_risk_level=null` cùng highest severity riêng CONTRACT/PORTFOLIO;
 - kết quả đánh giá của toàn bộ rule đang hoạt động;
-- `triggered_rule_ids`;
+- `triggered_rule_ids` cùng danh sách triggered riêng theo scope;
 - các alert đã ghép và mask;
 - `required_actions`;
 - `insufficient_evidence`;

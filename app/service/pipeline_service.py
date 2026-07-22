@@ -102,6 +102,7 @@ async def start_pipeline_run(
 async def start_validated_pipeline_run(
     *,
     contract: dict[str, Any] | str | None = None,
+    existing_contract_id: str | None = None,
     scenario: str | None = None,
     reference_date: str | date | None = None,
     submission: dict[str, Any] | None = None,
@@ -120,6 +121,7 @@ async def start_validated_pipeline_run(
     async def _runner() -> Any:
         return await run_validated_pipeline(
             contract,
+            existing_contract_id=existing_contract_id,
             session_id=session_id,
             reference_date=reference,
             scenario=scenario,
@@ -130,7 +132,12 @@ async def start_validated_pipeline_run(
     _RUNS[session_id] = task
     task.add_done_callback(lambda finished: _on_run_done(session_id, finished))
 
-    return {"session_id": session_id, "status": "running", "gated": True}
+    return {
+        "session_id": session_id,
+        "status": "running",
+        "gated": True,
+        "contract_id": existing_contract_id,
+    }
 
 
 def _on_run_done(session_id: int, task: asyncio.Task) -> None:
@@ -342,6 +349,8 @@ def _summarize_context(
     rows: list[dict[str, Any]] = []
     for finance in finance_packs:
         contract_id = finance.get("contract_id")
+        finance_details = finance.get("finance_details") or {}
+        execution_finance = finance_details.get("execution_finance") or {}
         funding_need = _resolved_summary_funding(finance, credit_profiles)
         risk = risk_by.get(contract_id)
         decision = decision_by.get(contract_id)
@@ -357,6 +366,12 @@ def _summarize_context(
                 "stage": "decision" if decision else ("risk" if risk else "finance"),
                 "generated_at": finance.get("generated_at"),
                 "finance": {
+                    "contract_lifecycle": finance_details.get("contract_lifecycle"),
+                    "assessment_type": finance_details.get("assessment_type"),
+                    "finance_status": (
+                        finance_details.get("finance_status")
+                        or execution_finance.get("finance_status")
+                    ),
                     "contract_name": finance.get("contract_name"),
                     "start_date": finance.get("start_date"),
                     "end_date": finance.get("end_date"),
@@ -373,7 +388,13 @@ def _summarize_context(
                         funding_need.get("credit_case_id") if funding_need else None
                     ),
                     "contract_value": finance.get("contract_value"),
-                    "gross_margin": finance.get("gross_margin"),
+                    "gross_margin": (
+                        finance.get("gross_margin")
+                        if finance.get("gross_margin") is not None
+                        else (
+                            finance_details.get("contract_economics") or {}
+                        ).get("expected_gross_margin_rate")
+                    ),
                     "confidence_score": finance.get("confidence_score"),
                     "status": finance.get("status"),
                     "additional_funding_need": cash_impact.get("additional_funding_need"),
@@ -382,7 +403,14 @@ def _summarize_context(
                 "risk": (
                     {
                         "overall_risk_level": risk.get("overall_risk_level"),
-                        "human_approval_required": risk.get("human_approval_required"),
+                        "risk_assessment_status": risk.get("risk_assessment_status"),
+                        "review_priority": risk.get("review_priority"),
+                        "triggered_rule_approval_required": risk.get(
+                            "triggered_rule_approval_required", False
+                        ),
+                        "manual_evidence_review_required": risk.get(
+                            "manual_evidence_review_required", False
+                        ),
                         "triggered_rule_ids": risk.get("triggered_rule_ids", []),
                         "total_rules_triggered": risk_summary.get(
                             "total_rules_triggered",
@@ -403,7 +431,8 @@ def _summarize_context(
                         ),
                         "human_review_required": risk_summary.get(
                             "human_review_required",
-                            risk.get("human_approval_required", False),
+                            risk.get("manual_evidence_review_required", False)
+                            or risk.get("triggered_rule_approval_required", False),
                         ),
                         "total_rules_evaluated": len(risk_evaluations),
                         "not_triggered_count": sum(
@@ -440,6 +469,10 @@ def _summarize_context(
                         "decision_status": decision.get("decision_status"),
                         "accept_opportunity": decision.get("accept_opportunity"),
                         "risk_level": decision.get("risk_level"),
+                        "risk_assessment_status": decision.get(
+                            "risk_assessment_status"
+                        ),
+                        "review_priority": decision.get("review_priority"),
                         "capital_need": decision.get("capital_need"),
                         "funding_need_type": decision.get("funding_need_type"),
                         "selected_bank_product_id": decision.get(
@@ -451,10 +484,34 @@ def _summarize_context(
                         "requires_founder_confirmation": decision.get(
                             "requires_founder_confirmation"
                         ),
-                        "approval_status": decision.get("approval_status"),
-                        "eligible_score": decision.get("eligible_score"),
+                        "human_confirmation_status": decision.get(
+                            "human_confirmation_status"
+                        ),
+                        "external_api_submission_approval_status": decision.get(
+                            "external_api_submission_approval_status"
+                        ) or (
+                            "EXECUTED"
+                            if decision.get("approval_status")
+                            else "NOT_REQUESTED"
+                        ),
+                        "bank_precheck_status": decision.get("bank_precheck_status")
+                        or (
+                            "COMPLETED"
+                            if decision.get("approval_status")
+                            else "NOT_ELIGIBLE_TO_RUN"
+                        ),
+                        "eligibility_score": decision.get("eligibility_score")
+                        if decision.get("eligibility_score") is not None
+                        else decision.get("eligible_score"),
                         "precheck_note": decision.get("precheck_note"),
                         "is_preliminary": decision.get("is_preliminary"),
+                        "contract_status": decision.get("contract_status"),
+                        "assessment_type": decision.get("assessment_type"),
+                        "required_actions": decision.get("required_actions", []),
+                        "human_confirmation_points": decision.get(
+                            "human_confirmation_points", []
+                        ),
+                        "is_final_decision": decision.get("is_final_decision", False),
                     }
                     if decision
                     else None
@@ -531,7 +588,11 @@ def _dashboard_metrics(contracts: list[dict[str, Any]]) -> dict[str, int | float
         risk = contract.get("risk") or {}
 
         decision_status = str(decision.get("decision_status") or "").lower()
-        if not decision.get("approval_status") and decision_status != "reject":
+        external_status = str(
+            decision.get("external_api_submission_approval_status")
+            or ("EXECUTED" if decision.get("approval_status") else "NOT_REQUESTED")
+        ).upper()
+        if external_status != "EXECUTED" and decision_status != "reject":
             awaiting += 1
 
         risk_level = str(

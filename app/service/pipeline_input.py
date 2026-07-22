@@ -56,8 +56,11 @@ def merge_contract_package(
 def select_pipeline_scope(
     base_data: dict[str, Any],
     uploaded_contract: ContractUploadPackage | None = None,
+    existing_contract_id: str | None = None,
 ) -> tuple[dict[str, Any], list[str], str]:
-    """Resolve the two supported entry modes without consulting the LLM."""
+    """Resolve batch, upload, or one existing-contract mode deterministically."""
+    if uploaded_contract is not None and existing_contract_id is not None:
+        raise ValueError("Choose either an uploaded contract or an existing contract_id")
     if uploaded_contract is not None:
         return (
             merge_contract_package(base_data, uploaded_contract),
@@ -74,6 +77,13 @@ def select_pipeline_scope(
         raise ValueError("The normal data source contains no contracts")
     if len(contract_ids) != len(set(contract_ids)):
         raise ValueError("The normal data source contains duplicate contract_id values")
+    if existing_contract_id is not None:
+        normalized_id = existing_contract_id.strip()
+        if normalized_id not in contract_ids:
+            raise LookupError(
+                f"Existing contract was not found in the database: {normalized_id}"
+            )
+        return base_data, [normalized_id], "existing_contract"
     return base_data, contract_ids, "automatic_batch"
 
 

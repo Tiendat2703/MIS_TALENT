@@ -33,11 +33,15 @@ from app.schema.decisionAgent import DecisionBatchOutput, DecisionCardOutput
 from app.schema.handoff_packs import PipelineHandoff, StrictModel
 from app.schema.pipeline_input import ContractUploadPackage
 from app.service.decision_guard import (
+    apply_finance_approval_policy,
+    apply_authoritative_precheck_state,
+    apply_mandatory_risk_policy,
     validate_decision_finance_consistency,
     validate_decision_prechecks,
     validate_decision_risk_policy,
 )
 from app.service.credit_profile import load_contract_credit_profiles
+from app.service.finance_handoff import normalize_contract_lifecycle
 from app.service.precheck_approval import ensure_precheck_approval_requests
 from app.service.pipeline_input import load_contract_package, select_pipeline_scope
 from app.tools.FinanceAgent.data_request import apply_form_submission
@@ -192,11 +196,26 @@ async def run_pipeline(
         data,
         upload,
     )
+    contracts_by_id = {
+        str(item.get("contract_id")): item
+        for item in data.get("contracts", [])
+        if item.get("contract_id") is not None
+    }
+    contract_lifecycles = {
+        contract_id: normalize_contract_lifecycle(
+            contracts_by_id.get(contract_id, {}).get("status")
+        )
+        for contract_id in contract_ids
+    }
+    contract_lifecycle = (
+        contract_lifecycles[contract_ids[0]] if len(contract_ids) == 1 else None
+    )
 
     request = {
         "session_id": session_id,
         "mode": mode,
         "contract_ids": contract_ids,
+        "contract_lifecycles": contract_lifecycles,
         "instruction": (
             "Run Finance once for the complete contract batch, persist a "
             "FinanceBatchPack, hand off to Risk by this session_id, then hand "
@@ -210,6 +229,8 @@ async def run_pipeline(
         run_id=session_id,
         contract_id=contract_ids[0] if len(contract_ids) == 1 else None,
         contract_ids=contract_ids,
+        contract_lifecycle=contract_lifecycle,
+        contract_lifecycles=contract_lifecycles,
         reference_date=reference_date.isoformat() if reference_date else None,
     )
 
@@ -220,6 +241,8 @@ async def run_pipeline(
         metadata={
             "mode": mode,
             "contract_ids": contract_ids,
+            "contract_lifecycle": contract_lifecycle,
+            "contract_lifecycles": contract_lifecycles,
             "uploaded_contract_id": (
                 upload.contract_id if upload is not None else None
             ),
@@ -273,31 +296,43 @@ async def run_pipeline(
             load_contract_credit_profiles,
             authoritative_context.finance_pack.contract_ids,
         )
-        validate_decision_finance_consistency(
-            result.final_output,
-            authoritative_context.finance_pack,
-            credit_profiles,
-        )
         if authoritative_context.risk_pack is None:
             raise ValueError(
                 f"RiskBatchPack is missing for session_id={session_id}"
             )
-        validate_decision_risk_policy(
+        decision_output = apply_finance_approval_policy(
             result.final_output,
+            authoritative_context.finance_pack,
+        )
+        decision_output = apply_mandatory_risk_policy(
+            decision_output,
+            authoritative_context.risk_pack,
+        )
+        validate_decision_finance_consistency(
+            decision_output,
+            authoritative_context.finance_pack,
+            credit_profiles,
+        )
+        validate_decision_risk_policy(
+            decision_output,
             authoritative_context.risk_pack,
         )
         # Register every actionable precheck deterministically. The external bank
         # call is still blocked until a human approves the exact stored arguments.
         await ensure_precheck_approval_requests(
             session_id,
-            result.final_output,
+            decision_output,
             authoritative_context.finance_pack,
             credit_profiles,
         )
         state_before_commit = await get_approval_state(session_id)
-        validate_decision_prechecks(result.final_output, state_before_commit)
-        await asyncio.to_thread(save_decision_pack, session_id, result.final_output)
-        decision_json = result.final_output.model_dump(mode="json")
+        decision_output = apply_authoritative_precheck_state(
+            decision_output,
+            state_before_commit,
+        )
+        validate_decision_prechecks(decision_output, state_before_commit)
+        await asyncio.to_thread(save_decision_pack, session_id, decision_output)
+        decision_json = decision_output.model_dump(mode="json")
         state = await commit_initial_result(
             session_id,
             decision_json,
@@ -332,7 +367,7 @@ async def run_pipeline(
         record = await asyncio.to_thread(load_pipeline_context, session_id)
         return PipelineRunResult(
             session_id=session_id,
-            decisions=result.final_output.decisions,
+            decisions=decision_output.decisions,
             pending_approvals=pending,
             context=record,
         )

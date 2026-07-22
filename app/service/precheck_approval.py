@@ -17,12 +17,20 @@ from app.schema.decisionAgent import DecisionBatchOutput, RecommendedOption
 from app.schema.handoff_packs import FinanceBatchPack
 from app.schema.risk_db_models import CreditProfile
 from app.service.credit_profile import resolve_contract_funding_need
+from app.service.finance_handoff import normalize_contract_lifecycle
 
 
-_NON_ACTIONABLE_OPTIONS = {
+_RISK_BLOCKING_OPTIONS = {
     RecommendedOption.TEMPORARY_REJECT_RISK,
     RecommendedOption.REJECT_MISSING_EVIDENCE,
+}
+
+_NON_ACTIONABLE_OPTIONS = {
     RecommendedOption.NO_SUITABLE_PRODUCT,
+    RecommendedOption.ESCALATE_FOR_REVIEW,
+    RecommendedOption.RECOMMEND_RENEGOTIATION,
+    RecommendedOption.RECOMMEND_HOLD,
+    RecommendedOption.NEED_MORE_DATA,
 }
 
 
@@ -39,9 +47,23 @@ def build_precheck_approval_specs(
 
     for finance in finance_batch.packs:
         decision = decisions_by_contract.get(finance.contract_id)
-        if decision is None or decision.recommended_option in _NON_ACTIONABLE_OPTIONS:
+        if decision is None:
             continue
-
+        is_active_contract = (
+            normalize_contract_lifecycle(decision.contract_status) == "ACTIVE"
+        )
+        if decision.recommended_option in _NON_ACTIONABLE_OPTIONS:
+            continue
+        # Risk remains visible in the Decision Card, but for a contract that is
+        # not ACTIVE it is advisory for bank-precheck collection. A complete,
+        # human-gated request may proceed even when Risk is INCOMPLETE or gives a
+        # temporary/missing-evidence rejection. ACTIVE contracts retain the
+        # stricter ongoing-contract gate.
+        if is_active_contract and (
+            decision.risk_assessment_status == "INCOMPLETE"
+            or decision.recommended_option in _RISK_BLOCKING_OPTIONS
+        ):
+            continue
         funding_need = resolve_contract_funding_need(
             finance,
             credit_profiles.get(finance.contract_id),

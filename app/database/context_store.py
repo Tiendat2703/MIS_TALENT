@@ -280,6 +280,12 @@ def decision_input_payload(session_id: int) -> dict[str, Any]:
 
     def build_case(pack: FinanceFeaturePack) -> dict[str, Any]:
         details = pack.finance_details or {}
+        contract_lifecycle = str(details.get("contract_lifecycle") or "UNKNOWN")
+        assessment_type = str(
+            details.get("financial_assessment_type")
+            or details.get("assessment_type")
+            or "NEW_CONTRACT_REVIEW"
+        )
         finance_payload = pack.model_dump(mode="json")
         # Decision receives the explicitly scoped replacement below.  Removing
         # the legacy aggregate prevents its generic ``revenue`` field from being
@@ -292,17 +298,23 @@ def decision_input_payload(session_id: int) -> dict[str, Any]:
             profile,
         )
         return {
+            "contract_lifecycle": contract_lifecycle,
+            "assessment_type": assessment_type,
             "finance": finance_payload,
             "risk": risk_by_contract[pack.contract_id].model_dump(mode="json"),
             "credit_profile": credit_profile_payload(profile),
             "contract_financials": {
                 "contract_value": pack.contract_value,
-                "expected_gross_margin_rate": pack.gross_margin,
+                "expected_gross_margin_rate": (
+                    details.get("contract_economics") or {}
+                ).get("expected_gross_margin_rate"),
                 "expected_gross_margin_amount": (
                     details.get("contract_economics") or {}
                 ).get("expected_gross_margin_amount"),
                 "order_allocation": details.get("order_allocation"),
             },
+            "execution_finance": details.get("execution_finance"),
+            "portfolio_context": details.get("portfolio_context"),
             "funding_need": funding_need,
             "product_search": {
                 "requested_amount": (
@@ -320,6 +332,19 @@ def decision_input_payload(session_id: int) -> dict[str, Any]:
                 "Finance owns requested_amount; Decision must not change it",
                 "Decision chooses the banking form and product from product_search.payment_terms and requested_amount",
                 "funding_need.amount_status=MISSING means bank precheck must not run",
+                *(
+                    [
+                        "ACTIVE means an ongoing-contract review, not a new acceptance decision",
+                        "execution_finance contains only current contract-scoped database facts and deterministic calculations",
+                        "portfolio_context is company-level context and must not be attributed to this contract",
+                        "missing or unavailable execution metrics must stay missing; do not estimate them",
+                        "the review may recommend actions but must not update source business records or make a final decision",
+                        "an ACTIVE review may propose a bank product and create a pending precheck request only when requested_amount is authoritative and concrete",
+                        "an ACTIVE review must never execute a bank API before human confirmation of the amount and data-sharing permission",
+                    ]
+                    if contract_lifecycle == "ACTIVE"
+                    else []
+                ),
             ],
         }
 

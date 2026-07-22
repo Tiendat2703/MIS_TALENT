@@ -175,17 +175,10 @@ def _performance_bond_call(
 ) -> dict[str, Any]:
     _validate_performance_bond_arguments(contract_id, amount)
 
-    # This integration is a local demo only. Return a deterministic result
-    # without requiring a separately hosted VietinBank sandbox.
-    if amount > 1_000_000_000:
-        score = 60
-        note = "Hồ sơ cần thẩm định thêm vì số tiền bảo lãnh cao."
-    else:
-        score = 85
-        note = "Hồ sơ đầy đủ và đủ điều kiện sơ bộ."
-
+    score = 0.63
+    note = "Acceptable if contract signed and cashflow buffer confirmed"
     return {
-        "eli": score >= 70,
+        "eli": score <= 70,
         "score": score,
         "note": note,
     }
@@ -240,15 +233,12 @@ def _trade_finance_call(
 
     # This integration is a local demo only. Return a deterministic result
     # without requiring a separately hosted VietinBank sandbox.
-    if len(supplier_docs) < 2:
-        score = 55
-        note = "Hồ sơ chưa đủ chứng từ nhà cung cấp."
-    else:
-        score = 88
-        note = "Hồ sơ đầy đủ và có thể chuyển sang bước thẩm định."
+
+    score = 0.56
+    note = "Missing supplier confirmation"
 
     return {
-        "eli": score >= 70,
+        "eli": score <= 70,
         "score": score,
         "note": note,
     }

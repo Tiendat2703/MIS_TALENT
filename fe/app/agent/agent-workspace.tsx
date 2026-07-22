@@ -14,11 +14,13 @@ import {
   CircleAlert,
   CirclePause,
   Clock3,
+  Database,
   ListChecks,
   LoaderCircle,
   Play,
   Scale,
   ShieldCheck,
+  Wrench,
 } from "lucide-react";
 
 type AgentId = "Finance" | "Risk" | "Decision" | "Validator";
@@ -26,6 +28,15 @@ type AgentStatus = "Idle" | "Working" | "Waiting" | "Done" | "Review" | "Error";
 type ConnectionStatus = "idle" | "starting" | "connected" | "reconnecting" | "review" | "completed" | "error";
 type LogFilter = "All" | AgentId;
 type LogStatus = "Started" | "Working" | "Completed" | "Review" | "Error" | "Cancelled" | "Handoff" | "Update";
+type DataSourceKind = "supabase_table" | "runtime_log" | "runtime_store";
+type DataAccess = "read" | "write" | "read_write";
+
+type ToolDataSource = {
+  label: string;
+  name: string;
+  kind: DataSourceKind;
+  access: DataAccess;
+};
 
 type PipelineEvent = {
   run_id?: string;
@@ -38,6 +49,7 @@ type PipelineEvent = {
   task?: string;
   status?: string;
   summary?: string;
+  data_sources?: ToolDataSource[];
 };
 
 type AgentRuntimeState = {
@@ -57,6 +69,8 @@ type ActivityItem = {
   endSeq?: number;
   type: string;
   events: PipelineEvent[];
+  toolName?: string;
+  dataSources: ToolDataSource[];
 };
 
 const AGENT_IDS: AgentId[] = ["Finance", "Risk", "Decision", "Validator"];
@@ -93,15 +107,22 @@ const agents = {
 } as const;
 
 const TOOL_LABELS: Record<string, string> = {
+  load_service_catalog: "Đọc danh mục sản phẩm và dịch vụ",
   load_and_validate: "Kiểm tra và chuẩn hóa dữ liệu đầu vào",
   reconcile_bank: "Đối soát hóa đơn với giao dịch ngân hàng",
   liquidity_funding: "Phân tích thanh khoản và nhu cầu vốn",
   classify_invoice: "Phân loại trạng thái hóa đơn",
   margin_analysis: "Phân tích biên lợi nhuận",
   missing_data: "Xác định dữ liệu tài chính còn thiếu",
+  prepare_finance_handoff: "Lưu Finance Pack vào workflow context",
+  process_risk_context: "Đánh giá quy tắc và lưu Risk Pack",
+  build_risk_pack: "Xây dựng Risk Pack",
+  save_risk_pack: "Lưu Risk Pack vào workflow context",
+  load_decision_context: "Nạp Finance, Risk và hồ sơ tín dụng",
   list_bank_products: "Đọc danh mục dịch vụ ngân hàng",
   precheck_performance_bond: "Kiểm tra điều kiện bảo lãnh thực hiện",
   precheck_trade_finance: "Kiểm tra điều kiện tài trợ thương mại",
+  precheck_micro_credit: "Kiểm tra điều kiện vốn lưu động",
   load_validation_evidence: "Thu thập bằng chứng kiểm soát chất lượng",
 };
 
@@ -217,6 +238,20 @@ function toolEventKey(event: PipelineEvent, agentId: AgentId | null): string {
   return `${event.run_id || "run"}:${agentId || "pipeline"}:${tool}`;
 }
 
+function mergeDataSources(
+  current: ToolDataSource[],
+  incoming?: ToolDataSource[],
+): ToolDataSource[] {
+  if (!incoming?.length) return current;
+  const merged = new Map(
+    current.map((source) => [`${source.kind}:${source.name}:${source.access}`, source]),
+  );
+  for (const source of incoming) {
+    merged.set(`${source.kind}:${source.name}:${source.access}`, source);
+  }
+  return Array.from(merged.values());
+}
+
 function buildActivityItems(events: PipelineEvent[]): ActivityItem[] {
   const ordered = [...events].reverse();
   const items: ActivityItem[] = [];
@@ -237,6 +272,8 @@ function buildActivityItems(events: PipelineEvent[]): ActivityItem[] {
         startSeq: event.seq,
         type: event.type,
         events: [event],
+        toolName: event.tool_name,
+        dataSources: event.data_sources || [],
       };
       items.push(item);
       openTools.set(toolEventKey(event, agentId), item);
@@ -252,6 +289,8 @@ function buildActivityItems(events: PipelineEvent[]): ActivityItem[] {
         openItem.finishedAt = event.ts;
         openItem.endSeq = event.seq;
         openItem.events.push(event);
+        openItem.toolName = event.tool_name || openItem.toolName;
+        openItem.dataSources = mergeDataSources(openItem.dataSources, event.data_sources);
         openTools.delete(key);
         continue;
       }
@@ -299,6 +338,8 @@ function buildActivityItems(events: PipelineEvent[]): ActivityItem[] {
       endSeq: event.seq,
       type: event.type,
       events: [event],
+      toolName: event.tool_name,
+      dataSources: event.data_sources || [],
     });
   }
 
@@ -461,6 +502,51 @@ function ActivityRow({ item }: { item: ActivityItem }) {
           </div>
 
           <p className="mt-2 max-w-[75ch] text-xs leading-5 text-zinc-400 sm:text-sm">{item.description}</p>
+
+          {item.toolName && (
+            <div className="mt-3 space-y-2 rounded-lg border border-white/[0.07] bg-black/25 px-3 py-2.5">
+              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                <span className="flex items-center gap-1.5 font-medium uppercase tracking-[0.12em] text-zinc-600">
+                  <Wrench className="size-3" strokeWidth={1.8} />
+                  Tool
+                </span>
+                <code className="rounded-md border border-sky-400/20 bg-sky-400/[0.07] px-2 py-1 font-mono text-[10px] text-sky-200">
+                  {item.toolName}
+                </code>
+              </div>
+
+              <div className="flex items-start gap-2 text-[11px]">
+                <span className="mt-1 flex shrink-0 items-center gap-1.5 font-medium uppercase tracking-[0.12em] text-zinc-600">
+                  <Database className="size-3" strokeWidth={1.8} />
+                  Nguồn
+                </span>
+                {item.dataSources.length > 0 ? (
+                  <div className="flex min-w-0 flex-wrap gap-1.5">
+                    {item.dataSources.map((source) => {
+                      const isTable = source.kind === "supabase_table";
+                      const accessLabel = source.access === "read"
+                        ? "đọc"
+                        : source.access === "write"
+                          ? "ghi"
+                          : "đọc/ghi";
+                      return (
+                        <span
+                          key={`${source.kind}:${source.name}:${source.access}`}
+                          className={`rounded-md border px-2 py-1 font-mono text-[10px] ${isTable ? "border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-200" : "border-violet-400/20 bg-violet-400/[0.07] text-violet-200"}`}
+                          title={`${isTable ? "Bảng Supabase" : "Nguồn nội bộ"}: ${source.name} · ${accessLabel}`}
+                        >
+                          {source.label}
+                          <span className="opacity-50"> · {source.name}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <span className="mt-0.5 text-[11px] text-zinc-600">Không khai báo bảng dữ liệu</span>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
             <span className="flex items-center gap-1.5 font-mono text-[10px] tabular-nums text-zinc-600">

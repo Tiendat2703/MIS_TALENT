@@ -8,35 +8,113 @@ from agents import function_tool
 
 from app.database.repository import query_db
 from app.schema.risk_db_models import (
+    BankTransaction,
     DataClassRule,
     MaskingExample,
+    OrderRecord,
     RiskRule,
 )
-from app.schema.handoff_packs import RiskAlert
+from app.schema.handoff_packs import FinanceFeaturePack, RiskAlert
 from app.tools.RiskAgent._helpers import parse_severity, require_rows
 from app.tools.RiskAgent._masking import mask_alert, mask_example
 
 
-# Business policy: a large requested amount by itself is not a risk rule and
-# must not block or reject an otherwise eligible contract. Keep the database row
-# for audit/history, but exclude it from every active runtime rule set.
-DISABLED_RISK_RULE_IDS = frozenset({"RR-005"})
+# Compatibility export only. Rule activity must come from governed rule-master
+# data, not a hard-coded application blacklist. The current table has no
+# ``active`` column, so all seven rows are evaluated for applicability.
+DISABLED_RISK_RULE_IDS: frozenset[str] = frozenset()
 
 
 def get_risk_rules_impl() -> list[RiskRule]:
     rows = query_db(
         """
-        SELECT rule_id, risk_type, trigger_condition, severity,
-               required_action, owner_agent
+        SELECT *
         FROM risk_rule
         ORDER BY rule_id
         """
     )
     return [
-        RiskRule(**{**row, "severity": parse_severity(row["severity"])})
+        RiskRule(
+            rule_id=row["rule_id"],
+            risk_type=row["risk_type"],
+            trigger_condition=row["trigger_condition"],
+            severity=parse_severity(row["severity"]),
+            required_action=row["required_action"],
+            owner_agent=row["owner_agent"],
+            confidence_score=row.get("confidence_score"),
+        )
         for row in require_rows(rows, "risk_rule")
-        if str(row.get("rule_id")) not in DISABLED_RISK_RULE_IDS
     ]
+
+
+def get_contract_bank_transactions_impl(
+    finance_pack: FinanceFeaturePack,
+) -> list[BankTransaction]:
+    """Read only bank transactions traceable to this contract handoff.
+
+    Transactions are linked by an explicit source id or by an invoice id in the
+    transaction description. Unrelated high-risk transactions must never leak
+    into a contract assessment.
+    """
+    rows = query_db(
+        """
+        SELECT txn_id, txn_date, bank, account_id, direction, description,
+               amount, counterparty_id, txn_status, transaction_risk_score
+        FROM bank_txn
+        ORDER BY txn_date, txn_id
+        """
+    ) or []
+    source_ids = {str(item) for item in finance_pack.source_record_ids}
+    invoice_ids = {item for item in source_ids if item.upper().startswith("INV-")}
+    matched: list[BankTransaction] = []
+    for row in rows:
+        txn_id = str(row.get("txn_id") or "")
+        description = str(row.get("description") or "").casefold()
+        linked_by_invoice = any(
+            invoice_id.casefold() in description for invoice_id in invoice_ids
+        )
+        if txn_id in source_ids or linked_by_invoice:
+            matched.append(BankTransaction(**row))
+    return matched
+
+
+def get_portfolio_bank_transactions_impl() -> list[BankTransaction]:
+    """Read portfolio transactions without attributing them to a contract."""
+    rows = query_db(
+        """
+        SELECT txn_id, txn_date, bank, account_id, direction, description,
+               amount, counterparty_id, txn_status, transaction_risk_score
+        FROM bank_txn
+        ORDER BY txn_date, txn_id
+        """
+    ) or []
+    return [BankTransaction(**row) for row in rows]
+
+
+def get_contract_orders_impl(contract_id: str) -> list[OrderRecord]:
+    """Read the authoritative order/progress rows for one contract."""
+    rows = query_db(
+        """
+        SELECT order_id, contract_id, customer_id, order_date, due_date, status,
+               service_id, order_revenue, estimated_cost, delivery_note
+        FROM orders
+        WHERE contract_id = %s
+        ORDER BY order_id
+        """,
+        (contract_id,),
+    ) or []
+    return [OrderRecord(**row) for row in rows]
+
+
+def load_risk_source_evidence_impl(
+    finance_pack: FinanceFeaturePack,
+) -> dict[str, list[BankTransaction] | list[OrderRecord]]:
+    """Load contract and portfolio evidence with explicit scope boundaries."""
+    return {
+        "bank_transactions": get_contract_bank_transactions_impl(finance_pack),
+        "portfolio_bank_transactions": get_portfolio_bank_transactions_impl(),
+        "orders": get_contract_orders_impl(finance_pack.contract_id),
+    }
 
 
 def get_alerts_impl() -> list[RiskAlert]:
@@ -90,7 +168,7 @@ def get_masking_examples_impl() -> list[MaskingExample]:
 
 @function_tool
 def get_risk_rules() -> list[RiskRule]:
-    """Read all active organizer-provided RR rules from PostgreSQL."""
+    """Read all organizer-provided RR rules from the governed rule master."""
     return get_risk_rules_impl()
 
 

@@ -23,6 +23,7 @@ class RiskRule(StrictModel):
     severity: Severity
     required_action: str
     owner_agent: str
+    confidence_score: float | None = Field(default=None, ge=0, le=1)
 
 
 class BankTransaction(StrictModel):

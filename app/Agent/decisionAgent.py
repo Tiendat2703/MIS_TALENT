@@ -25,7 +25,10 @@ from app.Agent.state_store import (
     initialize_approval_state,
 )
 from app.schema.decisionAgent import DecisionBatchOutput
-from app.service.decision_guard import validate_decision_prechecks
+from app.service.decision_guard import (
+    apply_authoritative_precheck_state,
+    validate_decision_prechecks,
+)
 from app.tools.DecisionAgent.GetBankProduct import list_bank_products
 from app.tools.DecisionAgent.PrecheckAPI import (
     precheck_micro_credit,
@@ -133,8 +136,12 @@ async def run_decision_agent(
             )
 
         state_before_commit = await get_approval_state(session_id)
-        validate_decision_prechecks(result.final_output, state_before_commit)
-        decision_result = result.final_output.model_dump(mode="json")
+        decision_output = apply_authoritative_precheck_state(
+            result.final_output,
+            state_before_commit,
+        )
+        validate_decision_prechecks(decision_output, state_before_commit)
+        decision_result = decision_output.model_dump(mode="json")
         state = await commit_initial_result(
             session_id,
             decision_result,

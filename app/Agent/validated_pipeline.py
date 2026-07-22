@@ -42,6 +42,7 @@ from app.schema.decisionAgent import DecisionCardOutput
 from app.schema.handoff_packs import StrictModel
 from app.schema.pipeline_input import ContractUploadPackage
 from app.schema.validatorAgent import ChallengeTicket, Stage, ValidationReport
+from app.service.finance_handoff import normalize_contract_lifecycle
 from app.service.pipeline_input import load_contract_package, select_pipeline_scope
 from app.tools.FinanceAgent.data_request import apply_form_submission
 from app.tools.FinanceAgent.finance_data import load_all
@@ -156,7 +157,16 @@ async def _run_decision_stage(
     from app.Agent.decisionAgent import build_decision_agent
     from app.Agent.state_store import commit_initial_result, get_approval_state
     from app.schema.decisionAgent import DecisionBatchOutput
-    from app.service.decision_guard import validate_decision_prechecks
+    from app.service.decision_guard import (
+        apply_finance_approval_policy,
+        apply_authoritative_precheck_state,
+        apply_mandatory_risk_policy,
+        validate_decision_finance_consistency,
+        validate_decision_prechecks,
+        validate_decision_risk_policy,
+    )
+    from app.service.credit_profile import load_contract_credit_profiles
+    from app.service.precheck_approval import ensure_precheck_approval_requests
 
     decision_input = json.dumps(
         {
@@ -185,10 +195,44 @@ async def _run_decision_stage(
             f"expected={contract_ids}, returned={returned_ids}"
         )
 
+    authoritative_context = await asyncio.to_thread(load_pipeline_context, session_id)
+    if authoritative_context.risk_pack is None:
+        raise ValueError(f"RiskBatchPack is missing for session_id={session_id}")
+    decision_output = apply_finance_approval_policy(
+        result.final_output,
+        authoritative_context.finance_pack,
+    )
+    decision_output = apply_mandatory_risk_policy(
+        decision_output,
+        authoritative_context.risk_pack,
+    )
+    credit_profiles = await asyncio.to_thread(
+        load_contract_credit_profiles,
+        authoritative_context.finance_pack.contract_ids,
+    )
+    validate_decision_finance_consistency(
+        decision_output,
+        authoritative_context.finance_pack,
+        credit_profiles,
+    )
+    validate_decision_risk_policy(
+        decision_output,
+        authoritative_context.risk_pack,
+    )
+    await ensure_precheck_approval_requests(
+        session_id,
+        decision_output,
+        authoritative_context.finance_pack,
+        credit_profiles,
+    )
     state_before = await get_approval_state(session_id)
-    validate_decision_prechecks(result.final_output, state_before)
-    await asyncio.to_thread(save_decision_pack, session_id, result.final_output)
-    decision_json = result.final_output.model_dump(mode="json")
+    decision_output = apply_authoritative_precheck_state(
+        decision_output,
+        state_before,
+    )
+    validate_decision_prechecks(decision_output, state_before)
+    await asyncio.to_thread(save_decision_pack, session_id, decision_output)
+    decision_json = decision_output.model_dump(mode="json")
     await commit_initial_result(
         session_id, decision_json, result.to_input_list(mode="normalized")
     )
@@ -202,12 +246,13 @@ async def _run_decision_stage(
             "data": decision_json,
         },
     )
-    return result.final_output
+    return decision_output
 
 
 async def run_validated_pipeline(
     contract: ContractUploadPackage | dict[str, Any] | str | Path | None = None,
     *,
+    existing_contract_id: str | None = None,
     session_id: int | None = None,
     reference_date: date | None = None,
     scenario: str | None = None,
@@ -229,11 +274,30 @@ async def run_validated_pipeline(
 
     data = await asyncio.to_thread(load_all)
     data, contract_ids, mode = await asyncio.to_thread(
-        select_pipeline_scope, data, upload
+        select_pipeline_scope, data, upload, existing_contract_id
+    )
+    contracts_by_id = {
+        str(item.get("contract_id")): item
+        for item in data.get("contracts", [])
+        if item.get("contract_id") is not None
+    }
+    contract_lifecycles = {
+        contract_id: normalize_contract_lifecycle(
+            contracts_by_id.get(contract_id, {}).get("status")
+        )
+        for contract_id in contract_ids
+    }
+    contract_lifecycle = (
+        contract_lifecycles[contract_ids[0]] if len(contract_ids) == 1 else None
     )
 
     user_input = json.dumps(
-        {"session_id": session_id, "mode": mode, "contract_ids": contract_ids},
+        {
+            "session_id": session_id,
+            "mode": mode,
+            "contract_ids": contract_ids,
+            "contract_lifecycles": contract_lifecycles,
+        },
         ensure_ascii=False,
     )
     context = AppContext(
@@ -242,6 +306,8 @@ async def run_validated_pipeline(
         run_id=session_id,
         contract_id=contract_ids[0] if len(contract_ids) == 1 else None,
         contract_ids=contract_ids,
+        contract_lifecycle=contract_lifecycle,
+        contract_lifecycles=contract_lifecycles,
         reference_date=reference_date.isoformat() if reference_date else None,
         scenario=scenario,
     )
@@ -249,7 +315,13 @@ async def run_validated_pipeline(
         session_id,
         context,
         user_input,
-        metadata={"mode": mode, "contract_ids": contract_ids, "gated": True},
+        metadata={
+            "mode": mode,
+            "contract_ids": contract_ids,
+            "contract_lifecycle": contract_lifecycle,
+            "contract_lifecycles": contract_lifecycles,
+            "gated": True,
+        },
     )
     if submission:
         apply_form_submission(data, submission)
@@ -263,7 +335,13 @@ async def run_validated_pipeline(
             "agent": "Finance_Agent",
             "task": "Gated pipeline: Finance → Validate → Risk → Validate → Decision",
             "status": "running",
-            "data": {"session_id": session_id, "mode": mode, "contract_ids": contract_ids},
+            "data": {
+                "session_id": session_id,
+                "mode": mode,
+                "contract_ids": contract_ids,
+                "contract_lifecycle": contract_lifecycle,
+                "contract_lifecycles": contract_lifecycles,
+            },
         },
     )
 

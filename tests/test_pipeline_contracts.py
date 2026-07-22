@@ -28,6 +28,7 @@ from app.schema.handoff_packs import (
     FinanceFeaturePack,
     RiskBatchPack,
     RiskPack,
+    Severity,
 )
 from app.schema.pipeline_input import ContractUploadPackage
 from app.schema.bank_product import BankProduct
@@ -35,6 +36,7 @@ from app.schema.risk_db_models import CreditProfile
 from app.service.finance_handoff import (
     build_finance_handoff,
     infer_funding_need_type,
+    normalize_contract_lifecycle,
     resolve_funding_term_amount,
     resolve_performance_bond_amount,
 )
@@ -46,6 +48,8 @@ from app.service.credit_profile import (
     resolve_contract_funding_need,
 )
 from app.service.decision_guard import (
+    apply_finance_approval_policy,
+    apply_authoritative_precheck_state,
     apply_mandatory_risk_policy,
     validate_decision_finance_consistency,
     validate_decision_prechecks,
@@ -57,7 +61,10 @@ from app.service.pipeline_input import (
     select_pipeline_scope,
 )
 from app.service.pipeline_service import _effective_funding_need_type
-from app.service.precheck_approval import build_precheck_approval_specs
+from app.service.precheck_approval import (
+    build_precheck_approval_specs,
+    ensure_precheck_approval_requests,
+)
 from app.tools import writeLogs
 from app.tools.DecisionAgent.GetBankProduct import serialize_bank_product
 from app.tools.DecisionAgent.PrecheckAPI import (
@@ -326,6 +333,7 @@ def _decision_batch() -> DecisionBatchOutput:
                 protective_condition="Human review is required.",
                 capital_need=420_000_000,
                 risk_level="medium",
+                review_priority="MEDIUM",
                 decision_status="review",
                 reasons=["Finance reason", "Risk reason", "Product reason"],
             )
@@ -333,7 +341,50 @@ def _decision_batch() -> DecisionBatchOutput:
     )
 
 
+def _active_decision_batch(
+    recommended_option: str = "CONTINUE_WITH_ACTIONS",
+) -> DecisionBatchOutput:
+    return DecisionBatchOutput.model_validate({
+        "decisions": [{
+            "contract_id": "CON-004",
+            "accept_opportunity": None,
+            "recommended_option": recommended_option,
+            "protective_condition": "Chỉ tiếp tục sau khi người phụ trách xác nhận.",
+            "capital_need": None,
+            "risk_level": "medium",
+            "review_priority": "MEDIUM",
+            "decision_status": "review",
+            "reasons": [
+                "Tình hình tài chính thực hiện dựa trên dữ liệu hiện có.",
+                "Rủi ro và evidence được giữ nguyên từ Risk Pack.",
+                "Hành động quản trị cần người có thẩm quyền xác nhận.",
+            ],
+            "requires_founder_confirmation": True,
+            "approval_status": False,
+            "is_preliminary": True,
+            "contract_status": "ACTIVE",
+            "assessment_type": "ONGOING_CONTRACT_REVIEW",
+            "required_actions": [{
+                "action": "Theo dõi khoản phải thu đang mở.",
+                "owner": "Contract Owner",
+            }],
+            "human_confirmation_points": [
+                "Xác nhận phương án tiếp tục thực hiện hợp đồng."
+            ],
+            "is_final_decision": False,
+        }],
+    })
+
+
 def _risk_batch(*triggered_rule_ids: str) -> RiskBatchPack:
+    active_rule_ids = [
+        rule_id for rule_id in triggered_rule_ids if rule_id != "RR-005"
+    ]
+    overall = (
+        "HIGH"
+        if any(rule_id != "RR-003" for rule_id in active_rule_ids)
+        else ("MEDIUM" if active_rule_ids else None)
+    )
     return RiskBatchPack.model_validate(
         {
             "contract_ids": ["CON-004"],
@@ -342,11 +393,16 @@ def _risk_batch(*triggered_rule_ids: str) -> RiskBatchPack:
                     "case_id": "CASE-CON-004",
                     "contract_id": "CON-004",
                     "generated_at": datetime.now(UTC),
-                    "overall_risk_level": "HIGH",
+                    "overall_risk_level": overall,
+                    "review_priority": overall or "LOW",
                     "rule_evaluations": [
                         {
                             "rule_id": rule_id,
-                            "status": "TRIGGERED",
+                            "status": (
+                                "RULE_INACTIVE"
+                                if rule_id == "RR-005"
+                                else "TRIGGERED"
+                            ),
                             "owner_agent": "Risk & Compliance Agent",
                             "severity": (
                                 "MEDIUM" if rule_id == "RR-003" else "HIGH"
@@ -356,9 +412,9 @@ def _risk_batch(*triggered_rule_ids: str) -> RiskBatchPack:
                         }
                         for rule_id in triggered_rule_ids
                     ],
-                    "triggered_rule_ids": list(triggered_rule_ids),
+                    "triggered_rule_ids": active_rule_ids,
                     "required_actions": ["Review before acceptance"],
-                    "human_approval_required": True,
+                    "human_approval_required": bool(active_rule_ids),
                     "handoff_summary": "Risk policy test pack.",
                     "decision_made_by_risk_agent": False,
                 }
@@ -419,8 +475,8 @@ def test_approval_continuation_cannot_override_rr003_rejection() -> None:
     assert decision.accept_opportunity is False
     assert decision.recommended_option.value == "TEMPORARY_REJECT_RISK"
     assert decision.decision_status.value == "reject"
-    assert decision.approval_status is True
-    assert decision.eligible_score == 85
+    assert decision.external_api_submission_approval_status == "EXECUTED"
+    assert decision.eligibility_score == 85
     assert "rr-003" in " ".join([
         decision.protective_condition,
         *decision.reasons,
@@ -429,28 +485,415 @@ def test_approval_continuation_cannot_override_rr003_rejection() -> None:
 
 
 def test_large_amount_alone_does_not_force_temporary_rejection() -> None:
-    validate_decision_risk_policy(_decision_batch(), _risk_batch("RR-005"))
+    risk_batch = _risk_batch("RR-005")
+    corrected = apply_mandatory_risk_policy(_decision_batch(), risk_batch)
+    validate_decision_risk_policy(corrected, risk_batch)
+    assert corrected.decisions[0].recommended_option.value == "APPROVE_WITH_CONDITION"
 
 
 def test_large_amount_with_another_nonblocking_risk_does_not_force_rejection() -> None:
     risk_batch = _risk_batch("RR-002", "RR-005")
-    decision = _decision_batch()
+    decision = apply_mandatory_risk_policy(_decision_batch(), risk_batch)
 
     validate_decision_risk_policy(decision, risk_batch)
-    assert apply_mandatory_risk_policy(
-        decision,
-        risk_batch,
-    ) == decision
+    assert decision.decisions[0].recommended_option.value == "APPROVE_WITH_CONDITION"
 
 
-def test_temporary_risk_rejection_does_not_create_precheck_request() -> None:
+def _incomplete_risk_batch() -> RiskBatchPack:
+    return RiskBatchPack.model_validate({
+        "contract_ids": ["CON-004"],
+        "packs": [{
+            "case_id": "CASE-CON-004",
+            "contract_id": "CON-004",
+            "generated_at": datetime.now(UTC),
+            "risk_assessment_status": "INCOMPLETE",
+            "overall_risk_level": None,
+            "review_priority": "HIGH",
+            "rule_evaluations": [{
+                "rule_id": "RR-001",
+                "status": "INSUFFICIENT_EVIDENCE",
+                "severity": "CRITICAL",
+                "missing_fields": ["related_transaction_risk_score"],
+                "message": "No linked 08_BANK_TXN score.",
+            }],
+            "triggered_rule_ids": [],
+            "manual_evidence_review_required": True,
+            "triggered_rule_approval_required": False,
+            "handoff_summary": "Risk assessment INCOMPLETE.",
+        }],
+    })
+
+
+def test_incomplete_active_risk_stays_null_and_blocks_bank_precheck() -> None:
+    risk_batch = _incomplete_risk_batch()
+    corrected = apply_mandatory_risk_policy(_active_decision_batch(), risk_batch)
+    decision = corrected.decisions[0]
+
+    assert decision.recommended_option.value == "NEED_MORE_DATA"
+    assert decision.risk_assessment_status == "INCOMPLETE"
+    assert decision.risk_level is None
+    assert decision.review_priority == Severity.HIGH
+    assert decision.human_confirmation_status == "PENDING"
+    assert decision.external_api_submission_approval_status == "NOT_REQUESTED"
+    assert decision.bank_precheck_status == "NOT_ELIGIBLE_TO_RUN"
+    assert decision.eligibility_score is None
+    validate_decision_risk_policy(corrected, risk_batch)
+    assert build_precheck_approval_specs(
+        corrected,
+        FinanceBatchPack(contract_ids=["CON-004"], packs=[_finance_pack()]),
+        {},
+    ) == []
+
+
+def test_incomplete_nonactive_risk_still_creates_precheck_request() -> None:
+    corrected = apply_mandatory_risk_policy(
+        _decision_batch(),
+        _incomplete_risk_batch(),
+    )
+
+    assert corrected.decisions[0].recommended_option.value == "REJECT_MISSING_EVIDENCE"
+    assert build_precheck_approval_specs(
+        corrected,
+        FinanceBatchPack(contract_ids=["CON-004"], packs=[_finance_pack()]),
+        {},
+    ) == [{
+        "contract_id": "CON-004",
+        "tool": "precheck_performance_bond",
+        "arguments": {
+            "contract_id": "CON-004",
+            "amount": 420_000_000.0,
+        },
+    }]
+
+
+def test_schema_allows_nonactive_incomplete_risk_pending_precheck() -> None:
+    payload = _decision_batch().model_dump(mode="json")
+    payload["decisions"][0].update({
+        "accept_opportunity": True,
+        "contract_status": "PENDING_EXPANSION",
+        "assessment_type": "NEW_CONTRACT_REVIEW",
+        "funding_need_type": "PERFORMANCE_BOND",
+        "selected_bank_product_id": "BANKPROD-002",
+        "selected_bank_product_name": "Performance bond",
+        "risk_assessment_status": "INCOMPLETE",
+        "risk_level": None,
+        "review_priority": "HIGH",
+        "external_api_submission_approval_status": "PENDING",
+        "bank_precheck_status": "ELIGIBLE_AWAITING_APPROVAL",
+        "eligibility_score": None,
+        "precheck_note": None,
+    })
+
+    decision = DecisionBatchOutput.model_validate(payload).decisions[0]
+
+    assert decision.external_api_submission_approval_status == "PENDING"
+    assert decision.bank_precheck_status == "ELIGIBLE_AWAITING_APPROVAL"
+
+
+def test_schema_allows_executed_precheck_while_nonactive_risk_is_incomplete() -> None:
+    payload = _decision_batch().model_dump(mode="json")
+    payload["decisions"][0].update({
+        "contract_status": "PENDING_EXPANSION",
+        "assessment_type": "NEW_CONTRACT_REVIEW",
+        "risk_assessment_status": "INCOMPLETE",
+        "risk_level": None,
+        "review_priority": "HIGH",
+        "external_api_submission_approval_status": "EXECUTED",
+        "bank_precheck_status": "COMPLETED",
+        "eligibility_score": 82,
+        "precheck_note": "Bank precheck completed after human approval.",
+    })
+
+    decision = DecisionBatchOutput.model_validate(payload).decisions[0]
+
+    assert decision.eligibility_score == 82
+    assert decision.precheck_note == "Bank precheck completed after human approval."
+
+
+def test_schema_still_blocks_incomplete_active_risk_precheck() -> None:
+    payload = _active_decision_batch().model_dump(mode="json")
+    payload["decisions"][0].update({
+        "risk_assessment_status": "INCOMPLETE",
+        "risk_level": None,
+        "review_priority": "HIGH",
+        "external_api_submission_approval_status": "PENDING",
+        "bank_precheck_status": "ELIGIBLE_AWAITING_APPROVAL",
+    })
+
+    with pytest.raises(
+        ValidationError,
+        match="Incomplete ACTIVE risk cannot request external API approval",
+    ):
+        DecisionBatchOutput.model_validate(payload)
+
+
+def test_continuation_restores_executed_state_after_incomplete_risk_policy() -> None:
+    approval_id = "approval-CON-004"
+    pending_state = {
+        "approval_requests": [{
+            "approval_id": approval_id,
+            "contract_id": "CON-004",
+            "status": "pending",
+            "result": None,
+        }],
+    }
+    batch_before = apply_authoritative_precheck_state(
+        apply_mandatory_risk_policy(
+            _decision_batch(),
+            _incomplete_risk_batch(),
+        ),
+        pending_state,
+    )
+    executed_result = {
+        "eligible_score": 85.0,
+        "precheck_note": "Hồ sơ đầy đủ và đủ điều kiện sơ bộ.",
+    }
+    executed_request = {
+        "approval_id": approval_id,
+        "contract_id": "CON-004",
+        "status": "executed",
+        "result": executed_result,
+    }
+    executed_state = {"approval_requests": [executed_request]}
+
+    reconciled = approval_service._reconcile_continuation_output(
+        _decision_batch(),
+        risk_batch=_incomplete_risk_batch(),
+        contract_id="CON-004",
+        approval_state=executed_state,
+    )
+    decision = reconciled.decisions[0]
+
+    assert decision.recommended_option.value == "REJECT_MISSING_EVIDENCE"
+    assert decision.risk_assessment_status == "INCOMPLETE"
+    assert decision.external_api_submission_approval_status == "EXECUTED"
+    assert decision.bank_precheck_status == "COMPLETED"
+    assert decision.eligibility_score == 85.0
+    assert decision.precheck_note == "Hồ sơ đầy đủ và đủ điều kiện sơ bộ."
+    approval_service._guard_continuation_result(
+        batch_before=batch_before.model_dump(mode="json"),
+        batch_after=reconciled.model_dump(mode="json"),
+        contract_id="CON-004",
+        approved=True,
+        approval_request=executed_request,
+        request_ids_before={approval_id},
+        request_ids_after={approval_id},
+    )
+
+
+@pytest.mark.asyncio
+async def test_incomplete_nonactive_risk_registers_pending_request(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(state_store, "PENDING_STATE_DIR", tmp_path)
+    run_id = 9_077
+    context = AppContext(
+        document_id="BATCH-9077",
+        original_input="{}",
+        run_id=run_id,
+        contract_id="CON-004",
+        contract_ids=["CON-004"],
+    )
+    await state_store.initialize_approval_state(run_id, context, "{}")
+
+    async def ignore_event(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "app.service.precheck_approval.event_bus.emit",
+        ignore_event,
+    )
+    corrected = apply_mandatory_risk_policy(
+        _decision_batch(),
+        _incomplete_risk_batch(),
+    )
+
+    requests = await ensure_precheck_approval_requests(
+        run_id,
+        corrected,
+        FinanceBatchPack(contract_ids=["CON-004"], packs=[_finance_pack()]),
+        {},
+    )
+
+    assert len(requests) == 1
+    assert requests[0]["status"] == "pending"
+    assert requests[0]["tool"] == "precheck_performance_bond"
+    assert requests[0]["arguments"] == {
+        "contract_id": "CON-004",
+        "amount": 420_000_000.0,
+    }
+
+
+def test_nonactive_temporary_risk_rejection_still_creates_precheck_request() -> None:
     decision = _temporary_risk_rejection("RR-003")
     finance_batch = FinanceBatchPack(
         contract_ids=["CON-004"],
         packs=[_finance_pack()],
     )
 
-    assert build_precheck_approval_specs(decision, finance_batch, {}) == []
+    assert build_precheck_approval_specs(decision, finance_batch, {}) == [{
+        "contract_id": "CON-004",
+        "tool": "precheck_performance_bond",
+        "arguments": {
+            "contract_id": "CON-004",
+            "amount": 420_000_000.0,
+        },
+    }]
+
+
+def test_pending_precheck_preserves_preliminary_nonactive_risk_rejection() -> None:
+    decision = _temporary_risk_rejection("RR-003")
+    approval_state = {
+        "approval_requests": [{
+            "contract_id": "CON-004",
+            "status": "pending",
+            "result": None,
+        }],
+    }
+
+    projected = apply_authoritative_precheck_state(decision, approval_state)
+    card = projected.decisions[0]
+
+    assert card.recommended_option.value == "TEMPORARY_REJECT_RISK"
+    assert card.decision_status.value == "reject"
+    assert card.external_api_submission_approval_status == "PENDING"
+    assert card.bank_precheck_status == "ELIGIBLE_AWAITING_APPROVAL"
+    validate_decision_prechecks(projected, approval_state)
+
+
+def test_active_contract_rejects_new_opportunity_decision_options() -> None:
+    payload = _active_decision_batch().model_dump(mode="json")
+    payload["decisions"][0]["recommended_option"] = "APPROVE_WITH_CONDITION"
+
+    with pytest.raises(
+        ValidationError,
+        match="ongoing-contract recommendation",
+    ):
+        DecisionBatchOutput.model_validate(payload)
+
+
+def test_active_contract_recommendation_is_always_human_review() -> None:
+    payload = _active_decision_batch().model_dump(mode="json")
+    payload["decisions"][0]["decision_status"] = "approve"
+
+    with pytest.raises(ValidationError, match="decision_status=review"):
+        DecisionBatchOutput.model_validate(payload)
+
+
+def test_active_rr003_preserves_management_option_and_adds_action() -> None:
+    corrected = apply_mandatory_risk_policy(
+        _active_decision_batch(),
+        _risk_batch("RR-003"),
+    )
+
+    decision = corrected.decisions[0]
+    assert decision.recommended_option.value == "CONTINUE_WITH_ACTIONS"
+    assert decision.decision_status.value == "review"
+    assert decision.accept_opportunity is None
+    assert decision.required_actions
+    assert any("rr-003" in item.action.casefold() for item in decision.required_actions)
+    assert decision.human_confirmation_points
+    assert "rr-003" in " ".join([
+        decision.protective_condition,
+        *decision.reasons,
+    ]).casefold()
+    validate_decision_risk_policy(corrected, _risk_batch("RR-003"))
+
+
+def test_decision_keeps_three_approval_flows_separate() -> None:
+    finance = _finance_pack().model_copy(update={
+        "contract_value": 980_000_000,
+        "finance_details": {
+            "contract_finance": {
+                "scope": "contract",
+                "contract_economics": {"contract_value": 980_000_000},
+            },
+            "governance_context": {
+                "scope": "company_policy",
+                "contract_final_action_approval_threshold": 300_000_000,
+            },
+        },
+    })
+    risk_payload = _risk_batch("RR-001").model_dump(mode="json")
+    risk_payload["packs"][0].update({
+        "contract_triggered_rule_ids": [],
+        "portfolio_triggered_rule_ids": ["RR-001"],
+        "portfolio_transaction_approval_required": True,
+        "portfolio_transaction_approval_object_ids": [
+            "TOK-TXN-006",
+            "TOK-TXN-007",
+        ],
+    })
+    risk_batch = RiskBatchPack.model_validate(risk_payload)
+
+    decision_batch = apply_finance_approval_policy(
+        _active_decision_batch(),
+        FinanceBatchPack(contract_ids=["CON-004"], packs=[finance]),
+    )
+    decision = apply_mandatory_risk_policy(
+        decision_batch,
+        risk_batch,
+    ).decisions[0]
+
+    assert decision.portfolio_transaction_approval.model_dump() == {
+        "required": True,
+        "source": "RR-001",
+        "status": "NOT_REQUESTED",
+        "object_ids": ["TOK-TXN-006", "TOK-TXN-007"],
+    }
+    assert decision.contract_final_action_approval.model_dump() == {
+        "required": True,
+        "source": "CONTRACT_VALUE_POLICY",
+        "status": "NOT_REQUESTED",
+        "object_ids": ["CON-004"],
+    }
+    assert decision.external_api_submission_approval.model_dump() == {
+        "required": False,
+        "source": None,
+        "status": "NOT_REQUIRED",
+        "object_ids": [],
+    }
+
+
+def test_active_review_with_concrete_funding_need_creates_pending_precheck_spec() -> None:
+    finance = _finance_pack().model_copy(update={
+        "finance_details": {
+            "contract_status": "Active",
+            "contract_lifecycle": "ACTIVE",
+            "assessment_type": "ONGOING_CONTRACT_REVIEW",
+            "payment_terms": "Performance bond 10%",
+            "funding_need": {"requested_amount_source": "contract"},
+        },
+    })
+    decision_payload = _active_decision_batch().model_dump(mode="json")
+    decision_payload["decisions"][0].update({
+        "capital_need": 420_000_000,
+        "funding_need_type": "PERFORMANCE_BOND",
+        "selected_bank_product_id": "BANKPROD-002",
+        "selected_bank_product_name": "Performance bond",
+    })
+
+    assert build_precheck_approval_specs(
+        DecisionBatchOutput.model_validate(decision_payload),
+        FinanceBatchPack(contract_ids=["CON-004"], packs=[finance]),
+        {},
+    ) == [{
+        "contract_id": "CON-004",
+        "tool": "precheck_performance_bond",
+        "arguments": {
+            "contract_id": "CON-004",
+            "amount": 420_000_000.0,
+        },
+    }]
+
+
+def test_active_hold_does_not_create_bank_precheck_request() -> None:
+    assert build_precheck_approval_specs(
+        _active_decision_batch("RECOMMEND_HOLD"),
+        FinanceBatchPack(contract_ids=["CON-004"], packs=[_finance_pack()]),
+        {},
+    ) == []
 
 
 def _finance_analysis() -> FinanceAnalysisPack:
@@ -614,7 +1057,7 @@ def test_contract_upload_rejects_package_wrapper() -> None:
         )
 
 
-def test_pipeline_scope_has_exactly_two_modes() -> None:
+def test_pipeline_scope_supports_batch_upload_and_existing_contract() -> None:
     base = {
         "contracts": [
             {"contract_id": "CON-001"},
@@ -649,6 +1092,20 @@ def test_pipeline_scope_has_exactly_two_modes() -> None:
         "CON-002",
         "CON-UPLOAD-001",
     ]
+
+    selected, contract_ids, mode = select_pipeline_scope(
+        base,
+        existing_contract_id="CON-002",
+    )
+    assert selected is base
+    assert contract_ids == ["CON-002"]
+    assert mode == "existing_contract"
+
+    with pytest.raises(LookupError, match="CON-404"):
+        select_pipeline_scope(base, existing_contract_id="CON-404")
+
+    with pytest.raises(ValueError, match="either"):
+        select_pipeline_scope(base, upload, "CON-001")
 
 
 def test_contract_upload_rejects_precomputed_risk_fields() -> None:
@@ -815,7 +1272,7 @@ def test_rich_finance_analysis_adapts_to_one_contract_case() -> None:
     assert handoff.funding_need_type is None
     assert handoff.gross_margin == 0.24
     assert handoff.contract_value == 4_200_000_000
-    assert handoff.requested_amount == 4_200_000_000
+    assert handoff.requested_amount is None
     assert handoff.transaction_risk_score is None
     assert handoff.source_record_ids == ["CON-004", "ORD-005", "INV-005"]
     assert handoff.finance_details["contract_margin"]["margin_pct"] == 0.24
@@ -834,7 +1291,151 @@ def test_rich_finance_analysis_adapts_to_one_contract_case() -> None:
     }
 
 
-def test_decision_context_uses_performance_bond_amount_not_portfolio_gap(
+def test_active_finance_review_uses_only_contract_scoped_execution_facts() -> None:
+    analysis = _finance_analysis().model_copy(update={
+        "invoice_classification": InvoiceClassification(
+            paid_total=45_000_000,
+            open_current_total=80_000_000,
+            overdue_total=120_000_000,
+            not_issued_total=300_000_000,
+            buckets={
+                "paid": [{"invoice_id": "INV-PAID", "amount": 45_000_000}],
+                "open_current": [{"invoice_id": "INV-OPEN", "amount": 80_000_000}],
+                "overdue": [{
+                    "invoice_id": "INV-LATE",
+                    "amount": 120_000_000,
+                    "days_overdue": 12,
+                }],
+                "not_issued": [{
+                    "invoice_id": "INV-DRAFT",
+                    "amount": 300_000_000,
+                }],
+            },
+        ),
+        "bank_reconciliation_summary": BankReconciliationSummary(
+            confirmed_cash_total=45_000_000,
+            matched=[{
+                "invoice_id": "INV-PAID",
+                "txn_id": "TXN-PAID",
+                "amount": 45_000_000,
+            }],
+        ),
+    })
+    source = {
+        "profile": {"company_id": "OPC-001"},
+        "contracts": [{
+            "contract_id": "CON-004",
+            "customer_id": "CUS-005",
+            "contract_value": 4_200_000_000,
+            "gross_margin": 0.25,
+            "payment_terms": "Monthly payment",
+            "status": "Active",
+        }],
+        "customers": [{"customer_id": "CUS-005"}],
+        "orders": [{"order_id": "ORD-005", "contract_id": "CON-004"}],
+        "invoices": [
+            {"invoice_id": invoice_id, "order_id": "ORD-005", "status": status}
+            for invoice_id, status in (
+                ("INV-PAID", "Paid"),
+                ("INV-OPEN", "Open"),
+                ("INV-LATE", "Open"),
+                ("INV-DRAFT", "Not issued"),
+            )
+        ],
+    }
+
+    handoff = build_finance_handoff("CON-004", analysis, source)
+    details = handoff.finance_details
+    execution = details["execution_finance"]
+
+    assert normalize_contract_lifecycle("Active") == "ACTIVE"
+    assert details["assessment_type"] == "ONGOING_CONTRACT_REVIEW"
+    assert details["financial_assessment_type"] == "ONGOING_CONTRACT_REVIEW"
+    assert details["finance_status"] == "ACTION_REQUIRED"
+    assert handoff.projected_closing_cash is None
+    assert handoff.cash_reserve_minimum is None
+    assert details["portfolio_context"] == {
+        "scope": "portfolio",
+        "lowest_liquidity_month": "2026-08",
+        "projected_closing_cash": -155_000_000.0,
+        "cash_reserve_minimum": 550_000_000.0,
+        "reserve_gap": 705_000_000.0,
+        "funding_need": 705_000_000.0,
+        "months_below_reserve": [],
+        "negative_cash_months": [],
+        "maximum_reserve_gap": 705_000_000.0,
+    }
+    assert details["contract_finance"]["scope"] == "contract"
+    assert "portfolio_context" not in details["contract_finance"]
+    assert details["contract_finance"]["execution_finance"] == execution
+    assert execution["invoice_totals"] == {
+        "invoice_count": 4,
+        "paid_invoice_total": 45_000_000.0,
+        "open_current_invoice_total": 80_000_000.0,
+        "overdue_invoice_total": 120_000_000.0,
+        "open_receivable_total": 200_000_000.0,
+        "not_issued_invoice_total": 300_000_000.0,
+        "max_days_overdue": 12,
+        "confirmed_collection_total": 45_000_000.0,
+        "matched_invoice_ids": ["INV-PAID"],
+        "matched_transaction_ids": ["TXN-PAID"],
+    }
+    assert "TXN-PAID" in handoff.source_record_ids
+    assert execution["finance_status"] == "ACTION_REQUIRED"
+    assert execution["invoiced_amount"] == 245_000_000
+    assert execution["collected_amount"] == 45_000_000
+    assert execution["open_receivable"] == 200_000_000
+    assert execution["overdue_receivable"] == 120_000_000
+    assert execution["remaining_estimated_cost"] is None
+    assert execution["current_margin_pct"] is None
+    assert execution["projected_funding_need"] is None
+    assert execution["unavailable_metrics"] == [
+        "actual_margin_rate",
+        "remaining_estimated_cost",
+    ]
+
+
+def test_active_finance_review_reflects_latest_cashflow_snapshot() -> None:
+    source = {
+        "profile": {"company_id": "OPC-001"},
+        "contracts": [{
+            "contract_id": "CON-004",
+            "contract_value": 4_200_000_000,
+            "gross_margin": 0.24,
+            "payment_terms": "Monthly payment",
+            "status": "Active",
+        }],
+        "customers": [],
+        "orders": [],
+        "invoices": [],
+    }
+    first = build_finance_handoff("CON-004", _finance_analysis(), source)
+    updated_analysis = _finance_analysis().model_copy(update={
+        "liquidity_brief": LiquidityBrief(
+            by_month=[LiquidityMonth(
+                month="2026-08",
+                projected_closing_cash=125_000_000,
+                cash_reserve_minimum=550_000_000,
+                reserve_gap=425_000_000,
+                net_operating_flow=-180_000_000,
+            )],
+            max_reserve_gap=425_000_000,
+            minimum_liquidity_need=425_000_000,
+            funding_need=425_000_000,
+        ),
+    })
+    second = build_finance_handoff("CON-004", updated_analysis, source)
+
+    assert first.finance_details["portfolio_context"]["projected_closing_cash"] == (
+        -155_000_000
+    )
+    assert second.finance_details["portfolio_context"]["projected_closing_cash"] == (
+        125_000_000
+    )
+    assert second.finance_details["portfolio_context"]["funding_need"] == 425_000_000
+
+
+def test_db_performance_bond_without_amount_does_not_fallback_to_contract_value(
     monkeypatch,
 ) -> None:
     handoff = build_finance_handoff(
@@ -848,6 +1449,7 @@ def test_decision_context_uses_performance_bond_amount_not_portfolio_gap(
                 "contract_value": 4_200_000_000,
                 "gross_margin": 0.24,
                 "payment_terms": "Performance bond required",
+                "status": "Active",
             }],
             "customers": [],
             "orders": [],
@@ -885,23 +1487,32 @@ def test_decision_context_uses_performance_bond_amount_not_portfolio_gap(
     payload = context_store.decision_input_payload(25)
     case = payload["cases"][0]
 
+    assert case["contract_lifecycle"] == "ACTIVE"
+    assert case["assessment_type"] == "ONGOING_CONTRACT_REVIEW"
+    assert case["execution_finance"]["scope"] == "contract"
+    assert case["portfolio_context"]["scope"] == "portfolio"
+    assert any(
+        "must stay missing" in rule
+        for rule in case["scope_rules"]
+    )
     assert payload["portfolio_finance"]["liquidity_brief"]["funding_need"] == 705_000_000
     reconciliation = payload["portfolio_finance"]["bank_reconciliation_summary"]
     assert reconciliation["confirmed_invoice_collections"] == 45_000_000
     assert "confirmed_cash_total" not in reconciliation
-    assert case["funding_need"] == {
-        "need_type": None,
-        "requested_amount": 4_200_000_000.0,
-        "tenor": None,
-        "payment_terms": "Performance bond required",
-        "basis": "finance.payment_terms_full_contract_fallback",
-        "scope": "contract",
-        "source": "finance_inference",
-        "credit_case_id": None,
-        "amount_status": "ESTIMATED",
+    assert handoff.requested_amount is None
+    assert handoff.finance_details["funding_need"] == {
+        "type": None,
+        "source": "decision_required",
+        "requested_amount_source": "missing",
+        "requested_amount_status": "MISSING",
+        "requested_amount_formula": None,
+        "requested_amount_percentage": None,
+        "requested_amount_term": None,
+        "performance_bond_percentage": None,
     }
+    assert case["funding_need"] is None
     assert case["product_search"] == {
-        "requested_amount": 4_200_000_000.0,
+        "requested_amount": None,
         "payment_terms": "Performance bond required",
         "tenor": None,
     }
@@ -909,6 +1520,54 @@ def test_decision_context_uses_performance_bond_amount_not_portfolio_gap(
     assert case["contract_financials"]["contract_value"] == 4_200_000_000
     assert "contract_margin" not in case["finance"]["finance_details"]
     assert "not a contract bond/credit amount" in payload["portfolio_scope_note"]
+
+
+def test_db_performance_bond_keeps_explicit_percentage() -> None:
+    source = {
+        "profile": {"company_id": "OPC-001"},
+        "contracts": [{
+            "contract_id": "CON-004",
+            "customer_id": "CUS-005",
+            "contract_value": 4_200_000_000,
+            "gross_margin": 0.24,
+            "payment_terms": "Performance bond 10%",
+        }],
+        "customers": [],
+        "orders": [],
+        "invoices": [],
+        "source": "database",
+    }
+
+    handoff = build_finance_handoff("CON-004", _finance_analysis(), source)
+
+    assert handoff.requested_amount == 420_000_000
+    assert handoff.finance_details["funding_need"]["requested_amount_source"] == (
+        "payment_terms_percentage"
+    )
+    assert handoff.finance_details["funding_need"]["performance_bond_percentage"] == 10.0
+
+
+def test_active_db_working_capital_without_amount_does_not_use_full_value() -> None:
+    handoff = build_finance_handoff(
+        "CON-004",
+        _finance_analysis(),
+        {
+            "profile": {"company_id": "OPC-001"},
+            "contracts": [{
+                "contract_id": "CON-004",
+                "contract_value": 4_200_000_000,
+                "payment_terms": "Working capital required",
+                "status": "Active",
+            }],
+            "customers": [],
+            "orders": [],
+            "invoices": [],
+            "source": "database",
+        },
+    )
+
+    assert handoff.requested_amount is None
+    assert handoff.finance_details["execution_finance"]["projected_funding_need"] is None
 
 
 def test_credit_profile_maps_only_an_explicit_contract_reference() -> None:
@@ -1124,6 +1783,32 @@ def test_decision_guard_uses_credit_profile_amount_as_authority() -> None:
     )
 
 
+def test_decision_guard_requires_active_lifecycle_card_for_active_finance() -> None:
+    finance = _finance_pack().model_copy(update={
+        "requested_amount": None,
+        "funding_need_type": None,
+        "finance_details": {
+            "contract_status": "Active",
+            "contract_lifecycle": "ACTIVE",
+            "assessment_type": "ONGOING_CONTRACT_REVIEW",
+            "payment_terms": "Monthly payment",
+        },
+    })
+    finance_batch = FinanceBatchPack(
+        contract_ids=["CON-004"],
+        packs=[finance],
+    )
+
+    with pytest.raises(ValueError, match="must be an ACTIVE"):
+        validate_decision_finance_consistency(_decision_batch(), finance_batch, {})
+
+    validate_decision_finance_consistency(
+        _active_decision_batch(),
+        finance_batch,
+        {},
+    )
+
+
 def test_trade_finance_with_empty_docs_still_creates_approval_spec() -> None:
     finance = _finance_pack().model_copy(
         update={
@@ -1335,6 +2020,27 @@ def test_decision_precheck_fields_are_guarded() -> None:
     payload["decisions"][0]["eligible_score"] = 85
     with pytest.raises(ValidationError, match="must be null"):
         DecisionBatchOutput.model_validate(payload)
+
+
+def test_pending_state_is_projected_into_decision_card() -> None:
+    projected = apply_authoritative_precheck_state(
+        _decision_batch(),
+        {"approval_requests": [{
+            "contract_id": "CON-004",
+            "status": "pending",
+        }]},
+    )
+    decision = projected.decisions[0]
+    assert decision.external_api_submission_approval_status == "PENDING"
+    assert decision.bank_precheck_status == "ELIGIBLE_AWAITING_APPROVAL"
+    assert decision.eligibility_score is None
+    validate_decision_prechecks(
+        projected,
+        {"approval_requests": [{
+            "contract_id": "CON-004",
+            "status": "pending",
+        }]},
+    )
 
 
 @pytest.mark.parametrize("legacy_field", ["risk_warnings", "missing_information"])

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from agents import Agent, RunContextWrapper
 from agents.lifecycle import AgentHooks
@@ -21,6 +21,8 @@ class AppContext:
     run_id: int
     contract_id: str | None = None
     contract_ids: list[str] = field(default_factory=list)
+    contract_lifecycle: str | None = None
+    contract_lifecycles: dict[str, str] = field(default_factory=dict)
     reference_date: str | None = None
     scenario: str | None = None
     finance_store: dict[str, Any] = field(default_factory=dict)
@@ -44,7 +46,157 @@ TOOL_LABELS = {
     "precheck_performance_bond": "Prepare performance-bond precheck",
     "precheck_trade_finance": "Prepare trade-finance precheck",
     "precheck_micro_credit": "Prepare working-capital precheck",
+    "load_service_catalog": "Read service catalog",
+    "load_and_validate": "Load and validate Finance data",
+    "reconcile_bank": "Reconcile invoices and bank transactions",
+    "liquidity_funding": "Analyze liquidity and funding need",
+    "classify_invoice": "Classify invoice status",
+    "margin_analysis": "Analyze contract and order margins",
+    "missing_data": "Identify missing Finance evidence",
+    "load_validation_evidence": "Load Validator evidence",
 }
+
+
+DataSourceKind = Literal[
+    "supabase_table",
+    "runtime_log",
+    "runtime_store",
+]
+DataAccess = Literal["read", "write", "read_write"]
+
+
+@dataclass(frozen=True)
+class ToolDataSource:
+    """One declared data dependency shown in realtime agent logs.
+
+    This registry describes the governed source used by a tool. It deliberately
+    distinguishes real Supabase tables (including ``public.context``) from
+    local runtime stores so the UI never presents a file as a database table.
+    """
+
+    label: str
+    name: str
+    kind: DataSourceKind = "supabase_table"
+    access: DataAccess = "read"
+
+    def as_event_payload(self) -> dict[str, str]:
+        return {
+            "label": self.label,
+            "name": self.name,
+            "kind": self.kind,
+            "access": self.access,
+        }
+
+
+def _table(label: str, name: str, access: DataAccess = "read") -> ToolDataSource:
+    return ToolDataSource(label=label, name=name, access=access)
+
+
+FINANCE_INPUT_SOURCES = (
+    _table("04_CONTRACTS", "contract"),
+    _table("06_ORDERS", "orders"),
+    _table("07_INVOICES", "invoice"),
+    _table("08_BANK_TXN", "bank_txn"),
+    _table("09_CASHFLOW", "cashflow"),
+    _table("02_OPC_PROFILE", "company"),
+    _table("03_CUSTOMERS", "customer"),
+    _table("05_PRODUCTS", "service"),
+)
+
+WORKFLOW_CONTEXT_READ = _table("CONTEXT", "context")
+WORKFLOW_CONTEXT_WRITE = _table("CONTEXT", "context", "write")
+WORKFLOW_CONTEXT_READ_WRITE = _table("CONTEXT", "context", "read_write")
+RUNTIME_LOG_SOURCE = ToolDataSource(
+    label="AGENT_RUNTIME_LOG",
+    name="logs/agent_runs/{run_id}.json",
+    kind="runtime_log",
+    access="read",
+)
+APPROVAL_STATE_SOURCE = ToolDataSource(
+    label="HITL_APPROVAL_STATE",
+    name="data/pending_states/{run_id}.json",
+    kind="runtime_store",
+    access="read_write",
+)
+
+
+TOOL_DATA_SOURCES: dict[str, tuple[ToolDataSource, ...]] = {
+    # Finance tools consume the immutable run snapshot preloaded from Supabase.
+    "load_service_catalog": (_table("05_PRODUCTS", "service"),),
+    "load_and_validate": FINANCE_INPUT_SOURCES,
+    "reconcile_bank": (
+        _table("07_INVOICES", "invoice"),
+        _table("08_BANK_TXN", "bank_txn"),
+    ),
+    "liquidity_funding": (
+        _table("09_CASHFLOW", "cashflow"),
+        _table("02_OPC_PROFILE", "company"),
+    ),
+    "classify_invoice": (_table("07_INVOICES", "invoice"),),
+    "margin_analysis": (
+        _table("06_ORDERS", "orders"),
+        _table("04_CONTRACTS", "contract"),
+        _table("02_OPC_PROFILE", "company"),
+        _table("05_PRODUCTS", "service"),
+    ),
+    "missing_data": (
+        _table("06_ORDERS", "orders"),
+        _table("07_INVOICES", "invoice"),
+        _table("08_BANK_TXN", "bank_txn"),
+    ),
+    "prepare_finance_handoff": (WORKFLOW_CONTEXT_WRITE,),
+    # Risk reads authoritative rule/evidence tables and persists its pack.
+    "process_risk_context": (
+        WORKFLOW_CONTEXT_READ_WRITE,
+        _table("13_RISK_RULES", "risk_rule"),
+        _table("14_ALERTS", "alert"),
+        _table("08_BANK_TXN", "bank_txn"),
+        _table("06_ORDERS", "orders"),
+        _table("15_DATA_CLASS", "data_class"),
+        _table("16_MASKING_EXAMPLES", "masking_example"),
+    ),
+    "build_risk_pack": (
+        _table("13_RISK_RULES", "risk_rule"),
+        _table("14_ALERTS", "alert"),
+        _table("08_BANK_TXN", "bank_txn"),
+        _table("06_ORDERS", "orders"),
+        _table("15_DATA_CLASS", "data_class"),
+        _table("16_MASKING_EXAMPLES", "masking_example"),
+    ),
+    "get_risk_rules": (_table("13_RISK_RULES", "risk_rule"),),
+    "get_alerts": (_table("14_ALERTS", "alert"),),
+    "get_data_classes": (_table("15_DATA_CLASS", "data_class"),),
+    "get_masking_examples": (
+        _table("16_MASKING_EXAMPLES", "masking_example"),
+    ),
+    "save_risk_pack": (WORKFLOW_CONTEXT_WRITE,),
+    # Decision uses persisted packs plus authoritative credit/product catalogs.
+    "load_decision_context": (
+        WORKFLOW_CONTEXT_READ,
+        _table("10_CREDIT_PROFILE", "credit_profile"),
+    ),
+    "list_bank_products": (_table("11_BANK_PRODUCTS", "bank_product"),),
+    # These tools use the local human-approval state and deterministic demo
+    # adapter; they do not read a Supabase table.
+    "precheck_performance_bond": (APPROVAL_STATE_SOURCE,),
+    "precheck_trade_finance": (APPROVAL_STATE_SOURCE,),
+    "precheck_micro_credit": (APPROVAL_STATE_SOURCE,),
+    # Validator reads the persisted pack plus the event-bus snapshot.
+    "load_validation_evidence": (
+        WORKFLOW_CONTEXT_READ,
+        RUNTIME_LOG_SOURCE,
+    ),
+}
+
+
+def get_tool_trace_metadata(tool_name: str) -> dict[str, list[dict[str, str]]]:
+    """Return a fresh JSON-safe source list for one tool event."""
+    return {
+        "data_sources": [
+            source.as_event_payload()
+            for source in TOOL_DATA_SOURCES.get(tool_name, ())
+        ]
+    }
 
 
 class CustomAgentHooks(AgentHooks):
@@ -96,6 +248,7 @@ class CustomAgentHooks(AgentHooks):
             "tool_name": tool_name,
             "task": TOOL_LABELS.get(tool_name, f"Run tool {tool_name}"),
             "status": "running",
+            **get_tool_trace_metadata(tool_name),
         })
 
     async def on_tool_end(
@@ -106,7 +259,7 @@ class CustomAgentHooks(AgentHooks):
         result: object,
     ) -> None:
         tool_name = tool.name
-        
+
         # ✅ Print đầu ra tool trực tiếp ra terminal
         print(f"\n{'='*60}")
         print(f"[TOOL OUTPUT] {tool_name}")
@@ -121,4 +274,5 @@ class CustomAgentHooks(AgentHooks):
             "task": TOOL_LABELS.get(tool_name, f"Tool {tool_name} completed"),
             "status": "done",
             "summary": str(result)[:500],
+            **get_tool_trace_metadata(tool_name),
         })

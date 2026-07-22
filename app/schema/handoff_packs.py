@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 
 class StrictModel(BaseModel):
@@ -110,15 +111,35 @@ class RiskFinding(StrictModel):
     human_approval_required: bool
 
 
+class ObservedMetric(StrictModel):
+    metric: str
+    value: str | int | float | bool | None = None
+
+
 class RuleEvaluation(StrictModel):
     rule_id: str
-    status: Literal["TRIGGERED", "NOT_TRIGGERED", "INSUFFICIENT_EVIDENCE"]
+    scope: Literal["CONTRACT", "PORTFOLIO"] = "CONTRACT"
+    status: Literal[
+        "TRIGGERED",
+        "NOT_TRIGGERED",
+        "INSUFFICIENT_EVIDENCE",
+        "NOT_APPLICABLE",
+        "RULE_CONFIGURATION_ERROR",
+        "RULE_INACTIVE",
+    ]
     owner_agent: str = ""
     severity: Severity | None = None
     observed_value: str | None = None
     required_action: str = ""
     findings: list[RiskFinding] = Field(default_factory=list)
     missing_fields: list[str] = Field(default_factory=list)
+    evidence_sources: list[str] = Field(default_factory=list)
+    evidence_paths: list[str] = Field(default_factory=list)
+    evidence_scope: str | None = None
+    evidence_record_ids: list[str] = Field(default_factory=list)
+    observed_metrics: list[ObservedMetric] = Field(default_factory=list)
+    comparison_operator: str | None = None
+    comparison_value: str | None = None
     message: str = ""
 
 
@@ -164,7 +185,11 @@ class RiskPackSummary(StrictModel):
     total_proposed_alerts: int
     unmapped_rule_ids: list[str] = Field(default_factory=list)
     highest_severity: Severity | None = None
+    highest_contract_triggered_severity: Severity | None = None
+    highest_portfolio_triggered_severity: Severity | None = None
     human_review_required: bool
+    triggered_rule_approval_required: bool = False
+    manual_evidence_review_required: bool = False
 
 
 class RiskPack(StrictModel):
@@ -173,14 +198,29 @@ class RiskPack(StrictModel):
     case_id: str
     contract_id: str
     generated_at: datetime
+    risk_assessment_status: Literal["COMPLETE", "INCOMPLETE"] = "COMPLETE"
     overall_risk_level: Severity | None = None
+    review_priority: Severity | None = None
     rule_evaluations: list[RuleEvaluation]
     triggered_rule_ids: list[str]
+    contract_triggered_rule_ids: list[str] = Field(default_factory=list)
+    portfolio_triggered_rule_ids: list[str] = Field(default_factory=list)
+    highest_contract_triggered_severity: Severity | None = None
+    highest_portfolio_triggered_severity: Severity | None = None
     alerts: list[RiskAlertMatch] = Field(default_factory=list)
     proposed_alerts: list[ProposedAlert] = Field(default_factory=list)
     required_actions: list[str] = Field(default_factory=list)
     insufficient_evidence: list[str] = Field(default_factory=list)
-    human_approval_required: bool
+    rule_configuration_error_ids: list[str] = Field(default_factory=list)
+    portfolio_transaction_approval_required: bool = False
+    portfolio_transaction_approval_object_ids: list[str] = Field(
+        default_factory=list
+    )
+    triggered_rule_approval_required: bool = False
+    manual_evidence_review_required: bool = False
+    # Compatibility-only input for historical context rows. New serialized
+    # packs use the two unambiguous fields above.
+    human_approval_required: SkipJsonSchema[bool] = Field(default=False, exclude=True)
     masked_data: MaskedDataSummary | None = None
     summary: RiskPackSummary | None = None
     handoff_summary: str
@@ -208,6 +248,7 @@ __all__ = [
     "FinanceBatchPack",
     "MaskedDataSummary",
     "MaskedField",
+    "ObservedMetric",
     "PipelineHandoff",
     "ProposedAlert",
     "RiskAlert",

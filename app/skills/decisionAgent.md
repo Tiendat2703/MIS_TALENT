@@ -10,6 +10,43 @@ mỗi `contract_id`, giữ nguyên thứ tự đầu vào; không được bỏ 
 Trong mỗi Decision Card, `contract_id` là một chuỗi đơn (ví dụ `"CON-004"`), không
 phải danh sách. Danh sách các kết quả chỉ nằm trong trường batch `decisions`.
 
+## Nhánh ưu tiên cho hợp đồng ACTIVE
+
+Nếu case có `contract_lifecycle=ACTIVE` và
+`assessment_type=ONGOING_CONTRACT_REVIEW`, đây là đánh giá một hợp đồng đang thực
+hiện, KHÔNG phải quyết định nhận/từ chối cơ hội mới. Nhánh này có ưu tiên cao hơn
+các hướng dẫn dành cho hợp đồng mới ở bên dưới:
+
+- Chỉ sử dụng dữ liệu hiện có trong `execution_finance`, Finance Pack, Risk Pack và
+  `portfolio_context`; không tự tạo actual cost, remaining cost, actual margin,
+  tiến độ hay penalty khi chúng không có trong input.
+- Dữ liệu được đọc lại từ Supabase ở đầu run là snapshot có thẩm quyền. Không đề
+  xuất sửa dữ liệu nguồn và không gọi tool ghi dữ liệu kinh doanh.
+- `portfolio_context` chỉ là bối cảnh toàn công ty; không được gán projected cash,
+  reserve gap hay funding need danh mục thành số của hợp đồng.
+- Đọc contract facts từ `contract_finance`; đọc `contract_triggered_rule_ids` và
+  `portfolio_triggered_rule_ids` riêng. Portfolio alert chỉ là bối cảnh OPC, không
+  được viết thành rủi ro đã xảy ra trên chính hợp đồng.
+- Chỉ được chọn một trong: `CONTINUE_AS_PLANNED`, `CONTINUE_WITH_ACTIONS`,
+  `ESCALATE_FOR_REVIEW`, `RECOMMEND_RENEGOTIATION`, `RECOMMEND_HOLD`,
+  `NEED_MORE_DATA`. Không dùng APPROVE/REJECT hoặc các option từ chối cơ hội mới.
+- Luôn đặt `contract_status=ACTIVE`,
+  `assessment_type=ONGOING_CONTRACT_REVIEW`, `decision_status=review`,
+  `accept_opportunity=null`,
+  `requires_founder_confirmation=true`, `is_preliminary=true`,
+  `is_final_decision=false`. Đây chỉ là khuyến nghị quản trị.
+- Chỉ khi `funding_need.requested_amount` có số cụ thể từ dữ liệu có thẩm quyền,
+  được phép đọc catalog và đề xuất sản phẩm. Có thể gọi `precheck_*` để hệ thống
+  tạo approval request PENDING; tool không được thực thi API ngân hàng thật cho
+  đến khi người dùng xác nhận đúng số tiền và quyền gửi dữ liệu. Nếu amount thiếu,
+  không đề xuất sản phẩm, không tạo request và không suy từ contract value.
+- Với mọi option ngoài `CONTINUE_AS_PLANNED`, phải tạo ít nhất một
+  `required_actions` gồm đúng `action` và `owner`. Luôn có ít nhất một chuỗi trong
+  `human_confirmation_points`.
+- Vẫn trả đúng ba `reasons`, nhưng lần lượt là: tình hình tài chính thực hiện; rủi
+  ro/evidence; và lý do của hành động quản trị đề xuất. Nếu có funding need cụ thể
+  và sản phẩm được đề xuất, lồng product fit vào lý do thứ ba; không tạo reason thứ tư.
+
 ## Công cụ có thể sử dụng
 
 - `list_bank_products()` — Đọc TOÀN BỘ catalog thật từ bảng `bank_product`, gồm tên
@@ -54,7 +91,9 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    thanh toán thông thường như monthly/milestone không tự động đồng nghĩa với nhu
    cầu vốn lưu động nếu không có ngôn ngữ tài trợ rõ ràng.
 
-2. **Đọc và tự chọn sản phẩm ngân hàng**: sau khi đọc context, PHẢI gọi
+2. **Đọc và tự chọn sản phẩm ngân hàng khi có funding need cụ thể**: sau khi đọc
+   context, nếu batch có ít nhất một case không ACTIVE hoặc một case ACTIVE có
+   `funding_need.requested_amount` cụ thể thì PHẢI gọi
    `list_bank_products()` đúng một lần cho TOÀN BỘ batch. Với từng case, chính bạn
    phải đọc `product_search.payment_terms` cùng `product_name`, `description` và
    `fit_note` của từng row để suy luận một trong các loại hình được schema hỗ trợ:
@@ -84,23 +123,37 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    tự suy diễn, không tạo lại trường `missing_information`, và không dừng toàn bộ
    batch để hỏi giữa chừng. Danh sách evidence gốc thuộc Finance Pack/Risk Pack.
 
-   **Policy tạm từ chối bắt buộc, áp dụng riêng từng hợp đồng trước khi pre-check:**
-   - Nếu `risk.triggered_rule_ids` chứa `RR-003` (áp lực biên lợi nhuận), PHẢI tạm
-     từ chối hợp đồng để review lại giá bán/chi phí.
-   - `RR-005` đã bị vô hiệu hóa: quy mô `requested_amount` lớn không phải lý do
-     từ chối, kể cả khi có rule khác. Chỉ đánh giá các rule khác theo chính nội
-     dung và policy của chúng.
+   **Policy RR-003 bắt buộc, áp dụng riêng từng hợp đồng trước khi pre-check:**
+   - Trước hết đọc `risk_assessment_status`. Nếu là `INCOMPLETE`, tuyệt đối không
+     biến `overall_risk_level=null` thành high/low. Chép đúng:
+     `risk_level=null`, `review_priority` từ Risk Pack và
+     `human_confirmation_status=PENDING`. Với ACTIVE chọn `NEED_MORE_DATA`, đặt
+     approval `NOT_REQUESTED`, bank precheck `NOT_ELIGIBLE_TO_RUN`; chưa được tạo
+     approval request cho đến khi Risk Assessment hoàn thành. Với case KHÔNG
+     ACTIVE, Risk `INCOMPLETE` chỉ là cảnh báo phải nêu trong Decision Card, KHÔNG
+     được dùng để chặn tạo pre-check request khi amount, loại hình và sản phẩm đã
+     đầy đủ. Trạng thái approval/precheck của case không ACTIVE phải phản ánh đúng
+     kết quả tool/StateStore (`PENDING` khi request đã được tạo), score/note vẫn null.
+   - Nếu `contract_triggered_rule_ids` chứa `RR-003`: với case không ACTIVE, PHẢI
+     tạm từ chối cơ hội để review lại giá bán/chi phí. Với case ACTIVE, RR-003 bắt
+     buộc tạo action rà soát pricing/cost nhưng KHÔNG tự động ép `RECOMMEND_HOLD`;
+     giữ management option phù hợp, ví dụ `NEED_MORE_DATA` khi còn thiếu bằng chứng
+     kinh doanh hoặc `CONTINUE_WITH_ACTIONS` khi đã đủ dữ liệu.
+   - RR-005 chỉ tạo approval gate cho hành động tài chính trên threshold; không tự
+     APPROVE/REJECT và không thay thế amount của Finance.
    - Khi tạm từ chối: đặt `accept_opportunity=false`,
      `recommended_option=TEMPORARY_REJECT_RISK`, `decision_status=reject`,
-     `is_preliminary=true`, `requires_founder_confirmation=true`; không gọi bất kỳ
-     pre-check tool nào và giữ `approval_status=false`, `eligible_score=null`,
-     `precheck_note=null`.
+     `is_preliminary=true`, `requires_founder_confirmation=true`. Với ACTIVE, không
+     tạo pre-check request. Với case KHÔNG ACTIVE, khuyến nghị rủi ro này KHÔNG
+     chặn việc tạo request để thu thập kết quả pre-check có cổng người duyệt; việc
+     tạo request không đồng nghĩa chấp thuận hợp đồng. Khi request pending, giữ
+     `eligibility_score=null`, `precheck_note=null`.
    - Lý do rủi ro và `protective_condition` phải nêu rõ ID rule gây tạm từ chối,
      dữ kiện kinh doanh tương ứng và hành động cần hoàn tất trước khi chạy lại hồ
      sơ. Đây là tạm từ chối có thể xem xét lại, không phải từ chối vĩnh viễn.
 
-4. **Chạy pre-check khi đã đủ thông tin và không thuộc policy tạm từ chối**: nếu đã
-   có đủ tham số bắt buộc và hợp đồng không bị tạm từ chối ở bước 3, chọn đúng tool
+4. **Tạo pre-check có cổng người duyệt khi đã đủ thông tin**: nếu đã có đủ tham số
+   bắt buộc, chọn đúng tool
    theo `funding_need_type` của sản phẩm Decision vừa chọn và gọi ngay (không cần
    chờ xác nhận bằng lời trong hội thoại —
    hệ thống sẽ tự động yêu cầu con người duyệt trước khi kết quả pre-check được thực
@@ -108,6 +161,11 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    - Bảo lãnh thực hiện hợp đồng → `precheck_performance_bond`
    - LC hoặc tài trợ thương mại → `precheck_trade_finance`
    - Vay vốn lưu động nhỏ → `precheck_micro_credit`
+
+   Với case KHÔNG ACTIVE, không trạng thái/kết luận nào của Risk được phép chặn
+   bước tạo request này; Risk vẫn được giữ nguyên trong reasons, protective
+   condition và quyết định sơ bộ. Với ACTIVE, tiếp tục áp dụng các cổng option/Risk
+   của nhánh ưu tiên ở trên.
 
    Khi đã có `requested_amount`, danh sách chứng từ/khoản phải thu rỗng (`[]`) vẫn
    là arguments thật và hợp lệ để tạo approval request. PHẢI gọi pre-check với
@@ -127,18 +185,25 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
    hàng", không được mô tả là "đang chờ người dùng duyệt/xác nhận pre-check".
 
    Pre-check tool tự kiểm tra StateStore:
-   - Nếu chưa được duyệt, tool chỉ ghi approval request và trả
-     `approval_status=false`, `eligible_score=null`, `precheck_note=null`; đây là kết
+   - Nếu chưa được duyệt, tool chỉ ghi approval request; Decision Card dùng
+     `external_api_submission_approval_status=PENDING`,
+     `bank_precheck_status=ELIGIBLE_AWAITING_APPROVAL`,
+     `eligibility_score=null`, `precheck_note=null`; đây là kết
      quả hợp lệ và bạn PHẢI tiếp tục hoàn tất toàn bộ Decision Card, không dừng run.
    - Nếu approval đã được duyệt, tool mới gọi API, trả score/note thật và cache kết
      quả. Không được tự tạo score/note khi tool đang pending hoặc rejected.
+   - Với ACTIVE, chỉ tạo request khi option là tiếp tục và có hành động tài chính
+     cần xác minh. Các option `ESCALATE_FOR_REVIEW`, `RECOMMEND_RENEGOTIATION`,
+     `RECOMMEND_HOLD`, `NEED_MORE_DATA` không tạo pre-check request mới.
 
 5. **Xuất kết quả theo đúng cấu trúc batch**, trong đó `decisions` chứa một Decision
    Card cho từng contract. Mỗi Decision Card gồm:
    - **Trạng thái quyết định** (`decision_status`): `approve`, `review`, hoặc `reject`.
-     Nếu pre-check cần thiết nhưng đang chờ duyệt thì dùng `review`.
-   - **Phương án đề xuất** (option): APPROVE / APPROVE_WITH_CONDITION /
-     TEMPORARY_REJECT_RISK / REJECT_MISSING_EVIDENCE / NO_SUITABLE_PRODUCT
+     Nếu pre-check cần thiết nhưng đang chờ duyệt thì dùng `review`. Case ACTIVE
+     luôn dùng `review` vì output chỉ là khuyến nghị quản trị cần người xác nhận.
+   - **Phương án đề xuất** (option): case không ACTIVE dùng APPROVE /
+     APPROVE_WITH_CONDITION / TEMPORARY_REJECT_RISK / REJECT_MISSING_EVIDENCE /
+     NO_SUITABLE_PRODUCT; case ACTIVE chỉ dùng sáu option trong nhánh ưu tiên.
    - **Ba lý do**, mỗi lý do phải là một LẬP LUẬN có kết luận, KHÔNG phải liệt kê số.
      Mỗi lý do bắt buộc kết thúc bằng mệnh đề nhân quả "→ do đó [ảnh hưởng tới quyết
      định nhận/không nhận CHÍNH hợp đồng này]". Khi trích số, phải ghi rõ số đó là
@@ -180,9 +245,11 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
           và `net_contract_margin`. Lập luận rõ hợp đồng tự phủ được bao nhiêu và còn
           hụt bao nhiêu phải bù bằng phương án tài chính. Con số phải lấy đúng từ
           `cash_impact`, không tự tính lại.
-     2. **Lý do rủi ro / hồ sơ** — từ `overall_risk_level`, rule triggered, alert và
-        evidence thiếu, kết luận vì sao chọn `review`/`reject` thay vì approve thẳng
-        cho hợp đồng này.
+     2. **Lý do rủi ro / hồ sơ** — từ contract/portfolio triggered rules, hai mức
+        highest scoped severity, alert và evidence thiếu. `overall_risk_level=null`
+        trong assessment COMPLETE nghĩa là không tổng hợp global level, không phải
+        thiếu dữ liệu. Kết luận vì sao chọn management option cho hợp đồng này mà
+        không gán portfolio anomaly thành sự kiện của hợp đồng.
      3. **Lý do product fit** — nêu row ngân hàng đã chọn và vì sao description,
         fit note, phân khúc, minimum amount, rate/phí và collateral phù hợp với hợp
         đồng; hoặc nêu rõ các row đã xem và điều kiện khiến không thể chọn. Nếu thiếu
@@ -194,14 +261,29 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
      tạo approval request thì mới được nói đang chờ người có thẩm quyền duyệt gọi
      ngân hàng. Luôn phải có trường này, dù phương án là gì.
 
+   Ba approval flow phải tách biệt, không dùng một boolean chung:
+   - `portfolio_transaction_approval`: chỉ phản ánh RR-001 PORTFOLIO và object IDs
+     giao dịch; không phải approval nhận/tiếp tục hợp đồng.
+   - `contract_final_action_approval`: lấy từ `governance_context`/contract value
+     policy; Founder duyệt hành động cuối, không có nhiệm vụ bổ sung amount.
+   - `external_api_submission_approval`: chỉ phản ánh StateStore của precheck ngân
+     hàng. Finance Lead/data owner chịu trách nhiệm xác định hoặc bổ sung amount.
+
    Decision Card CHỈ được chứa các trường sau:
    - `contract_id`, `accept_opportunity`, `recommended_option`;
    - `protective_condition`, `capital_need`, `funding_need_type`,
      `selected_bank_product_id`, `selected_bank_product_name`, `risk_level`,
+     `risk_assessment_status`, `review_priority`,
      `decision_status`;
    - `reasons` (đúng ba phần tài chính, rủi ro/hồ sơ, product fit);
-   - `eligible_score`, `precheck_note`, `requires_founder_confirmation`;
-   - `approval_status`, `is_preliminary`.
+   - `eligibility_score`, `precheck_note`, `requires_founder_confirmation`,
+     `human_confirmation_status`;
+   - `portfolio_transaction_approval`, `contract_final_action_approval`,
+     `external_api_submission_approval`;
+   - `external_api_submission_approval_status`, `bank_precheck_status`,
+     `is_preliminary`.
+   - `contract_status`, `assessment_type`, `required_actions`,
+     `human_confirmation_points`, `is_final_decision`.
 
    Không tạo `risk_warnings`, `missing_information` hoặc `handoff_summary`. Cảnh báo
    và evidence chi tiết được ứng dụng đọc trực tiếp từ Finance Pack/Risk Pack theo
@@ -210,18 +292,21 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
 
    Các trường kết quả pre-check phải tuân thủ chính xác trạng thái phê duyệt của
    từng contract:
-   - Nếu pre-check chưa được gọi, đang chờ duyệt, bị từ chối, hoặc không đủ tham số:
-     `approval_status=false`, `eligible_score=null`, `precheck_note=null`.
+   - Nếu chưa đủ điều kiện chạy: approval `NOT_REQUESTED`, bank precheck
+     `NOT_ELIGIBLE_TO_RUN`, `eligibility_score=null`, `precheck_note=null`.
+   - Nếu đã tạo yêu cầu và đang chờ duyệt: approval `PENDING`, bank precheck
+     `ELIGIBLE_AWAITING_APPROVAL`, score/note vẫn null. Nếu người duyệt từ chối:
+     approval `REJECTED`, bank precheck `NOT_ELIGIBLE_TO_RUN`.
    - Chỉ khi con người đã approve và pre-check tool đã thực thi thành công:
-     `approval_status=true`, `eligible_score` lấy đúng từ trường `score` của tool,
-     và `precheck_note` lấy nguyên nội dung trường `note` của tool.
+     approval `EXECUTED`, bank precheck `COMPLETED`, `eligibility_score` lấy đúng
+     từ trường `score` của tool và `precheck_note` lấy nguyên trường `note`.
    - Không được lấy score/note từ `list_bank_products`, không tự suy diễn score/note,
-     và không được đặt `approval_status=true` chỉ vì sản phẩm có trạng thái
+     và không được đặt approval `EXECUTED` chỉ vì sản phẩm có trạng thái
      `PENDING_HUMAN_APPROVAL`.
    - `credit_profile.eligibility_score`, `precheck_note` và `approval_status` là hồ
      sơ tham chiếu đã có, KHÔNG phải kết quả của lần gọi API ngân hàng hiện tại;
-     không được chép chúng vào `eligible_score`, `precheck_note` hoặc
-     `approval_status` của Decision Card.
+     không được chép chúng vào `eligibility_score`, `precheck_note` hoặc trạng thái
+     approval của Decision Card.
 6. **Hoàn tất batch**: Batch chỉ chứa danh sách `decisions`, đúng một card cho mỗi
    contract đầu vào và giữ nguyên thứ tự. Không thêm contract ngoài input. Việc lưu
    `context.decision_pack`, local hook log, `LogsAgent.DecisionLogs` và danh sách
@@ -251,8 +336,9 @@ vệ, rồi vẫn hoàn tất batch. Không sao chép danh sách dữ liệu thi
   luận từ payment terms và nội dung catalog; hai trường sản phẩm phải được chép đúng
   từ cùng một row mà `list_bank_products()` trả về, không được lấy từ Finance hoặc
   tự đặt.
-- `approval_status` phản ánh việc pre-check tool đã được con người duyệt và thực thi,
-  không phản ánh quyết định nhận hợp đồng trong `accept_opportunity`.
+- `external_api_submission_approval_status` là state machine, không phải boolean:
+  `NOT_REQUESTED` không được diễn giải thành người dùng từ chối và không phản ánh
+  quyết định nhận hợp đồng trong `accept_opportunity`.
 - Khi nhận follow-up approval cho một contract, chỉ được gọi đúng precheck tool với
   đúng arguments đã duyệt và chỉ được cập nhật Decision Card của contract đó. Mọi
   Decision Card khác phải được trả lại nguyên vẹn, không thay đổi bất kỳ field nào.

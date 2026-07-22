@@ -7,18 +7,18 @@ import { PageTransition } from "@/components/ui/page-transition";
 
 const highlights = [
   {
-    title: "Budget control",
-    description: "Track budget, actual spend, cash flow, and variance in one finance cockpit.",
+    title: "Phân tích tài chính",
+    description: "Phân tích đơn hàng, hóa đơn và dòng tiền để đánh giá nhu cầu vốn và khả năng tiếp nhận hợp đồng.",
     icon: ChartNoAxesCombined,
   },
   {
-    title: "Agent pipeline",
-    description: "Monitor AI agents as they scan signals, assess risk, and prepare execution steps.",
+    title: "Rủi ro và tuân thủ",
+    description: "Kiểm tra hồ sơ còn thiếu, phát hiện rủi ro trọng yếu và xác định những nội dung cần con người xác nhận.",
     icon: Bot,
   },
   {
-    title: "Risk signals",
-    description: "Surface schedule, contingency, and forecast issues before they become blockers.",
+    title: "Đề xuất quyết định",
+    description: "So sánh tiêu chí tài chính và phương án đối tác để tạo Decision Card gồm phương án, ba lý do và một điều kiện bảo vệ.",
     icon: Activity,
   },
 ] as const;
@@ -34,27 +34,22 @@ export default function Home() {
         <main className="relative mx-auto flex min-h-[100dvh] w-full max-w-6xl flex-col justify-center px-6 pb-14 pt-32 text-[var(--fin-text)] sm:px-10 lg:px-16">
           <section className="max-w-3xl">
             <p className="text-sm font-medium uppercase tracking-[0.22em] text-emerald-300/80">
-              Finance AI Workspace
+              NỀN TẢNG AI HỖ TRỢ ĐÁNH GIÁ HỢP ĐỒNG
             </p>
             <h1 className="mt-5 text-balance text-5xl font-semibold leading-[0.95] tracking-tight text-[var(--fin-text)] sm:text-6xl lg:text-7xl">
-              FinWise
+              FINWISE
             </h1>
             <p className="mt-6 max-w-2xl text-pretty text-lg leading-8 text-[var(--fin-muted)] sm:text-xl">
-              A focused command center for finance teams to review performance,
-              coordinate AI agents, and act on risk signals with less friction.
+              Phân tích dữ liệu tài chính, phát hiện rủi ro và đề xuất phương án hợp đồng thông
+              qua quy trình phối hợp các AI Agent có sự kiểm soát của con người.
+
             </p>
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">
               <Link
-                href="/dashboard"
+                href="/about"
                 className="inline-flex h-12 items-center justify-center rounded-md bg-emerald-400 px-5 text-sm font-semibold text-black transition-colors hover:bg-emerald-300"
               >
-                Open Dashboard
-              </Link>
-              <Link
-                href="/agent"
-                className="inline-flex h-12 items-center justify-center rounded-md border border-[var(--fin-soft-border)] bg-[var(--fin-surface)] px-5 text-sm font-semibold text-[var(--fin-text)] transition-colors hover:border-emerald-400/40 hover:bg-emerald-400/10 hover:text-emerald-700"
-              >
-                View AI Agents
+                Nhập Hợp đồng mới
               </Link>
             </div>
           </section>

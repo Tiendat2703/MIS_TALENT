@@ -13,9 +13,9 @@ import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 const navItems = [
   { href: "/", label: "Home" },
-  { href: "/about", label: "About us" },
+  { href: "/about", label: "Input New Contract" },
   { href: "/agent", label: "AI Agent" },
-  { href: "/teamPack", label: "Kho dữ liệu" },
+  { href: "/teamPack", label: "Database" },
   { href: "/dashboard", label: "Dashboard" },
 ] as const;
 

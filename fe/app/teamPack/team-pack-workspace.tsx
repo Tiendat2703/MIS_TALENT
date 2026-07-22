@@ -239,7 +239,7 @@ export function TeamPackWorkspace() {
     <div className="mx-auto w-full max-w-[1600px]">
       <header className="mb-6 border-b border-[var(--fin-soft-border)] pb-5">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-500">Team Pack</p>
-        <h1 className="mt-2 text-2xl font-semibold tracking-[-0.035em] sm:text-3xl">Kho dữ liệu hợp đồng</h1>
+        <h1 className="mt-2 text-2xl font-semibold tracking-[-0.035em] sm:text-3xl">Database hợp đồng</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--fin-muted)]">
           Kiểm tra dữ liệu đã nạp từ Supabase và chọn một hợp đồng để chạy quy trình đánh giá AI Agent.
         </p>
@@ -249,7 +249,7 @@ export function TeamPackWorkspace() {
         <aside className="border-b border-[var(--fin-soft-border)] p-5 lg:border-b-0 lg:border-r lg:p-6">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--fin-muted)]">Kho dữ liệu</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--fin-muted)]">Database</p>
               <p className="mt-1 text-sm font-medium">{catalogStatus}</p>
             </div>
             <span

@@ -5,7 +5,7 @@ import { PageTransition } from "@/components/ui/page-transition";
 import { TeamPackWorkspace } from "./team-pack-workspace";
 
 export const metadata: Metadata = {
-  title: "Kho dữ liệu | MIS Agent",
+  title: "Database | MIS Agent",
   description: "Kiểm tra dữ liệu Supabase và chọn hợp đồng để chạy AI Agent.",
 };
 
